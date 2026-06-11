@@ -1198,11 +1198,11 @@ def init_bot():
             await lora_cmd.finish(f"切换失败: {e}")
     
     logger.info("机器人初始化完成")
-    logger.info("提示: 请配置NapCat连接到 ws://127.0.0.1:8081/onebot/v11/ws")
+    logger.info("提示: 请配置NapCat连接到 ws://服务器IP:8081/onebot/v11/ws")
     logger.info("提示: 使用 /help 或 /帮助 查看帮助")
-    
-    # 启动
-    nonebot.run()
+
+    # 启动 - 显式指定 host 和 port
+    nonebot.run(host="0.0.0.0", port=8081)
 
 if __name__ == "__main__":
     init_bot()
