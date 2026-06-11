@@ -1,0 +1,856 @@
+#!/usr/bin/env python3
+"""
+模型管理模块
+负责多提供商模型推理、本地模型文件管理、LoRA适配器切换。
+支持 Ollama / llama.cpp / Transformers+PEFT / Mock 四种提供商。
+"""
+
+import os
+import time
+import json
+import logging
+import random
+import threading
+from enum import Enum
+from datetime import datetime
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+# DB 配置缓存（5 秒 TTL，避免每次推理都全表扫描 config）
+_cached_db_config = {}
+_cached_db_config_time: float = 0.0
+_db_config_ttl: float = 5.0
+
+
+def _get_db_config():
+    """从数据库读取模型配置参数（带缓存）"""
+    global _cached_db_config, _cached_db_config_time
+    now = time.time()
+    if _cached_db_config and (now - _cached_db_config_time) < _db_config_ttl:
+        return _cached_db_config.copy()
+    try:
+        import sqlite3
+        db_path = Path(__file__).parent.parent / "qq_assistant.db"
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute('SELECT key, value FROM config')
+        rows = cursor.fetchall()
+        conn.close()
+        result = {}
+        for key, value in rows:
+            try:
+                if '.' in value:
+                    result[key] = float(value)
+                else:
+                    result[key] = int(value)
+            except (ValueError, TypeError):
+                if value.lower() == 'true':
+                    result[key] = True
+                elif value.lower() == 'false':
+                    result[key] = False
+                else:
+                    result[key] = value
+        _cached_db_config = result
+        _cached_db_config_time = now
+        return result.copy()
+    except Exception:
+        return {}
+
+
+_db_cfg = _get_db_config()
+from typing import Optional, Dict, Any, List, Tuple
+from dataclasses import dataclass
+
+
+class ModelProvider(str, Enum):
+    OLLAMA = "ollama"
+    LLAMA_CPP = "llama_cpp"
+    TRANSFORMERS_PEFT = "transformers_peft"
+    OPENAI_COMPAT = "openai_compat"
+    VLLM = "vllm"
+    MOCK = "mock"
+
+
+@dataclass
+class ModelConfig:
+    name: str
+    repo_id: str
+    model_type: str
+    size: str
+    description: str
+    required_files: List[str]
+    checksum_file: Optional[str] = None
+
+
+MODEL_CONFIGS: Dict[str, ModelConfig] = {
+    "qwen2.5-7b": ModelConfig(
+        name="Qwen2.5-7B-Instruct",
+        repo_id="Qwen/Qwen2.5-7B-Instruct",
+        model_type="qwen",
+        size="7b",
+        description="Qwen2.5 7B参数指令微调模型",
+        required_files=[
+            "config.json",
+            "model.safetensors.index.json",
+            "tokenizer_config.json",
+            "tokenizer.json",
+            "generation_config.json"
+        ]
+    ),
+    "qwen2.5-3b": ModelConfig(
+        name="Qwen2.5-3B-Instruct",
+        repo_id="Qwen/Qwen2.5-3B-Instruct",
+        model_type="qwen",
+        size="3b",
+        description="Qwen2.5 3B参数指令微调模型",
+        required_files=[
+            "config.json",
+            "model.safetensors.index.json",
+            "tokenizer_config.json",
+            "tokenizer.json",
+            "generation_config.json"
+        ]
+    ),
+    "qwen2.5-1.5b": ModelConfig(
+        name="Qwen2.5-1.5B-Instruct",
+        repo_id="Qwen/Qwen2.5-1.5B-Instruct",
+        model_type="qwen",
+        size="1.5b",
+        description="Qwen2.5 1.5B参数指令微调模型",
+        required_files=[
+            "config.json",
+            "model.safetensors.index.json",
+            "tokenizer_config.json",
+            "tokenizer.json",
+            "generation_config.json"
+        ]
+    ),
+}
+
+
+class BaseProvider:
+    """模型提供商基类"""
+
+    def __init__(self, name: str):
+        self.name = name
+        self._loaded = False
+        self._model_name = ""
+
+    def generate(self, prompt: str, session_history: List[Dict] = None,
+                 rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        raise NotImplementedError
+
+    def get_status(self) -> Dict[str, Any]:
+        return {
+            "loaded": self._loaded,
+            "modelName": self._model_name,
+        }
+
+    def set_lora_adapter(self, lora_path: Optional[str]):
+        pass
+
+
+class OpenAICompatProvider(BaseProvider):
+    """OpenAI兼容API提供商（支持DeepSeek、通义千问等）"""
+
+    def __init__(self):
+        super().__init__("openai_compat")
+        self.base_url = os.getenv("OPENAI_COMPAT_BASE_URL", "https://api.deepseek.com")
+        self.api_key = os.getenv("OPENAI_COMPAT_API_KEY", "")
+        self.model = os.getenv("OPENAI_COMPAT_MODEL", "deepseek-chat")
+        self._model_name = self.model
+        self._loaded = True
+        # 连接池复用（避免每次 generate 都新建 TCP 连接）
+        import httpx
+        self._client = httpx.Client(timeout=120.0,
+            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20))
+        # 从数据库配置覆盖
+        self._refresh_db_config()
+
+    def _refresh_db_config(self):
+        """从数据库刷新配置"""
+        global _db_cfg
+        _db_cfg = _get_db_config()
+        if _db_cfg.get("openaiCompatBaseUrl"):
+            self.base_url = _db_cfg["openaiCompatBaseUrl"]
+        if _db_cfg.get("openaiCompatApiKey"):
+            self.api_key = _db_cfg["openaiCompatApiKey"]
+        if _db_cfg.get("openaiCompatModel"):
+            self.model = _db_cfg["openaiCompatModel"]
+            self._model_name = self.model
+
+    def generate(self, prompt: str, session_history: List[Dict] = None,
+                 rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        # 每次生成前刷新配置，确保使用最新的API Key
+        self._refresh_db_config()
+
+        if not self.api_key:
+            raise RuntimeError("未配置 API Key，请在设置页面配置 OpenAI 兼容 API Key")
+
+        start = time.time()
+        messages = []
+
+        if rag_docs:
+            rag_text = "\n".join(doc.get("content", "") for doc in rag_docs[:3])
+            messages.append({
+                "role": "system",
+                "content": f"参考资料：\n{rag_text[:800]}"
+            })
+
+        if session_history:
+            messages.extend(session_history)
+
+        messages.append({"role": "user", "content": prompt})
+
+        max_tokens = max_tokens_override if max_tokens_override else int(_db_cfg.get('maxTokens', 512))
+
+        try:
+            response = self._client.post(
+                f"{self.base_url}/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": float(_db_cfg.get('temperature', 0.8)),
+                    "max_tokens": max_tokens,
+                }
+            )
+            if response.status_code == 200:
+                data = response.json()
+                reply = data["choices"][0]["message"]["content"].strip()
+                cost = round(time.time() - start, 2)
+                return reply, cost
+            else:
+                raise RuntimeError(f"API返回错误: {response.status_code} - {response.text[:200]}")
+        except Exception as e:
+            logger.error(f"OpenAI兼容API调用失败: {e}")
+            raise
+
+
+class MockProvider(BaseProvider):
+    """模拟提供商，用于测试"""
+
+    def __init__(self):
+        super().__init__("mock")
+        self._model_name = "Mock Model"
+        self._loaded = True
+
+    def generate(self, prompt: str, session_history: List[Dict] = None,
+                 rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        start = time.time()
+        replies = [
+            f"好的，我来帮您处理这个问题！您说的是：{prompt[:30]}...",
+            f"这个问题很有趣，让我想想... 关于：{prompt[:30]}",
+            f"哈哈，这个问题有意思！{prompt[:30]}... 让我陪你聊聊～",
+        ]
+        reply = random.choice(replies)
+        cost = round(time.time() - start + random.uniform(1.0, 3.0), 2)
+        return reply, cost
+
+
+class OllamaProvider(BaseProvider):
+    """Ollama 提供商"""
+
+    def __init__(self):
+        super().__init__("ollama")
+        self.base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        self.model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+        self._model_name = self.model
+        self._loaded = True
+        import httpx
+        self._client = httpx.Client(timeout=120.0,
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10))
+
+    def generate(self, prompt: str, session_history: List[Dict] = None,
+                 rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        start = time.time()
+        messages = []
+
+        if rag_docs:
+            rag_text = "\n".join(doc.get("content", "") for doc in rag_docs[:3])
+            messages.append({
+                "role": "system",
+                "content": f"参考资料：\n{rag_text[:800]}"
+            })
+
+        if session_history:
+            messages.extend(session_history)
+
+        messages.append({"role": "user", "content": prompt})
+
+        max_tokens = max_tokens_override if max_tokens_override else int(_db_cfg.get('maxTokens', 512))
+
+        try:
+            response = self._client.post(
+                f"{self.base_url}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "stream": False,
+                    "options": {"temperature": float(_db_cfg.get('temperature', 0.8)), "top_p": 0.9, "num_predict": max_tokens}
+                }
+            )
+            if response.status_code == 200:
+                data = response.json()
+                reply = data["message"]["content"].strip()
+                cost = round(time.time() - start, 2)
+                return reply, cost
+            else:
+                raise RuntimeError(f"Ollama返回错误状态码: {response.status_code}")
+        except Exception as e:
+            logger.error(f"Ollama调用失败: {e}")
+            raise
+
+
+class LlamaCppProvider(BaseProvider):
+    """llama.cpp 提供商"""
+
+    def __init__(self):
+        super().__init__("llama_cpp")
+        self.base_url = os.getenv("LLAMA_CPP_URL", "http://localhost:8080")
+        self._model_name = "llama.cpp"
+        self._loaded = True
+        import httpx
+        self._client = httpx.Client(timeout=120.0,
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10))
+
+    def generate(self, prompt: str, session_history: List[Dict] = None,
+                 rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        start = time.time()
+        full_prompt = prompt
+        if session_history:
+            parts = []
+            for msg in session_history:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if role == "user":
+                    parts.append(f"User: {content}")
+                elif role == "assistant":
+                    parts.append(f"Assistant: {content}")
+            parts.append(f"User: {prompt}")
+            full_prompt = "\n".join(parts)
+
+        max_tokens = max_tokens_override if max_tokens_override else int(_db_cfg.get('maxTokens', 512))
+
+        try:
+            response = self._client.post(
+                f"{self.base_url}/completion",
+                json={
+                    "prompt": full_prompt,
+                    "n_predict": max_tokens,
+                    "temperature": float(_db_cfg.get('temperature', 0.8)),
+                    "top_p": 0.9,
+                }
+            )
+            if response.status_code == 200:
+                data = response.json()
+                reply = data.get("content", "").strip()
+                cost = round(time.time() - start, 2)
+                return reply, cost
+            else:
+                raise RuntimeError(f"llama.cpp返回错误状态码: {response.status_code}")
+        except Exception as e:
+            logger.error(f"llama.cpp调用失败: {e}")
+            raise
+
+
+class TransformersPeftProvider(BaseProvider):
+    """Transformers + PEFT 本地推理提供商"""
+
+    def __init__(self):
+        super().__init__("transformers_peft")
+        self._model = None
+        self._tokenizer = None
+        self._lora_path: Optional[str] = None
+        self._load_lock = threading.Lock()  # 线程安全锁
+        base_model_path = os.getenv("BASE_MODEL_PATH", "models/Qwen2.5-7B-Instruct")
+        if not os.path.isabs(base_model_path):
+            # 相对路径基于 backend 根目录（项目根目录下的 backend/）
+            base_model_path = str(Path(__file__).parent.parent / base_model_path)
+        self._base_model_path = base_model_path
+        self._model_name = "Qwen2.5-7B-Instruct"
+        self._loaded = False
+
+    def _ensure_loaded(self):
+        """线程安全的模型加载（double-check locking）"""
+        if self._model is not None:
+            return
+        with self._load_lock:
+            if self._model is not None:
+                return
+
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+            from peft import PeftModel
+
+            base_path = str(Path(self._base_model_path).resolve())
+            if not Path(base_path).exists():
+                raise FileNotFoundError(f"模型路径不存在: {base_path}")
+
+            self._tokenizer = AutoTokenizer.from_pretrained(base_path, trust_remote_code=True)
+
+            # 尝试多种加载策略（Windows bitsandbytes 兼容性）
+            load_strategies = [
+                ("4-bit NF4 量化", self._load_4bit),
+                ("8-bit 量化", self._load_8bit),
+                ("FP16 半精度", self._load_fp16),
+            ]
+
+            base_model = None
+            for strategy_name, load_fn in load_strategies:
+                try:
+                    logger.info(f"尝试 {strategy_name} 加载 Qwen2.5-7B...")
+                    base_model = load_fn(base_path)
+                    logger.info(f"✅ {strategy_name} 加载成功")
+                    break
+                except Exception as e:
+                    logger.warning(f"❌ {strategy_name} 加载失败: {e}")
+                    continue
+
+            if base_model is None:
+                raise RuntimeError("所有加载策略均失败，请检查模型文件和 GPU 显存")
+
+            if self._lora_path and Path(self._lora_path).exists():
+                logger.info(f"加载LoRA适配器: {self._lora_path}")
+                self._model = PeftModel.from_pretrained(base_model, self._lora_path)
+            else:
+                self._model = base_model
+
+            self._model.eval()
+            self._loaded = True
+            vram = torch.cuda.memory_allocated() / 1024**3
+            logger.info(f"7B 模型加载完成，显存: {vram:.1f}GB")
+
+    def _load_4bit(self, base_path: str):
+        """4-bit NF4 量化加载"""
+        import torch
+        from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+        nf4_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
+        )
+        return AutoModelForCausalLM.from_pretrained(
+            base_path,
+            quantization_config=nf4_config,
+            device_map="auto",
+            low_cpu_mem_usage=True,
+            trust_remote_code=True,
+        )
+
+    def _load_8bit(self, base_path: str):
+        """8-bit 量化加载"""
+        import torch
+        from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+        config = BitsAndBytesConfig(load_in_8bit=True)
+        return AutoModelForCausalLM.from_pretrained(
+            base_path,
+            quantization_config=config,
+            device_map="auto",
+            low_cpu_mem_usage=True,
+            trust_remote_code=True,
+        )
+
+    def _load_fp16(self, base_path: str):
+        """FP16 半精度加载（需要足够显存）"""
+        import torch
+        from transformers import AutoModelForCausalLM
+        return AutoModelForCausalLM.from_pretrained(
+            base_path,
+            torch_dtype=torch.float16,
+            device_map="auto",
+            low_cpu_mem_usage=True,
+            trust_remote_code=True,
+        )
+
+    def set_lora_adapter(self, lora_path: Optional[str]):
+        if lora_path and Path(lora_path).exists():
+            self._lora_path = lora_path
+            if self._model is not None:
+                import torch
+                from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+                from peft import PeftModel
+
+                logger.info(f"热切换LoRA适配器: {lora_path}")
+                base_model = self._model.base_model.model if hasattr(self._model, 'base_model') else self._model
+                del self._model
+                torch.cuda.empty_cache()
+                self._model = PeftModel.from_pretrained(base_model, lora_path)
+                self._model.eval()
+            logger.info(f"LoRA适配器已设置: {lora_path}")
+        else:
+            self._lora_path = None
+            logger.info("LoRA适配器已清除")
+
+    def generate(self, prompt: str, session_history: List[Dict] = None,
+                 rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        import torch
+
+        self._ensure_loaded()
+        start = time.time()
+
+        messages = []
+        if rag_docs:
+            rag_text = "\n".join(doc.get("content", "") for doc in rag_docs[:3])
+            messages.append({
+                "role": "system",
+                "content": f"参考资料：\n{rag_text[:800]}"
+            })
+
+        if session_history:
+            messages.extend(session_history)
+
+        messages.append({"role": "user", "content": prompt})
+
+        encoded = self._tokenizer.apply_chat_template(
+            messages, return_tensors="pt", add_generation_prompt=True
+        )
+
+        if hasattr(encoded, 'input_ids'):
+            input_ids = encoded.input_ids.to(self._model.device)
+        elif isinstance(encoded, dict) and 'input_ids' in encoded:
+            input_ids = torch.tensor(encoded['input_ids'], dtype=torch.long, device=self._model.device)
+        else:
+            input_ids = torch.tensor(encoded, dtype=torch.long, device=self._model.device)
+
+        max_tokens = max_tokens_override if max_tokens_override else int(_db_cfg.get('maxTokens', 512))
+
+        with torch.no_grad():
+            output = self._model.generate(
+                input_ids,
+                max_new_tokens=max_tokens,
+                temperature=float(_db_cfg.get('temperature', 0.85)),
+                top_p=0.92,
+                do_sample=True,
+                repetition_penalty=1.15,
+                pad_token_id=self._tokenizer.eos_token_id,
+            )
+
+        reply = self._tokenizer.decode(output[0][input_ids.shape[1]:], skip_special_tokens=True).strip()
+        cost = round(time.time() - start, 2)
+        return reply, cost
+
+    def get_status(self) -> Dict[str, Any]:
+        return {
+            "loaded": self._loaded,
+            "modelName": self._model_name,
+            "loraAdapter": self._lora_path,
+        }
+
+
+class VLLMProvider(BaseProvider):
+    """vLLM 提供商 - 高性能推理引擎，支持 Continuous Batching"""
+
+    def __init__(self):
+        super().__init__("vllm")
+        self.base_url = os.getenv("VLLM_BASE_URL", "http://localhost:8001/v1")
+        self.model = os.getenv("VLLM_MODEL", "qwen2.5-7b")
+        self.timeout = float(os.getenv("VLLM_TIMEOUT", "120.0"))
+        self._model_name = self.model
+        self._loaded = True
+        self._refresh_db_config()
+
+    def _refresh_db_config(self):
+        """从数据库刷新配置"""
+        global _db_cfg
+        _db_cfg = _get_db_config()
+        if _db_cfg.get("vllmBaseUrl"):
+            self.base_url = _db_cfg["vllmBaseUrl"]
+        if _db_cfg.get("vllmModel"):
+            self.model = _db_cfg["vllmModel"]
+            self._model_name = self.model
+        if _db_cfg.get("vllmTimeout"):
+            self.timeout = float(_db_cfg["vllmTimeout"])
+
+    def set_lora_adapter(self, lora_path: Optional[str]):
+        """通过 vLLM 的 --enable-lora 传递 LoRA 名称"""
+        if lora_path:
+            self._lora_adapter = lora_path
+            logger.info(f"vLLM LoRA 适配器已设置: {lora_path}")
+        else:
+            self._lora_adapter = None
+            logger.info("vLLM LoRA 适配器已清除")
+
+    async def generate_async(self, prompt: str, session_history: List[Dict] = None,
+                             rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        """异步生成 - 使用 httpx.AsyncClient 不阻塞事件循环"""
+        import asyncio
+        import httpx
+
+        self._refresh_db_config()
+        start = time.time()
+
+        messages = []
+        if rag_docs:
+            rag_text = "\n".join(doc.get("content", "") for doc in rag_docs[:3])
+            messages.append({"role": "system", "content": f"参考资料：\n{rag_text[:800]}"})
+
+        if session_history:
+            for msg in session_history[-10:]:
+                messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
+
+        messages.append({"role": "user", "content": prompt})
+
+        max_tokens = max_tokens_override if max_tokens_override else int(_db_cfg.get('maxTokens', 512))
+        temperature = float(_db_cfg.get('temperature', 0.8))
+
+        model_name = self.model
+        if hasattr(self, '_lora_adapter') and self._lora_adapter:
+            model_name = f"{self.model}:{self._lora_adapter}"
+
+        payload = {
+            "model": model_name,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "top_p": 0.9,
+        }
+
+        last_error = None
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout, connect=10.0)) as client:
+                    resp = await client.post(
+                        f"{self.base_url}/chat/completions",
+                        json=payload,
+                        headers={"Authorization": "Bearer EMPTY"}
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        reply = data["choices"][0]["message"]["content"].strip()
+                        cost = round(time.time() - start, 2)
+                        return reply, cost
+                    elif resp.status_code >= 500:
+                        last_error = RuntimeError(f"vLLM返回错误: {resp.status_code} - {resp.text[:200]}")
+                        if attempt < 2:
+                            await asyncio.sleep(1.0 * (attempt + 1))
+                            continue
+                        raise last_error
+                    else:
+                        error_text = resp.text[:200]
+                        raise RuntimeError(f"vLLM返回错误: {resp.status_code} - {error_text}")
+            except httpx.TimeoutException as e:
+                last_error = RuntimeError(f"vLLM请求超时 (attempt {attempt + 1}/3): {e}")
+                if attempt < 2:
+                    await asyncio.sleep(1.0 * (attempt + 1))
+                    continue
+                raise last_error
+            except RuntimeError:
+                raise
+
+        raise last_error or RuntimeError("vLLM请求失败: 未知错误")
+
+    def generate(self, prompt: str, session_history: List[Dict] = None,
+                 rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        """同步生成包装 - 在线程池中运行异步方法"""
+        import asyncio
+        import concurrent.futures
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(
+                        asyncio.run,
+                        self.generate_async(prompt, session_history, rag_docs, max_tokens_override)
+                    )
+                    return future.result(timeout=self.timeout + 10)
+        except RuntimeError:
+            pass  # No running event loop
+
+        return asyncio.run(self.generate_async(prompt, session_history, rag_docs, max_tokens_override))
+
+
+class ModelManager:
+    """模型管理器，负责多提供商切换、LoRA管理、模型文件操作。"""
+
+    def __init__(self, base_dir: Optional[Path] = None):
+        self.base_dir = base_dir or Path(__file__).parent
+        self.models_dir = self.base_dir / "models"
+        self.models_dir.mkdir(exist_ok=True)
+        self.cache_file = self.models_dir / "model_cache.json"
+
+        self._providers: Dict[ModelProvider, BaseProvider] = {
+            ModelProvider.MOCK: MockProvider(),
+            ModelProvider.OLLAMA: OllamaProvider(),
+            ModelProvider.LLAMA_CPP: LlamaCppProvider(),
+            ModelProvider.OPENAI_COMPAT: OpenAICompatProvider(),
+            ModelProvider.TRANSFORMERS_PEFT: TransformersPeftProvider(),
+            ModelProvider.VLLM: VLLMProvider(),
+        }
+
+        self._current_provider = ModelProvider.MOCK
+        # 从数据库配置初始化提供商
+        db_provider = _db_cfg.get("modelProvider", "mock")
+        if db_provider in [e.value for e in ModelProvider]:
+            self._current_provider = ModelProvider(db_provider)
+            logger.info(f"从数据库配置初始化模型提供商: {db_provider}")
+        self._load_cache()
+
+    def _load_cache(self):
+        self.cache: Dict[str, Any] = {}
+        if self.cache_file.exists():
+            try:
+                with open(self.cache_file, 'r', encoding='utf-8') as f:
+                    self.cache = json.load(f)
+            except Exception as e:
+                logger.warning(f"读取模型缓存失败: {e}")
+                self.cache = {}
+
+    def _save_cache(self):
+        try:
+            with open(self.cache_file, 'w', encoding='utf-8') as f:
+                json.dump(self.cache, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"保存模型缓存失败: {e}")
+
+    def set_provider(self, provider: ModelProvider) -> bool:
+        if provider not in self._providers:
+            logger.error(f"未知提供商: {provider}")
+            return False
+        self._current_provider = provider
+        logger.info(f"已切换到提供商: {provider.value}")
+        return True
+
+    def get_current_provider(self) -> BaseProvider:
+        return self._providers[self._current_provider]
+
+    def generate(self, prompt: str, session_history: List[Dict] = None,
+                 rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        provider = self.get_current_provider()
+        return provider.generate(prompt, session_history, rag_docs, max_tokens_override)
+
+    def set_lora_adapter(self, lora_path: Optional[str]):
+        provider = self.get_current_provider()
+        if hasattr(provider, 'set_lora_adapter'):
+            provider.set_lora_adapter(lora_path)
+        else:
+            peft_provider = self._providers.get(ModelProvider.TRANSFORMERS_PEFT)
+            if peft_provider and hasattr(peft_provider, 'set_lora_adapter'):
+                peft_provider.set_lora_adapter(lora_path)
+
+    def get_status(self) -> Dict[str, Any]:
+        providers_status = {}
+        for key, provider in self._providers.items():
+            providers_status[key.value] = provider.get_status()
+
+        return {
+            "currentProvider": self._current_provider.value,
+            "providers": providers_status,
+        }
+
+    def list_available_models(self) -> List[Dict[str, Any]]:
+        models = []
+        for model_key, config in MODEL_CONFIGS.items():
+            model_dir = self.models_dir / config.name
+            downloaded = model_dir.exists()
+            if downloaded:
+                all_required = all(
+                    (model_dir / f).exists() for f in config.required_files
+                )
+                has_weights = bool(
+                    list(model_dir.glob("*.safetensors")) + list(model_dir.glob("*.bin"))
+                )
+                downloaded = all_required and has_weights
+
+            models.append({
+                "name": model_key,
+                "display_name": config.name,
+                "repo_id": config.repo_id,
+                "size": config.size,
+                "description": config.description,
+                "downloaded": downloaded,
+            })
+        return models
+
+    def check_model_exists(self, model_name: str) -> bool:
+        config = MODEL_CONFIGS.get(model_name)
+        if not config:
+            return False
+
+        model_dir = self.models_dir / config.name
+        if not model_dir.exists():
+            return False
+
+        for required_file in config.required_files:
+            if not (model_dir / required_file).exists():
+                return False
+
+        weight_files = list(model_dir.glob("*.safetensors")) + list(model_dir.glob("*.bin"))
+        return bool(weight_files)
+
+    def download_model_from_hf(self, model_name: str, force: bool = False) -> Dict[str, Any]:
+        config = MODEL_CONFIGS.get(model_name)
+        if not config:
+            return {"success": False, "error": f"未知模型: {model_name}"}
+
+        model_dir = self.models_dir / config.name
+
+        if model_dir.exists() and not force:
+            return {
+                "success": True,
+                "message": f"模型已存在: {config.name}",
+                "model_name": model_name,
+                "path": str(model_dir),
+            }
+
+        try:
+            from huggingface_hub import snapshot_download
+            logger.info(f"开始下载模型: {config.repo_id}...")
+            download_path = snapshot_download(
+                repo_id=config.repo_id,
+                local_dir=str(model_dir),
+                resume_download=True,
+            )
+            self.cache[model_name] = {
+                "downloaded_at": datetime.now().isoformat(),
+                "path": str(model_dir),
+            }
+            self._save_cache()
+
+            return {
+                "success": True,
+                "message": f"模型下载完成: {config.name}",
+                "model_name": model_name,
+                "path": str(download_path),
+            }
+        except Exception as e:
+            logger.error(f"下载模型失败: {e}")
+            return {"success": False, "error": str(e)}
+
+    def delete_model(self, model_name: str) -> bool:
+        config = MODEL_CONFIGS.get(model_name)
+        if not config:
+            logger.warning(f"未知模型: {model_name}")
+            return False
+
+        model_dir = self.models_dir / config.name
+        if not model_dir.exists():
+            return True
+
+        try:
+            import shutil
+            shutil.rmtree(model_dir)
+            if model_name in self.cache:
+                del self.cache[model_name]
+                self._save_cache()
+            logger.info(f"模型已删除: {config.name}")
+            return True
+        except Exception as e:
+            logger.error(f"删除模型失败: {e}")
+            return False
+
+
+_model_manager: Optional[ModelManager] = None
+
+
+def get_model_manager() -> ModelManager:
+    global _model_manager
+    if _model_manager is None:
+        _model_manager = ModelManager()
+    return _model_manager

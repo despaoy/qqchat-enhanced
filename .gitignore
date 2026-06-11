@@ -1,0 +1,172 @@
+.next
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Production build
+dist/
+build/
+out/
+.next/
+.rsbuild/
+
+# Testing
+coverage/
+*.lcov
+.nyc_output
+
+# Environment variables
+.env
+.env.*
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Diagnostic reports
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Cache
+.cache/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+.npm
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+node-compile-cache/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+.temp/
+
+# Optional files
+*.tgz
+*.gz
+*.zip
+*.tar
+
+# TypeScript
+*.tsbuildinfo
+
+# Misc
+.vercel
+.turbo
+
+.coze-logs
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+backend/venv/
+
+# === 模型文件（大文件，不提交）===
+backend/models/
+*.safetensors
+*.bin
+*.gguf
+*.pt
+*.pth
+
+# === LoRA 适配器 ===
+backend/loras/
+loras/
+
+# === 数据库 ===
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# === 向量数据库 ===
+backend/vector_db/
+vector_db/
+*.faiss
+*.index
+
+# === 知识库语料 ===
+backend/knowledge_bases/
+genshin_knowledge_base/
+
+# === 训练数据和输出 ===
+backend/training/data/
+backend/training/datasets_import/
+backend/hutao_dialogues.json
+backend/hutao_dialogues_filtered.json
+backend/hutao_lora_dataset.json
+backend/intent_training_cache.json
+train_3090.py
+*.ckpt
+runs/
+
+# === 数据目录 ===
+deploy/data/
+
+# === 模型文件和下载的二进制 ===
+RAG/
+backend/bge-reranker-base/
+backend/intent_classifier_model/
+*.whl
+
+# === 训练输出 ===
+output/
+
+# === 外部数据集/训练语料 ===
+Chatharuhi/
+
+# === 文档文件 ===
+*.docx
+
+# === 项目文档（仅 README.md 保留）===
+AGENTS.md
+FILE_AUDIT.md
+PROJECT_OVERVIEW.md
+TECHNICAL_DOC.md

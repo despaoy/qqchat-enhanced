@@ -1,0 +1,60 @@
+/**
+ * 根布局组件
+ *
+ * 全站最外层布局，配置：
+ * - 主题切换（next-themes ThemeProvider）
+ * - 全局设置（SettingsProvider - 语言/时区）
+ * - 开发环境 Inspector 工具
+ * - 全局 Toast 通知容器
+ *
+ * 包含 SEO 元数据（title、description、keywords）。
+ */
+
+import type { Metadata } from 'next';
+import { Inspector } from 'react-dev-inspector';
+import { ThemeProvider } from 'next-themes';
+import './globals.css';
+import { Toaster } from '@/components/ui/sonner';
+import { SettingsProvider } from '@/contexts/SettingsContext';
+import { AuthProvider } from '@/contexts/AuthContext';
+
+export const metadata: Metadata = {
+  title: {
+    default: 'QQ智能助手 | 管理平台',
+    template: '%s | QQ智能助手',
+  },
+  description:
+    '基于本地大语言模型的QQ智能助手管理平台，支持个性化风格定制和历史记录管理。',
+  keywords: [
+    'QQ机器人',
+    '智能助手',
+    '大语言模型',
+    'LoRA微调',
+    '个性化聊天',
+  ],
+  authors: [{ name: 'QQ智能助手团队' }],
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  const isDev = process.env.COZE_PROJECT_ENV === 'DEV';
+
+  return (
+    <html lang="zh-CN" suppressHydrationWarning>
+      <body className={`antialiased`}>
+        <ThemeProvider attribute="class" defaultTheme="light">
+          <AuthProvider>
+            <SettingsProvider>
+              {isDev && <Inspector />}
+              {children}
+              <Toaster />
+            </SettingsProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </body>
+    </html>
+  );
+}

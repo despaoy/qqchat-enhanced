@@ -1,0 +1,466 @@
+"""
+RAG意图检测模块
+负责智能分析用户消息，判断是否需要触发RAG知识库检索。
+
+检测策略（混合方案）：
+- 优先使用训练好的 ML 分类器（embedding + LogisticRegression）
+- 分类器不可用时回退到规则引擎（关键词匹配 + 句式分析）
+"""
+
+import re
+import json
+import pickle
+import logging
+from pathlib import Path
+from typing import List, Tuple, Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
+
+# 全局 ML 模型缓存
+_ml_encoder = None
+_ml_classifier = None
+_ml_config = None
+_ML_AVAILABLE = False
+
+
+class RAGIntentDetector:
+    """RAG意图检测器，通过多维度规则判断用户消息是否需要知识库检索。
+
+    检测逻辑：消息长度检查 -> 特殊字符过滤 -> 社交词与知识词匹配 -> 疑问句检测 -> 原神内容检测。
+    """
+    
+    def __init__(self):
+        # 配置参数
+        self.min_length_for_rag = 3  # 最小长度才考虑RAG
+        self.max_length_for_no_rag = 10  # 超过此长度更可能需RAG
+        
+        # 知识查询关键词（需要RAG）
+        self.knowledge_keywords = [
+            # 问题词
+            "什么", "为什么", "如何", "怎样", "怎么", "何时", "哪里", "哪位",
+            "谁", "多少", "几时", "几点", "多久", "多远", "多大", "多高",
+            "解释", "说明", "定义", "含义", "意思", "是什么", "为什么",
+            "怎么办", "如何处理", "如何解决", "如何做", "怎么做",
+            "原因", "理由", "原理", "机制", "过程", "步骤", "方法",
+            "区别", "差异", "不同", "相同", "相似", "特点", "特征",
+            "优势", "缺点", "优点", "劣势", "好处", "坏处",
+            "历史", "背景", "来源", "起源", "发展", "演变",
+            "功能", "作用", "用途", "效果", "影响", "结果",
+            "数据", "统计", "数字", "比例", "百分比", "率",
+            "结构", "组成", "成分", "元素", "部分", "模块",
+            # 查询/介绍类
+            "介绍", "介绍一下", "说说", "讲讲", "聊聊", "告诉我",
+            "查询", "搜索", "查找", "了解一下", "知不知道",
+            
+            # 原神特定关键词
+            "原神", "角色", "武器", "圣遗物", "天赋", "命座",
+            "副本", "秘境", "世界任务", "传说任务", "活动",
+            "材料", "突破", "升级", "培养", "配队", "阵容",
+            "元素", "反应", "伤害", "治疗", "护盾", "控制",
+            "地图", "地区", "国家", "蒙德", "璃月", "稻妻",
+            "须弥", "枫丹", "纳塔", "至冬", "天空岛",
+            "魔神", "七神", "执政", "眷属", "使徒", "愚人众",
+            "深渊", "教团", "魔物", "BOSS", "周本", "世界BOSS",
+        ]
+        
+        # 社交对话关键词（不需要RAG）
+        self.social_keywords = [
+            # 问候
+            "你好", "您好", "嗨", "hello", "hi", "早上好", "早安",
+            "中午好", "午安", "晚上好", "晚安", "再见", "拜拜",
+            "回见", "下次见", "再会",
+            
+            # 感谢
+            "谢谢", "感谢", "多谢", "辛苦了", "麻烦你了", "感谢你",
+            
+            # 道歉
+            "对不起", "抱歉", "不好意思", "抱歉啦", "不好意思啦",
+            
+            # 确认
+            "好的", "好滴", "好的呢", "好的呀", "可以", "没问题",
+            "明白", "懂了", "了解", "知道", "清楚", "收到", "OK",
+            "嗯嗯", "哦哦",
+            
+            # 闲聊
+            "在吗", "在干嘛", "干嘛呢", "忙吗", "吃饭了吗", "吃了吗",
+            "睡觉", "起床", "上班", "下班", "学习", "工作", "玩游戏",
+            "今天", "明天", "昨天", "最近", "最近怎么样", "最近好吗",
+            
+            # 评价
+            "厉害", "牛逼", "不错", "挺好", "很好", "非常好", "很棒", "太棒了",
+            "可爱", "漂亮", "美丽", "帅气", "有趣", "好玩",
+            
+            # 胡桃特定社交词
+            "胡桃", "堂主", "往生堂",
+            "嘿嘿", "嘻嘻", "哈哈", "啦啦", "啦啦啦",
+        ]
+        
+        # 编译正则表达式
+        self.knowledge_pattern = re.compile(
+            '|'.join([re.escape(keyword) for keyword in self.knowledge_keywords]),
+            re.IGNORECASE
+        )
+        
+        self.social_pattern = re.compile(
+            '|'.join([re.escape(keyword) for keyword in self.social_keywords]),
+            re.IGNORECASE
+        )
+        
+        # 疑问词模式
+        self.question_pattern = re.compile(
+            r'.*[吗呢吧啊呀么？?]$|.*(吗|呢|吧|啊|呀|么)[？?]?$'
+        )
+        
+        # 特殊字符模式
+        self.special_chars_pattern = re.compile(r'[!@#$%^&*()_+\-=\[\]{};\':"\\|,.<>/?~`]')
+        
+        logger.info("RAG意图检测器初始化完成")
+    
+    def needs_rag(self, message: str, context: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
+        """
+        判断消息是否需要RAG检索
+        
+        Args:
+            message: 用户消息
+            context: 可选上下文信息（如对话历史）
+            
+        Returns:
+            Tuple[是否需要RAG, 判断原因]
+        """
+        message = message.strip()
+        
+        # 1. 检查消息长度
+        if len(message) < self.min_length_for_rag:
+            return False, f"消息过短（{len(message)}字符），不需要RAG"
+        
+        # 2. 检查是否纯特殊字符或表情
+        if self._is_mostly_special_chars(message):
+            return False, "消息主要为特殊字符或表情，不需要RAG"
+        
+        # 3. 检查社交关键词和知识关键词的组合
+        social_match = self.social_pattern.search(message)
+        knowledge_match = self.knowledge_pattern.search(message)
+        
+        # 如果同时包含社交词和知识关键词，需要RAG（例如"胡桃的命座效果是什么？"）
+        if social_match and knowledge_match:
+            # 原神相关内容即使有社交词也需要RAG；否则不需要
+            if not self._contains_genshin_content(message):
+                return False, f"包含社交词'{social_match.group()}'和知识关键词'{knowledge_match.group()}'，但不是原神相关问题，不需要RAG"
+            return True, f"包含社交词'{social_match.group()}'和知识关键词'{knowledge_match.group()}'，且是原神相关内容，需要RAG"
+        
+        # 如果只有社交词，没有知识关键词
+        if social_match and not knowledge_match:
+            # 检查是否包含原神内容（原神角色名可能被误判为社交词）
+            if self._contains_genshin_content(message):
+                # 原神相关内容，需要RAG
+                return True, f"包含社交词'{social_match.group()}'但是原神相关内容，需要RAG"
+            # 纯社交消息，不需要RAG
+            return False, f"包含社交词'{social_match.group()}'且没有知识关键词，不需要RAG"
+        
+        # 4. 检查知识关键词（只有知识关键词，没有社交词）
+        if not social_match and knowledge_match:
+            # 必须同时包含原神相关内容才触发RAG（知识库只有原神内容）
+            if not self._contains_genshin_content(message):
+                return False, f"包含知识关键词'{knowledge_match.group()}'但不是原神相关问题，不需要RAG"
+            return True, f"包含知识关键词'{knowledge_match.group()}'，需要RAG"
+        
+        # 5. 检查是否疑问句
+        if self._is_question(message):
+            # 疑问句且长度适中 → 必须包含原神内容才RAG
+            if len(message) > 5 and len(message) < 100:
+                if not self._contains_genshin_content(message):
+                    return False, "是疑问句但不是原神相关问题，不需要RAG"
+                return True, "是原神相关的疑问句，需要RAG"
+            elif len(message) >= 100:
+                return True, "是长疑问句，需要RAG"
+        
+        # 6. 检查消息长度
+        if len(message) > self.max_length_for_no_rag:
+            # 长消息更可能需要RAG
+            return True, f"消息较长（{len(message)}字符），可能需要RAG"
+        
+        # 7. 检查是否包含原神特定内容
+        if self._contains_genshin_content(message):
+            return True, "包含原神相关内容，需要RAG"
+        
+        # 默认情况：不需要RAG
+        return False, "未检测到明确需要RAG的特征"
+    
+    def _is_mostly_special_chars(self, message: str) -> bool:
+        """检查消息是否主要为特殊字符或表情"""
+        # 移除常见中文标点
+        chinese_punct = '，。！？；：""''（）【】《》'
+        cleaned = message
+        for punct in chinese_punct:
+            cleaned = cleaned.replace(punct, '')
+        
+        # 检查特殊字符比例
+        special_count = len(self.special_chars_pattern.findall(cleaned))
+        if len(cleaned) == 0:
+            return True
+        return special_count / len(cleaned) > 0.5
+    
+    def _is_question(self, message: str) -> bool:
+        """判断是否为疑问句"""
+        # 检查是否以问号结尾
+        if message.endswith(('?', '？')):
+            return True
+        
+        # 检查是否包含常见疑问词
+        question_words = ['吗', '呢', '吧', '啊', '呀', '么', '什么', '为什么', '如何', '怎样', '怎么', '谁', '哪', '几']
+        for word in question_words:
+            if word in message:
+                return True
+        
+        # 使用正则表达式匹配疑问模式
+        return bool(self.question_pattern.match(message))
+    
+    def _contains_genshin_content(self, message: str) -> bool:
+        """检查是否包含原神相关内容"""
+        genshin_terms = [
+            '原神', 'Genshin', '角色', '武器', '圣遗物', '天赋', '命座', '命之座',
+            '蒙德', '璃月', '稻妻', '须弥', '枫丹', '纳塔', '至冬', '天空岛',
+            '胡桃', '钟离', '七七', '甘雨', '刻晴', '夜兰', '云堇',
+            '雷电将军', '纳西妲', '神里绫华', '八重神子',
+            '温迪', '魈', '达达利亚', '公子', '女士', '散兵', '斯卡拉姆齐',
+            '凝光', '荒泷一斗', '托马', '艾尔海森', '赛诺', '迪希雅',
+            '深渊', '教团', '愚人众', '七神', '魔神', '执政', '眷属',
+            '元素', '反应', '火', '水', '风', '雷', '草', '冰', '岩',
+            '副本', '秘境', '世界任务', '传说任务', '每日委托', '活动',
+            '抽卡', '祈愿', '保底', '定轨', '武器池', '角色池',
+            '往生堂', '堂主', '岩王帝君', '摩拉克斯', '巴巴托斯',
+            '旅行者', '派蒙', '千岩军', '西风骑士团', '群玉阁',
+            '戴因斯雷布', '奥赛尔', '跋掣', '特瓦林', '层岩巨渊',
+        ]
+        
+        message_lower = message.lower()
+        for term in genshin_terms:
+            if term.lower() in message_lower:
+                return True
+        return False
+    
+    def analyze_message(self, message: str) -> Dict[str, Any]:
+        """
+        分析消息特征
+        
+        Args:
+            message: 用户消息
+            
+        Returns:
+            包含各种特征的分析结果
+        """
+        message = message.strip()
+        
+        analysis = {
+            "message": message,
+            "length": len(message),
+            "needs_rag": False,
+            "reason": "",
+            "features": {
+                "is_question": self._is_question(message),
+                "contains_knowledge_keywords": bool(self.knowledge_pattern.search(message)),
+                "contains_social_keywords": bool(self.social_pattern.search(message)),
+                "contains_genshin_content": self._contains_genshin_content(message),
+                "has_special_chars": bool(self.special_chars_pattern.search(message)),
+            },
+            "matches": {
+                "knowledge_keywords": [],
+                "social_keywords": [],
+            }
+        }
+        
+        # 收集匹配的关键词
+        for keyword in self.knowledge_keywords:
+            if keyword.lower() in message.lower():
+                analysis["matches"]["knowledge_keywords"].append(keyword)
+        
+        for keyword in self.social_keywords:
+            if keyword.lower() in message.lower():
+                analysis["matches"]["social_keywords"].append(keyword)
+        
+        # 判断是否需要RAG
+        needs_rag, reason = self.needs_rag(message)
+        analysis["needs_rag"] = needs_rag
+        analysis["reason"] = reason
+        
+        return analysis
+
+
+# 全局实例
+_intent_detector: Optional[RAGIntentDetector] = None
+
+
+def _load_ml_model():
+    global _ml_encoder, _ml_classifier, _ml_config, _ML_AVAILABLE
+    if _ML_AVAILABLE:
+        return
+    try:
+        base = Path(__file__).parent
+        model_dir = base / "intent_classifier_model"
+        config_path = model_dir / "config.json"
+        classifier_path = model_dir / "classifier.joblib"
+        legacy_model_path = base / "intent_classifier_model.pkl"
+        legacy_config_path = base / "intent_classifier_config.json"
+
+        if model_dir.exists() and classifier_path.exists() and config_path.exists():
+            import joblib
+            with open(config_path, "r", encoding="utf-8") as f:
+                _ml_config = json.load(f)
+            _ml_classifier = joblib.load(classifier_path)
+            _ml_scaler = joblib.load(model_dir / "scaler.joblib")
+            _ml_config["_scaler"] = _ml_scaler
+        elif legacy_model_path.exists() and legacy_config_path.exists():
+            with open(legacy_config_path, "r", encoding="utf-8") as f:
+                _ml_config = json.load(f)
+            with open(legacy_model_path, "rb") as f:
+                _ml_classifier = pickle.load(f)
+        else:
+            logger.info("ML 分类器模型文件不存在，使用规则引擎")
+            return
+
+        from sentence_transformers import SentenceTransformer
+        embed_model_name = _ml_config.get("embedding_model", "paraphrase-multilingual-MiniLM-L12-v2")
+        local_candidates = [
+            base.parent / "RAG" / embed_model_name,
+            base / "models" / embed_model_name,
+        ]
+        _ml_encoder = None
+        for candidate in local_candidates:
+            if candidate.exists():
+                try:
+                    _ml_encoder = SentenceTransformer(str(candidate))
+                    break
+                except Exception:
+                    continue
+        if _ml_encoder is None:
+            _ml_encoder = SentenceTransformer(embed_model_name)
+
+        _ML_AVAILABLE = True
+        logger.info(f"ML 意图分类器加载成功 (v{_ml_config.get('version', '1.0')}, F1: {_ml_config.get('cv_f1_mean', 'N/A')})")
+    except Exception as e:
+        logger.warning(f"ML 分类器加载失败，使用规则引擎: {e}")
+
+
+def _ml_predict(message: str) -> Tuple[bool, str, float]:
+    global _ml_encoder, _ml_classifier, _ml_config
+    threshold = _ml_config.get("threshold", 0.5)
+    embedding = _ml_encoder.encode([message])
+    scaler = _ml_config.get("_scaler")
+    if scaler is not None:
+        embedding = scaler.transform(embedding)
+    proba = _ml_classifier.predict_proba(embedding)[0]
+    score = proba[1]
+    pred = score >= threshold
+    return pred, f"ML分类器 (置信度: {score:.2%})", score
+
+
+def get_intent_detector() -> RAGIntentDetector:
+    """获取意图检测器单例"""
+    global _intent_detector
+    if _intent_detector is None:
+        _intent_detector = RAGIntentDetector()
+    return _intent_detector
+
+
+def needs_rag(message: str, context: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
+    """
+    便捷函数：判断消息是否需要RAG（ML模型优先 + 低置信度规则兜底）
+
+    Args:
+        message: 用户消息
+        context: 可选上下文
+
+    Returns:
+        Tuple[是否需要RAG, 判断原因]
+    """
+    global _ML_AVAILABLE, _ml_config
+
+    if not _ML_AVAILABLE:
+        _load_ml_model()
+
+    if _ML_AVAILABLE:
+        try:
+            pred, reason, confidence = _ml_predict(message)
+            fallback_threshold = _ml_config.get("confidence_fallback", 0.3)
+            detector = get_intent_detector()
+            rule_pred, rule_reason = detector.needs_rag(message, context)
+
+            if pred and confidence >= fallback_threshold:
+                return pred, reason
+
+            if not pred and not rule_pred:
+                return False, f"{reason} (规则一致)"
+
+            if pred != rule_pred:
+                logger.info(f"ML({confidence:.2%}→{pred})与规则({rule_pred})冲突, 采用规则: {rule_reason}")
+                return rule_pred, f"规则兜底({rule_reason[:40]}...)"
+
+            if not pred and rule_pred and confidence < 0.8:
+                logger.info(f"ML判不需要RAG({confidence:.2%})但规则认为需要, 采用规则: {rule_reason}")
+                return True, f"规则兜底({rule_reason[:40]}...)"
+
+            return pred, reason
+        except Exception as e:
+            logger.warning(f"ML 预测失败，回退规则引擎: {e}")
+
+    detector = get_intent_detector()
+    return detector.needs_rag(message, context)
+
+
+def analyze_message(message: str) -> Dict[str, Any]:
+    """
+    便捷函数：全面分析消息特征，包括意图检测和关键词匹配。
+
+    Args:
+        message: 用户消息文本
+
+    Returns:
+        分析结果字典，包含 message、length、needs_rag、reason、features、matches 等字段
+    """
+    detector = get_intent_detector()
+    return detector.analyze_message(message)
+
+
+# 测试函数
+if __name__ == "__main__":
+    # 配置日志
+    logging.basicConfig(level=logging.INFO)
+    
+    detector = RAGIntentDetector()
+    
+    test_messages = [
+        "你好",
+        "胡桃你好呀",
+        "原神是什么游戏？",
+        "蒙德有哪些角色？",
+        "璃月的地理位置在哪里？",
+        "胡桃的命座效果是什么？",
+        "谢谢你的帮助",
+        "好的，我明白了",
+        "哈哈哈，你真有趣",
+        "元素反应有哪些类型？",
+        "深渊螺旋怎么打？",
+        "圣遗物怎么搭配最好？",
+        "在吗",
+        "今天天气怎么样？",
+        "晚上吃什么？",
+        "抽卡保底机制是怎样的？",
+        "！！！",
+        "😊",
+        "原神中胡桃这个角色有什么特点？",
+        "如何培养胡桃？",
+    ]
+    
+    print("RAG意图检测器测试结果：")
+    print("=" * 80)
+    
+    for msg in test_messages:
+        needs, reason = detector.needs_rag(msg)
+        analysis = detector.analyze_message(msg)
+        
+        print(f"消息: {msg}")
+        print(f"长度: {len(msg)}字符")
+        print(f"需要RAG: {'是' if needs else '否'}")
+        print(f"原因: {reason}")
+        print(f"特征: {analysis['features']}")
+        print("-" * 80)

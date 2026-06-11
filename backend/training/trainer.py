@@ -1,0 +1,669 @@
+"""
+胡桃风格LoRA训练核心脚本
+基于Qwen2.5-7B-Instruct的LoRA微调，包含完整训练配置、GPU温度保护、早停机制。
+"""
+import os as _os
+import logging
+import json
+import math
+from pathlib import Path
+from dataclasses import dataclass, field, asdict
+from typing import Optional, Dict, Any, List
+
+_BACKEND_DIR = Path(__file__).parent
+
+
+def _resolve_path(p: str) -> str:
+    if _os.path.isabs(p):
+        return p
+    return str(_BACKEND_DIR / p)
+
+import torch
+import transformers
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    DataCollatorForSeq2Seq,
+)
+from peft import (
+    LoraConfig,
+    get_peft_model,
+    prepare_model_for_kbit_training,
+    TaskType,
+)
+from datasets import Dataset, load_dataset
+from trl import SFTTrainer, SFTConfig
+
+try:
+    from transformers import EarlyStoppingCallback
+    HAS_EARLY_STOPPING = True
+except ImportError:
+    HAS_EARLY_STOPPING = False
+
+import time
+from transformers import TrainerCallback
+
+HAS_PYNVML = False
+try:
+    import pynvml
+    pynvml.nvmlInit()
+    HAS_PYNVML = True
+except Exception:
+    pass
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+class GpuTemperatureCallback(TrainerCallback):
+    """GPU温度监控回调，训练过程中定期检查GPU温度，超过阈值时触发散热暂停，
+    防止笔记本GPU过热导致系统蓝屏(BSOD)。"""
+
+    def __init__(self, max_temp: float = 82.0, cooldown_temp: float = 72.0,
+                 cooldown_seconds: int = 30, check_interval_steps: int = 20):
+        """初始化GPU温度监控回调。
+
+        Args:
+            max_temp: 触发散热的最高温度阈值，默认82°C
+            cooldown_temp: 恢复训练的目标冷却温度，默认72°C
+            cooldown_seconds: 每次散热暂停秒数，默认30
+            check_interval_steps: 每隔多少步检查一次温度，默认20
+        """
+        self.max_temp = max_temp
+        self.cooldown_temp = cooldown_temp
+        self.cooldown_seconds = cooldown_seconds
+        self.check_interval_steps = check_interval_steps
+        self._max_observed = 0.0
+        self._cooldown_count = 0
+        self._last_check_step = -999
+
+    def _get_gpu_temp(self) -> float:
+        if HAS_PYNVML:
+            try:
+                handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                return float(pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU))
+            except Exception:
+                pass
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return float(result.stdout.strip().split('\n')[0].strip())
+        except Exception:
+            pass
+        return -1.0
+
+    def on_step_end(self, args, state, control, **kwargs):
+        step = state.global_step
+        if step - self._last_check_step < self.check_interval_steps:
+            return control
+
+        self._last_check_step = step
+        temp = self._get_gpu_temp()
+        if temp > 0:
+            self._max_observed = max(self._max_observed, temp)
+
+        if temp > 0 and temp > self.max_temp:
+            self._cooldown_count += 1
+            logger.warning(f"GPU温度 ({temp:.0f}°C) 超过限制 ({self.max_temp:.0f}°C)，"
+                          f"暂停 {self.cooldown_seconds} 秒散热... (第{self._cooldown_count}次)")
+            msg = f"GPU温度 ({temp:.0f}°C) 超过限制 ({self.max_temp:.0f}°C)，暂停 {self.cooldown_seconds} 秒散热... (第{self._cooldown_count}次)"
+            print(msg)
+
+            elapsed = 0
+            while elapsed < self.cooldown_seconds:
+                time.sleep(5)
+                elapsed += 5
+                current_temp = self._get_gpu_temp()
+                if current_temp > 0:
+                    wait_remaining = self.cooldown_seconds - elapsed
+                    logger.info(f"散热中... 当前温度: {current_temp:.0f}°C, 还需等待: {wait_remaining}秒")
+                if current_temp > 0 and current_temp <= self.cooldown_temp and elapsed >= 15:
+                    logger.info(f"GPU已冷却到 {current_temp:.0f}°C，提前恢复训练")
+                    break
+
+            if self._cooldown_count >= 10:
+                logger.error("散热次数超过10次，可能是散热系统问题。建议：1) 清理风扇灰尘 2) 使用散热底座 3) 降低室温")
+                print("散热次数超过10次，可能是散热系统问题。建议：1) 清理风扇灰尘 2) 使用散热底座 3) 降低室温")
+
+        return control
+
+    def on_train_end(self, args, state, control, **kwargs):
+        logger.info(f"训练完成。GPU最高温度记录: {self._max_observed:.0f}°C, 散热暂停次数: {self._cooldown_count}")
+
+
+
+@dataclass
+class LoRATrainingConfig:
+    """LoRA训练配置数据类，包含模型路径、LoRA超参数、训练参数和优化器设置。
+
+    支持从/到JSON文件序列化，提供参数校验功能。
+    """
+    base_model_path: str = _resolve_path(_os.getenv("BASE_MODEL_PATH", "models/Qwen2.5-7B-Instruct"))
+    train_data_path: str = _resolve_path("hutao_dialogues.json")
+    output_dir: str = _resolve_path("loras/hutao_lora_7b")
+
+    lora_r: int = 32
+    lora_alpha: int = 64
+    lora_dropout: float = 0.1
+    target_modules: List[str] = field(default_factory=lambda: [
+        "q_proj", "k_proj", "v_proj", "o_proj",
+        "gate_proj", "up_proj", "down_proj"
+    ])
+    lora_bias: str = "none"
+
+    learning_rate: float = 2e-4
+    num_train_epochs: int = 12
+    per_device_train_batch_size: int = 2
+    per_device_eval_batch_size: int = 2
+    gradient_accumulation_steps: int = 4
+    max_seq_length: int = 1024
+
+    lr_scheduler_type: str = "cosine"
+    warmup_ratio: float = 0.05
+    warmup_steps: int = 0
+    max_grad_norm: float = 0.5
+
+    weight_decay: float = 0.01
+    adam_beta1: float = 0.9
+    adam_beta2: float = 0.999
+    adam_epsilon: float = 1e-8
+
+    early_stopping_patience: int = 3
+    early_stopping_threshold: float = 0.001
+
+    eval_strategy: str = "steps"
+    eval_steps: int = 50
+    save_strategy: str = "steps"
+    save_steps: int = 50
+    save_total_limit: int = 3
+    load_best_model_at_end: bool = True
+    metric_for_best_model: str = "eval_loss"
+    greater_is_better: bool = False
+
+    fp16: bool = True
+    bf16: bool = False
+    optim: str = "paged_adamw_32bit"
+    gradient_checkpointing: bool = True
+
+    logging_steps: int = 10
+    report_to: str = "none"
+    logging_dir: Optional[str] = None
+
+    system_prompt: str = "你是胡桃，保持你的风格"
+    train_test_split: float = 0.9
+    seed: int = 42
+    resume_from_checkpoint: Optional[str] = None
+
+    def validate(self):
+        """校验配置参数合法性。
+
+        Returns:
+            List[str]: 错误信息列表，无错误时为空列表
+        """
+        errors = []
+        if not Path(self.base_model_path).exists():
+            errors.append(f"基础模型路径不存在: {self.base_model_path}")
+        if not Path(self.train_data_path).exists():
+            errors.append(f"训练数据路径不存在: {self.train_data_path}")
+        if self.lora_r <= 0:
+            errors.append(f"lora_r必须大于0: {self.lora_r}")
+        if self.learning_rate <= 0:
+            errors.append(f"learning_rate必须大于0: {self.learning_rate}")
+        if self.num_train_epochs <= 0:
+            errors.append(f"num_train_epochs必须大于0: {self.num_train_epochs}")
+        if self.fp16 and self.bf16:
+            errors.append("不能同时启用fp16和bf16")
+        if self.early_stopping_patience <= 0:
+            errors.append(f"early_stopping_patience必须大于0: {self.early_stopping_patience}")
+        return errors
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    def save(self, path: Path):
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "LoRATrainingConfig":
+        valid_fields = {f.name for f in cls.__dataclass_fields__.values()}
+        filtered = {k: v for k, v in d.items() if k in valid_fields}
+        for path_key in ("base_model_path", "train_data_path", "output_dir"):
+            if path_key in filtered and not _os.path.isabs(filtered[path_key]):
+                filtered[path_key] = _resolve_path(filtered[path_key])
+        return cls(**filtered)
+
+    @classmethod
+    def load(cls, path: Path) -> "LoRATrainingConfig":
+        with open(path, 'r', encoding='utf-8') as f:
+            return cls.from_dict(json.load(f))
+
+
+class LoRATrainer:
+    """LoRA训练器，封装完整的微调流程：加载模型和分词器 -> 预处理数据 -> 配置LoRA -> 训练 -> 保存。
+
+    支持早停、GPU温度保护、检查点恢复、最佳模型自动选择。
+    """
+
+    def __init__(self, config: Optional[LoRATrainingConfig] = None):
+        """初始化训练器。
+
+        Args:
+            config: 训练配置，默认使用LoRATrainingConfig()
+        """
+        self.config = config or LoRATrainingConfig()
+        self._tokenizer = None
+        self._model = None
+
+    def print_gpu_memory(self, stage: str = ""):
+        if torch.cuda.is_available():
+            allocated = torch.cuda.memory_allocated() / 1024**3
+            reserved = torch.cuda.memory_reserved() / 1024**3
+            logger.info(f"[{stage}] GPU显存 - 已分配: {allocated:.2f}GB, 已保留: {reserved:.2f}GB")
+
+    def cleanup_gpu(self):
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            import gc
+            gc.collect()
+            logger.info("GPU显存已清理")
+
+    def _load_tokenizer(self) -> AutoTokenizer:
+        logger.info("加载Tokenizer...")
+        tokenizer = AutoTokenizer.from_pretrained(
+            str(self.config.base_model_path),
+            trust_remote_code=True,
+        )
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        if tokenizer.pad_token_id is None:
+            tokenizer.pad_token_id = tokenizer.eos_token_id
+        self._tokenizer = tokenizer
+        return tokenizer
+
+    def _load_and_preprocess_data(self, tokenizer: AutoTokenizer) -> Dict[str, Dataset]:
+        logger.info("=" * 60)
+        logger.info("步骤1: 加载和预处理训练数据")
+        logger.info("=" * 60)
+
+        dataset = load_dataset("json", data_files=str(self.config.train_data_path))["train"]
+        logger.info(f"训练数据加载完成，样本数: {len(dataset)}")
+
+        # 检测数据格式：conversations（多轮）或 user_question/agent_response（单轮）
+        sample = dataset[0]
+        has_conversations = "conversations" in sample
+        logger.info(f"数据格式: {'ShareGPT多轮对话' if has_conversations else '单轮对话(user_question/agent_response)'}")
+
+        def format_and_tokenize(examples):
+            all_input_ids = []
+            all_labels = []
+            all_attention_mask = []
+
+            if has_conversations:
+                # ShareGPT 多轮对话格式
+                for i in range(len(examples["conversations"])):
+                    convs = examples["conversations"][i]
+                    system_text = examples.get("system", [None])[i] if "system" in examples else None
+
+                    # 转换为 Qwen chat 格式
+                    messages = []
+                    if system_text:
+                        messages.append({"role": "system", "content": system_text})
+                    else:
+                        messages.append({"role": "system", "content": self.config.system_prompt})
+
+                    for conv in convs:
+                        role = "user" if conv.get("from") == "human" else "assistant"
+                        messages.append({"role": role, "content": conv.get("value", "")})
+
+                    # 多轮对话：构建 prompt（不含最后assistant回复）和 full_text
+                    prompt_messages = messages[:-1]  # 去掉最后的 assistant 回复
+                    # 确保 prompt 最后一条是 user
+                    if prompt_messages and prompt_messages[-1]["role"] == "assistant":
+                        prompt_messages = prompt_messages[:-1]
+
+                    prompt_text = tokenizer.apply_chat_template(
+                        prompt_messages,
+                        tokenize=False,
+                        add_generation_prompt=True
+                    )
+                    full_text = tokenizer.apply_chat_template(
+                        messages,
+                        tokenize=False,
+                        add_generation_prompt=False
+                    )
+
+                    prompt_ids = tokenizer.encode(prompt_text, add_special_tokens=False)
+                    full_ids = tokenizer.encode(full_text, add_special_tokens=False)
+
+                    if len(full_ids) > self.config.max_seq_length:
+                        full_ids = full_ids[:self.config.max_seq_length]
+                        prompt_len = min(len(prompt_ids), self.config.max_seq_length)
+                    else:
+                        prompt_len = len(prompt_ids)
+
+                    labels = [-100] * prompt_len + full_ids[prompt_len:]
+                    labels = labels[:self.config.max_seq_length]
+
+                    attention_mask = [1] * len(full_ids)
+                    while len(full_ids) < self.config.max_seq_length:
+                        full_ids.append(tokenizer.pad_token_id)
+                        attention_mask.append(0)
+                        labels.append(-100)
+
+                    full_ids = full_ids[:self.config.max_seq_length]
+                    attention_mask = attention_mask[:self.config.max_seq_length]
+                    labels = labels[:self.config.max_seq_length]
+
+                    all_input_ids.append(full_ids)
+                    all_labels.append(labels)
+                    all_attention_mask.append(attention_mask)
+            else:
+                # 旧格式：user_question / agent_response 单轮对话
+                for i in range(len(examples["user_question"])):
+                    user_content = examples["user_question"][i]
+                    assistant_content = examples["agent_response"][i]
+
+                    system_msg = {"role": "system", "content": self.config.system_prompt}
+                    user_msg = {"role": "user", "content": user_content}
+                    assistant_msg = {"role": "assistant", "content": assistant_content}
+
+                    prompt_text = tokenizer.apply_chat_template(
+                        [system_msg, user_msg],
+                        tokenize=False,
+                        add_generation_prompt=True
+                    )
+                    full_text = tokenizer.apply_chat_template(
+                        [system_msg, user_msg, assistant_msg],
+                        tokenize=False,
+                        add_generation_prompt=False
+                    )
+
+                    prompt_ids = tokenizer.encode(prompt_text, add_special_tokens=False)
+                    full_ids = tokenizer.encode(full_text, add_special_tokens=False)
+
+                    if len(full_ids) > self.config.max_seq_length:
+                        full_ids = full_ids[:self.config.max_seq_length]
+                        prompt_len = min(len(prompt_ids), self.config.max_seq_length)
+                    else:
+                        prompt_len = len(prompt_ids)
+
+                    labels = [-100] * prompt_len + full_ids[prompt_len:]
+                    labels = labels[:self.config.max_seq_length]
+
+                    attention_mask = [1] * len(full_ids)
+                    while len(full_ids) < self.config.max_seq_length:
+                        full_ids.append(tokenizer.pad_token_id)
+                        attention_mask.append(0)
+                        labels.append(-100)
+
+                    full_ids = full_ids[:self.config.max_seq_length]
+                    attention_mask = attention_mask[:self.config.max_seq_length]
+                    labels = labels[:self.config.max_seq_length]
+
+                    all_input_ids.append(full_ids)
+                    all_labels.append(labels)
+                    all_attention_mask.append(attention_mask)
+
+            return {
+                "input_ids": all_input_ids,
+                "labels": all_labels,
+                "attention_mask": all_attention_mask,
+            }
+
+        tokenized_dataset = dataset.map(
+            format_and_tokenize,
+            batched=True,
+            remove_columns=dataset.column_names,
+            desc="Tokenizing dataset",
+        )
+
+        split = tokenized_dataset.train_test_split(
+            test_size=1 - self.config.train_test_split,
+            seed=self.config.seed,
+        )
+
+        train_dataset = split["train"]
+        eval_dataset = split["test"]
+
+        logger.info(f"训练集: {len(train_dataset)} 样本")
+        logger.info(f"验证集: {len(eval_dataset)} 样本")
+
+        return {"train": train_dataset, "eval": eval_dataset}
+
+    def _load_model(self) -> AutoModelForCausalLM:
+        logger.info("加载基础模型...")
+
+        torch_dtype = torch.bfloat16 if self.config.bf16 else torch.float16
+
+        model = AutoModelForCausalLM.from_pretrained(
+            str(self.config.base_model_path),
+            torch_dtype=torch_dtype,
+            device_map="auto",
+            trust_remote_code=True,
+            low_cpu_mem_usage=True,
+        )
+        model = prepare_model_for_kbit_training(model)
+        self.print_gpu_memory("基础模型加载后")
+        self._model = model
+        return model
+
+    def _create_lora_config(self) -> LoraConfig:
+        return LoraConfig(
+            r=self.config.lora_r,
+            lora_alpha=self.config.lora_alpha,
+            target_modules=self.config.target_modules,
+            lora_dropout=self.config.lora_dropout,
+            bias=self.config.lora_bias,
+            task_type=TaskType.CAUSAL_LM,
+        )
+
+    def train(self) -> Path:
+        """执行完整的LoRA训练流程。
+
+        流程：校验配置 -> 清理GPU -> 加载分词器和模型 -> 预处理数据 -> 
+        配置LoRA -> 创建SFTTrainer（含早停和温度回调） -> 训练 -> 评估 -> 保存模型。
+
+        Returns:
+            Path: 最终模型保存路径（output_dir/final）
+
+        Raises:
+            ValueError: 训练配置有错误时抛出
+        """
+        logger.info("=" * 60)
+        logger.info("优化版胡桃LoRA训练开始")
+        logger.info("=" * 60)
+
+        config_errors = self.config.validate()
+        if config_errors:
+            for err in config_errors:
+                logger.error(f"配置错误: {err}")
+            raise ValueError(f"训练配置有 {len(config_errors)} 个错误")
+
+        try:
+            self.cleanup_gpu()
+
+            tokenizer = self._load_tokenizer()
+            datasets = self._load_and_preprocess_data(tokenizer)
+            model = self._load_model()
+
+            logger.info("配置LoRA...")
+            lora_config = self._create_lora_config()
+            model = get_peft_model(model, lora_config)
+            model.print_trainable_parameters()
+            self.print_gpu_memory("LoRA配置后")
+
+            output_dir = Path(self.config.output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            config_save_path = output_dir / "training_config.json"
+            self.config.save(config_save_path)
+            logger.info(f"训练配置已保存到: {config_save_path}")
+
+            callbacks = []
+            if self.config.early_stopping_patience > 0 and HAS_EARLY_STOPPING:
+                early_stopping = EarlyStoppingCallback(
+                    early_stopping_patience=self.config.early_stopping_patience,
+                    early_stopping_threshold=self.config.early_stopping_threshold,
+                )
+                callbacks.append(early_stopping)
+                logger.info(f"已启用早停机制: patience={self.config.early_stopping_patience}, "
+                          f"threshold={self.config.early_stopping_threshold}")
+
+            gpu_temp_callback = GpuTemperatureCallback(
+                max_temp=82.0,
+                cooldown_temp=72.0,
+                cooldown_seconds=30,
+                check_interval_steps=20,
+            )
+            callbacks.append(gpu_temp_callback)
+            logger.info("已启用GPU温度保护: max=82°C, cooldown=72°C, interval=20步")
+
+            training_args = SFTConfig(
+                output_dir=str(output_dir),
+                num_train_epochs=self.config.num_train_epochs,
+                per_device_train_batch_size=self.config.per_device_train_batch_size,
+                per_device_eval_batch_size=self.config.per_device_eval_batch_size,
+                gradient_accumulation_steps=self.config.gradient_accumulation_steps,
+                learning_rate=self.config.learning_rate,
+                lr_scheduler_type=self.config.lr_scheduler_type,
+                warmup_ratio=self.config.warmup_ratio,
+                warmup_steps=self.config.warmup_steps,
+                max_grad_norm=self.config.max_grad_norm,
+                weight_decay=self.config.weight_decay,
+                adam_beta1=self.config.adam_beta1,
+                adam_beta2=self.config.adam_beta2,
+                adam_epsilon=self.config.adam_epsilon,
+                logging_steps=self.config.logging_steps,
+                logging_dir=self.config.logging_dir,
+                eval_strategy=self.config.eval_strategy,
+                eval_steps=self.config.eval_steps,
+                save_strategy=self.config.save_strategy,
+                save_steps=self.config.save_steps,
+                save_total_limit=self.config.save_total_limit,
+                load_best_model_at_end=self.config.load_best_model_at_end,
+                metric_for_best_model=self.config.metric_for_best_model,
+                greater_is_better=self.config.greater_is_better,
+                fp16=self.config.fp16,
+                bf16=self.config.bf16,
+                optim=self.config.optim,
+                report_to=self.config.report_to,
+                gradient_checkpointing=self.config.gradient_checkpointing,
+                max_length=self.config.max_seq_length,
+                seed=self.config.seed,
+                dataset_text_field="text",
+                packing=False,
+            )
+
+            data_collator = DataCollatorForSeq2Seq(
+                tokenizer=tokenizer,
+                model=model,
+                padding=True,
+                return_tensors="pt",
+            )
+
+            trainer = SFTTrainer(
+                model=model,
+                args=training_args,
+                train_dataset=datasets["train"],
+                eval_dataset=datasets["eval"],
+                data_collator=data_collator,
+                callbacks=callbacks,
+            )
+
+            logger.info("=" * 60)
+            logger.info("开始训练")
+            logger.info("=" * 60)
+            self.print_gpu_memory("训练前")
+
+            checkpoint = self.config.resume_from_checkpoint
+            if checkpoint and Path(checkpoint).exists():
+                logger.info(f"从检查点恢复训练: {checkpoint}")
+                trainer.train(resume_from_checkpoint=checkpoint)
+            else:
+                trainer.train()
+
+            final_output = output_dir / "final"
+            trainer.model.save_pretrained(str(final_output))
+            tokenizer.save_pretrained(str(final_output))
+
+            eval_results = trainer.evaluate()
+            logger.info(f"最终评估结果: {eval_results}")
+
+            results_path = output_dir / "training_results.json"
+            with open(results_path, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "eval_results": {k: float(v) if isinstance(v, (int, float)) else str(v)
+                                     for k, v in eval_results.items()},
+                    "config": self.config.to_dict(),
+                    "best_model_checkpoint": str(trainer.state.best_model_checkpoint) if trainer.state.best_model_checkpoint else None,
+                    "best_metric": float(trainer.state.best_metric) if trainer.state.best_metric else None,
+                }, f, indent=2, ensure_ascii=False)
+
+            logger.info(f"LoRA模型已保存到: {final_output}")
+            logger.info(f"训练结果已保存到: {results_path}")
+            self.print_gpu_memory("训练完成")
+
+            logger.info("=" * 60)
+            logger.info("训练完成！")
+            logger.info("=" * 60)
+
+            return final_output
+
+        except Exception as e:
+            logger.error(f"训练失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise
+        finally:
+            self.cleanup_gpu()
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="LoRA训练脚本")
+    parser.add_argument("--config", type=str, default=None, help="训练配置JSON文件路径")
+    parser.add_argument("--base-model", type=str, default=None, help="基础模型路径")
+    parser.add_argument("--train-data", type=str, default=None, help="训练数据路径")
+    parser.add_argument("--output-dir", type=str, default=None, help="输出目录")
+    parser.add_argument("--epochs", type=int, default=None, help="训练轮数")
+    parser.add_argument("--lr", type=float, default=None, help="学习率")
+    parser.add_argument("--lora-r", type=int, default=None, help="LoRA rank")
+    parser.add_argument("--resume", type=str, default=None, help="从检查点恢复训练")
+    args = parser.parse_args()
+
+    if args.config:
+        config = LoRATrainingConfig.load(Path(args.config))
+        logger.info(f"从配置文件加载: {args.config}")
+    else:
+        config = LoRATrainingConfig()
+
+    if args.base_model:
+        config.base_model_path = _resolve_path(args.base_model)
+    if args.train_data:
+        config.train_data_path = _resolve_path(args.train_data)
+    if args.output_dir:
+        config.output_dir = _resolve_path(args.output_dir)
+    if args.epochs:
+        config.num_train_epochs = args.epochs
+    if args.lr:
+        config.learning_rate = args.lr
+    if args.lora_r:
+        config.lora_r = args.lora_r
+    if args.resume:
+        config.resume_from_checkpoint = args.resume
+
+    trainer = LoRATrainer(config)
+    output_path = trainer.train()
+    logger.info(f"\n训练成功完成！模型保存在: {output_path}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,1159 @@
+import os
+import sqlite3
+import logging
+import threading
+from pathlib import Path
+from datetime import datetime
+from typing import Optional, Dict
+
+logger = logging.getLogger(__name__)
+
+# LoRA路径映射 - 自动扫描 backend/loras/ 目录
+def _scan_lora_dirs():
+    """扫描 loras 目录，自动发现 LoRA 适配器"""
+    lora_base = Path(__file__).parent.parent / "loras"
+    path_map = {}
+    if lora_base.exists():
+        for d in lora_base.iterdir():
+            if d.is_dir():
+                # 检查是否包含 adapter_config.json（LoRA 适配器标志）
+                # 支持直接在目录下或 final/ 子目录下
+                has_adapter = (d / "adapter_config.json").exists() or (d / "final" / "adapter_config.json").exists()
+                if has_adapter:
+                    path_map[d.name] = str(d)
+    return path_map
+
+LORA_DIR_MAP = _scan_lora_dirs()
+
+# 兼容旧代码：通过 id 查找路径
+LORA_PATH_MAP = {}
+
+def _resolve_path(p: str) -> str:
+    if os.path.isabs(p):
+        return p
+    return str(Path(__file__).parent.parent / p)
+
+# 数据库路径
+DB_PATH = Path(__file__).parent.parent / "qq_assistant.db"
+
+# ============================================
+# SQLite数据库类
+# ============================================
+class SQLiteDB:
+    """SQLite数据库类 - 实现数据持久化"""
+    def __init__(self, db_path: Path = DB_PATH):
+        self.db_path = db_path
+        self._local = threading.local()
+        self._init_database()
+    
+    def _get_connection(self):
+        """获取数据库连接 - 线程本地复用 + WAL模式"""
+        if not hasattr(self._local, 'conn') or self._local.conn is None:
+            conn = sqlite3.connect(f"file:{self.db_path}?mode=rwc", uri=True, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute('PRAGMA journal_mode=WAL')
+            conn.execute('PRAGMA busy_timeout=5000')
+            conn.execute('PRAGMA synchronous=NORMAL')
+            conn.execute('PRAGMA cache_size=-8000')
+            conn.execute('PRAGMA foreign_keys=ON')
+            self._local.conn = conn
+        return self._local.conn
+    
+    def close_connection(self):
+        """关闭当前线程的数据库连接"""
+        if hasattr(self._local, 'conn') and self._local.conn is not None:
+            self._local.conn.close()
+            self._local.conn = None
+    
+    def _init_database(self):
+        """初始化数据库表结构"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        # 创建消息表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sessionType TEXT NOT NULL,
+                sessionId TEXT NOT NULL,
+                sessionName TEXT,
+                userId TEXT,
+                userName TEXT,
+                message TEXT NOT NULL,
+                reply TEXT NOT NULL,
+                modelName TEXT,
+                loraName TEXT,
+                costTime REAL,
+                createdAt TEXT NOT NULL
+            )
+        ''')
+        
+        # 创建LoRA模型表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS loras (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                status TEXT NOT NULL DEFAULT 'inactive',
+                style TEXT,
+                size TEXT,
+                trainedSteps INTEGER,
+                totalSteps INTEGER,
+                createdAt TEXT
+            )
+        ''')
+        
+        # 创建配置表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS config (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        ''')
+        
+        # 创建知识库表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS knowledge_bases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        ''')
+
+        # 创建知识库文件夹表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS knowledge_folders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                knowledge_base_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (knowledge_base_id) REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+                UNIQUE(knowledge_base_id, name)
+            )
+        ''')
+
+        # 创建知识库文档表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS knowledge_documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT '未分类',
+                knowledge_base_id INTEGER,
+                folder_id INTEGER,
+                sourceType TEXT NOT NULL DEFAULT 'text',
+                sourceUrl TEXT,
+                fileType TEXT,
+                fileSize INTEGER,
+                chunkCount INTEGER DEFAULT 0,
+                createdAt TEXT NOT NULL,
+                updatedAt TEXT NOT NULL,
+                FOREIGN KEY (knowledge_base_id) REFERENCES knowledge_bases(id) ON DELETE SET NULL,
+                FOREIGN KEY (folder_id) REFERENCES knowledge_folders(id) ON DELETE SET NULL
+            )
+        ''')
+
+        # 迁移：为旧表添加 category 字段（如果不存在）
+        try:
+            cursor.execute("SELECT category FROM knowledge_documents LIMIT 1")
+        except sqlite3.OperationalError:
+            cursor.execute("ALTER TABLE knowledge_documents ADD COLUMN category TEXT NOT NULL DEFAULT '未分类'")
+            logger.info("已为 knowledge_documents 表添加 category 字段")
+
+        # 迁移：为旧表添加 knowledge_base_id 和 folder_id 字段
+        try:
+            cursor.execute("SELECT knowledge_base_id FROM knowledge_documents LIMIT 1")
+        except sqlite3.OperationalError:
+            cursor.execute("ALTER TABLE knowledge_documents ADD COLUMN knowledge_base_id INTEGER REFERENCES knowledge_bases(id) ON DELETE SET NULL")
+            logger.info("已为 knowledge_documents 表添加 knowledge_base_id 字段")
+        try:
+            cursor.execute("SELECT folder_id FROM knowledge_documents LIMIT 1")
+        except sqlite3.OperationalError:
+            cursor.execute("ALTER TABLE knowledge_documents ADD COLUMN folder_id INTEGER REFERENCES knowledge_folders(id) ON DELETE SET NULL")
+            logger.info("已为 knowledge_documents 表添加 folder_id 字段")
+        
+        # 创建知识库向量表（用于RAG）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS knowledge_chunks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                documentId INTEGER NOT NULL,
+                chunkIndex INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                embedding BLOB,
+                createdAt TEXT NOT NULL,
+                FOREIGN KEY (documentId) REFERENCES knowledge_documents(id) ON DELETE CASCADE
+            )
+        ''')
+
+        # 创建用户表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        ''')
+
+        # 创建用户数据表（表单数据持久化）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                page_key TEXT NOT NULL,
+                data_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                UNIQUE(user_id, page_key)
+            )
+        ''')
+
+        # 创建已保存对话表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS saved_dialogues (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                character_desc TEXT NOT NULL,
+                style TEXT,
+                dialogue_count INTEGER NOT NULL DEFAULT 0,
+                dialogues_json TEXT NOT NULL,
+                turn_stats TEXT,
+                scene_stats TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        ''')
+
+        # 会话设置表：每个会话的机器人开关状态
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS session_settings (
+                sessionId TEXT PRIMARY KEY,
+                sessionType TEXT NOT NULL DEFAULT 'private',
+                sessionName TEXT,
+                bot_enabled INTEGER NOT NULL DEFAULT 1,
+                updated_at TEXT
+            )
+        ''')
+        
+        # 创建 Claw 自定义工具表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS claw_tools (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT NOT NULL DEFAULT '',
+                code TEXT NOT NULL DEFAULT '',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        ''')
+
+        conn.commit()
+
+        # 高并发优化：WAL模式 + busy_timeout
+        cursor.execute('PRAGMA journal_mode=WAL')
+        cursor.execute('PRAGMA busy_timeout=5000')
+        cursor.execute('PRAGMA synchronous=NORMAL')
+        cursor.execute('PRAGMA cache_size=-8000')  # 8MB cache
+        cursor.execute('PRAGMA temp_store=MEMORY')
+
+        # 初始化LoRA数据（如果表为空）
+        cursor.execute('SELECT COUNT(*) FROM loras')
+        if cursor.fetchone()[0] == 0:
+            self._init_default_loras(cursor)
+        else:
+            # 清理无对应文件的旧记录（如硬编码的 hutao_style）
+            self._cleanup_stale_loras(cursor)
+            # 同步：扫描 loras/ 目录，自动注册新增的 LoRA
+            self._sync_loras_from_disk(cursor)
+        
+        # 初始化配置数据（如果表为空）
+        cursor.execute('SELECT COUNT(*) FROM config')
+        if cursor.fetchone()[0] == 0:
+            self._init_default_config(cursor)
+        
+        conn.commit()
+        logger.info(f"✅ 数据库初始化完成: {self.db_path}")
+    
+    def _init_default_loras(self, cursor):
+        """初始化默认LoRA数据 - 自动扫描 loras/ 目录并注册"""
+        lora_base = Path(__file__).parent.parent / "loras"
+        default_loras = []
+
+        if lora_base.exists():
+            for idx, d in enumerate(sorted(lora_base.iterdir()), start=1):
+                if not d.is_dir():
+                    continue
+                # 检查是否包含 adapter_config.json
+                config_path = d / "adapter_config.json"
+                final_config_path = d / "final" / "adapter_config.json"
+                adapter_path = d
+                if not config_path.exists() and final_config_path.exists():
+                    config_path = final_config_path
+                    adapter_path = d / "final"
+
+                if not config_path.exists():
+                    continue
+
+                # 读取元信息
+                meta = self._read_lora_metadata(adapter_path)
+
+                # 计算 adapter_model 大小
+                adapter_file = adapter_path / "adapter_model.safetensors"
+                size_str = "未知"
+                if adapter_file.exists():
+                    size_mb = adapter_file.stat().st_size / (1024 * 1024)
+                    size_str = f"{size_mb:.0f}MB"
+
+                # 确定状态：第一个默认 active
+                status = "active" if idx == 1 else "inactive"
+
+                lora_name = d.name
+                # 生成描述（包含 rank/alpha 信息）
+                desc_map = {
+                    "hutao_lora_7b": "往生堂第七十七代堂主胡桃的对话风格",
+                    "minamo_lora": "神白水菜萌风格 LoRA",
+                }
+                base_desc = desc_map.get(lora_name, f"LoRA 适配器 - {lora_name}")
+                rank_info = f" (rank={meta['rank']}, alpha={meta['alpha']})" if meta['rank'] > 0 else ""
+                description = base_desc + rank_info
+
+                trained_steps = meta["trained_steps"]
+                total_steps = meta["total_steps"] if meta["total_steps"] > 0 else trained_steps
+
+                default_loras.append({
+                    "id": str(idx),
+                    "name": lora_name,
+                    "description": description,
+                    "status": status,
+                    "style": "",
+                    "size": size_str,
+                    "trainedSteps": trained_steps,
+                    "totalSteps": total_steps,
+                    "createdAt": datetime.now().strftime("%Y-%m-%d"),
+                })
+
+        # 如果没有扫描到任何 LoRA，跳过初始化
+        if not default_loras:
+            return
+        
+        for lora in default_loras:
+            cursor.execute('''
+                INSERT INTO loras (id, name, description, status, style, size, trainedSteps, totalSteps, createdAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                lora["id"], lora["name"], lora["description"], lora["status"],
+                lora["style"], lora["size"], lora["trainedSteps"],
+                lora["totalSteps"], lora["createdAt"]
+            ))
+
+    def _cleanup_stale_loras(self, cursor):
+        """清理无对应文件的旧记录（如硬编码的 hutao_style）"""
+        lora_base = Path(__file__).parent.parent / "loras"
+        # 获取 loras/ 目录下所有有效目录名
+        valid_dirs = set()
+        if lora_base.exists():
+            for d in lora_base.iterdir():
+                if d.is_dir():
+                    has_adapter = (d / "adapter_config.json").exists() or (d / "final" / "adapter_config.json").exists()
+                    if has_adapter:
+                        valid_dirs.add(d.name)
+
+        # 删除数据库中无对应文件的记录
+        cursor.execute('SELECT id, name FROM loras')
+        for row in cursor.fetchall():
+            name = row[1]
+            if name not in valid_dirs:
+                cursor.execute('DELETE FROM loras WHERE id = ?', (row[0],))
+                logger.info(f"清理无效 LoRA 记录: {name} (无对应文件)")
+
+    def _read_lora_metadata(self, adapter_path: Path) -> dict:
+        """从 adapter_config.json 和 trainer_state.json 读取 LoRA 元信息"""
+        import json as _json
+        meta = {"rank": 0, "alpha": 0, "trained_steps": 0, "total_steps": 0, "train_completed": False}
+
+        config_path = adapter_path / "adapter_config.json"
+        if config_path.exists():
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    cfg = _json.load(f)
+                meta["rank"] = cfg.get("r", 0)
+                meta["alpha"] = cfg.get("lora_alpha", 0)
+            except Exception:
+                pass
+
+        # 尝试读取训练状态
+        state_path = adapter_path / "trainer_state.json"
+        if not state_path.exists() and adapter_path.name == "final":
+            # 查找 checkpoint 目录中的 trainer_state.json
+            try:
+                checkpoint_dirs = [d for d in adapter_path.parent.iterdir()
+                                   if d.is_dir() and d.name.startswith("checkpoint-")]
+                if checkpoint_dirs:
+                    max_ckpt = max(checkpoint_dirs, key=lambda d: int(d.name.split("-")[-1]))
+                    candidate = max_ckpt / "trainer_state.json"
+                    if candidate.exists():
+                        state_path = candidate
+            except Exception:
+                pass
+
+        if state_path and state_path.exists():
+            try:
+                with open(state_path, 'r', encoding='utf-8') as f:
+                    state = _json.load(f)
+                meta["trained_steps"] = state.get("global_step", 0)
+                meta["total_steps"] = state.get("max_steps", 0)
+                meta["train_completed"] = state.get("best_metric") is not None or meta["trained_steps"] > 0
+            except Exception:
+                pass
+
+        # 如果没有 trainer_state，但有 adapter_model，说明训练已完成
+        adapter_file = adapter_path / "adapter_model.safetensors"
+        if adapter_file.exists() and meta["trained_steps"] == 0:
+            meta["train_completed"] = True
+            meta["trained_steps"] = 1
+            meta["total_steps"] = 1
+
+        return meta
+
+    def _sync_loras_from_disk(self, cursor):
+        """同步：扫描 loras/ 目录，注册新增 LoRA 并更新已有记录的元信息"""
+        lora_base = Path(__file__).parent.parent / "loras"
+        if not lora_base.exists():
+            return
+
+        # 获取数据库中已有的 LoRA
+        cursor.execute('SELECT id, name FROM loras')
+        existing_loras = {row[1]: row[0] for row in cursor.fetchall()}  # name -> id
+
+        # 获取当前最大 ID
+        cursor.execute('SELECT MAX(CAST(id AS INTEGER)) FROM loras')
+        max_id_row = cursor.fetchone()
+        max_id = max_id_row[0] if max_id_row and max_id_row[0] else 0
+
+        for d in sorted(lora_base.iterdir()):
+            if not d.is_dir():
+                continue
+
+            # 检查是否包含 adapter_config.json
+            config_path = d / "adapter_config.json"
+            adapter_path = d
+            if not config_path.exists() and (d / "final" / "adapter_config.json").exists():
+                config_path = d / "final" / "adapter_config.json"
+                adapter_path = d / "final"
+
+            if not config_path.exists():
+                continue
+
+            # 读取元信息
+            meta = self._read_lora_metadata(adapter_path)
+
+            # 计算 adapter 大小
+            adapter_file = adapter_path / "adapter_model.safetensors"
+            size_str = "未知"
+            if adapter_file.exists():
+                size_mb = adapter_file.stat().st_size / (1024 * 1024)
+                size_str = f"{size_mb:.0f}MB"
+
+            # 生成描述（包含 rank/alpha 信息）
+            desc_map = {
+                "hutao_lora_7b": "往生堂第七十七代堂主胡桃的对话风格",
+                "minamo_lora": "神白水菜萌风格 LoRA",
+            }
+            base_desc = desc_map.get(d.name, f"LoRA 适配器 - {d.name}")
+            rank_info = f" (rank={meta['rank']}, alpha={meta['alpha']})" if meta['rank'] > 0 else ""
+            description = base_desc + rank_info
+
+            trained_steps = meta["trained_steps"]
+            total_steps = meta["total_steps"] if meta["total_steps"] > 0 else trained_steps
+
+            if d.name in existing_loras:
+                # 更新已有记录的元信息
+                cursor.execute('''
+                    UPDATE loras SET description = ?, size = ?, trainedSteps = ?, totalSteps = ?
+                    WHERE name = ?
+                ''', (description, size_str, trained_steps, total_steps, d.name))
+            else:
+                # 新增记录
+                max_id += 1
+                cursor.execute('''
+                    INSERT INTO loras (id, name, description, status, style, size, trainedSteps, totalSteps, createdAt)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    str(max_id), d.name, description, "inactive",
+                    "", size_str, trained_steps, total_steps,
+                    datetime.now().strftime("%Y-%m-%d")
+                ))
+                logger.info(f"自动注册 LoRA: {d.name} (size={size_str})")
+
+    def _init_default_config(self, cursor):
+        """初始化默认配置"""
+        default_config = {
+            "botName": "QQ智能助手",
+            "autoReply": "true",
+            "groupReply": "true",
+            "privateReply": "true",
+            "replyDelay": "1",
+            "modelProvider": "mock",
+            "baseModel": "qwen2.5-7b",
+            "temperature": "0.7",
+            "maxTokens": "2048",
+            "contextWindow": "8k",
+            "useKnowledgeBase": "false",
+            "language": "zh-CN",
+            "timezone": "Asia/Shanghai",
+            "defaultReplyTemplate": "",
+            "errorAlert": "true",
+            "dailyStats": "true",
+            "anomalyDetection": "false",
+            "contentFilter": "true",
+            "contentReview": "true",
+            "adminQqList": "",
+            "openaiCompatBaseUrl": "https://api.deepseek.com",
+            "openaiCompatApiKey": "",
+            "openaiCompatModel": "deepseek-chat"
+        }
+        
+        for key, value in default_config.items():
+            cursor.execute('INSERT INTO config (key, value) VALUES (?, ?)', (key, value))
+    
+    def get_messages(self, limit: int = 100, offset: int = 0):
+        """获取消息记录"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT * FROM messages 
+            ORDER BY createdAt DESC 
+            LIMIT ? OFFSET ?
+        ''', (limit, offset))
+        rows = cursor.fetchall()
+        
+        messages = []
+        for row in rows:
+            messages.append(dict(row))
+        return messages
+    
+    def get_message_count(self) -> int:
+        """获取消息总数"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM messages')
+        return cursor.fetchone()[0]
+    
+    def add_message(self, message: Dict):
+        """添加消息记录"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        created_at = message.get("createdAt", datetime.now().isoformat())
+        
+        cursor.execute('''
+            INSERT INTO messages (sessionType, sessionId, sessionName, userId, userName, message, reply, modelName, loraName, costTime, createdAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            message.get("sessionType", "private"),
+            message.get("sessionId", ""),
+            message.get("sessionName", ""),
+            message.get("userId", ""),
+            message.get("userName", ""),
+            message.get("message", ""),
+            message.get("reply", ""),
+            message.get("modelName", ""),
+            message.get("loraName", ""),
+            message.get("costTime", 0.0),
+            created_at
+        ))
+        
+        message_id = cursor.lastrowid
+        conn.commit()
+        
+        # 返回完整的消息对象
+        return {
+            **message,
+            "id": str(message_id),
+            "createdAt": created_at
+        }
+    
+    def delete_message(self, msg_id: int) -> bool:
+        """删除单条消息记录"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM messages WHERE id = ?', (msg_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    
+    def delete_messages_by_filter(self, search: str = None, sessionType: str = None, lora: str = None, sessionName: str = None) -> int:
+        """批量删除消息（基于筛选条件），返回删除数量"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        conditions = []
+        params = []
+        if search:
+            conditions.append("(message LIKE ? OR reply LIKE ? OR userName LIKE ?)")
+            params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+        if sessionType and sessionType != "all":
+            conditions.append("sessionType = ?")
+            params.append(sessionType)
+        if lora and lora != "all":
+            conditions.append("loraName = ?")
+            params.append(lora)
+        if sessionName:
+            conditions.append("sessionName LIKE ?")
+            params.append(f"%{sessionName}%")
+        
+        if conditions:
+            cursor.execute(f"DELETE FROM messages WHERE {' AND '.join(conditions)}", params)
+        else:
+            cursor.execute("DELETE FROM messages")
+        
+        conn.commit()
+        return cursor.rowcount
+    
+    def get_loras(self, status: Optional[str] = None):
+        """获取LoRA模型列表"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        if status and status != "all":
+            cursor.execute('SELECT * FROM loras WHERE status = ?', (status,))
+        else:
+            cursor.execute('SELECT * FROM loras')
+        
+        rows = cursor.fetchall()
+        
+        loras = []
+        for row in rows:
+            loras.append(dict(row))
+        return loras
+    
+    def update_lora_status(self, lora_id: str, status: str):
+        """更新LoRA模型状态"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        if status == "active":
+            # 先将所有其他LoRA设为inactive
+            cursor.execute('UPDATE loras SET status = ? WHERE id != ?', ('inactive', lora_id))
+        
+        # 更新指定LoRA的状态
+        cursor.execute('UPDATE loras SET status = ? WHERE id = ?', (status, lora_id))
+        
+        conn.commit()
+        
+        # 获取更新后的LoRA
+        cursor.execute('SELECT * FROM loras WHERE id = ?', (lora_id,))
+        row = cursor.fetchone()
+        
+        if row:
+            return dict(row)
+        return None
+    
+    @property
+    def config(self):
+        """获取配置"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM config')
+        rows = cursor.fetchall()
+        
+        config_dict = {}
+        for row in rows:
+            key = row['key']
+            value = row['value']
+            # 尝试转换类型
+            if value.lower() == 'true':
+                config_dict[key] = True
+            elif value.lower() == 'false':
+                config_dict[key] = False
+            else:
+                try:
+                    if '.' in value:
+                        config_dict[key] = float(value)
+                    else:
+                        config_dict[key] = int(value)
+                except:
+                    config_dict[key] = value
+        return config_dict
+
+    def get_config_value(self, key: str, default=None):
+        """获取单个配置项的值"""
+        config_dict = self.config
+        return config_dict.get(key, default)
+    
+    def update_config(self, new_config: Dict):
+        """更新配置"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        for key, value in new_config.items():
+            # 转换为字符串存储
+            if isinstance(value, bool):
+                value_str = str(value).lower()
+            else:
+                value_str = str(value)
+            
+            cursor.execute('''
+                INSERT OR REPLACE INTO config (key, value)
+                VALUES (?, ?)
+            ''', (key, value_str))
+        
+        conn.commit()
+    
+    @property
+    def messages(self):
+        """获取所有消息（兼容性）"""
+        return self.get_messages(limit=1000)
+    
+    @property
+    def loras(self):
+        """获取所有LoRA（兼容性）"""
+        return self.get_loras()
+    
+    # ============================================
+    # 知识库管理
+    # ============================================
+    def create_knowledge_base(self, name: str, description: str = ""):
+        """创建知识库"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now().isoformat()
+        try:
+            cursor.execute(
+                'INSERT INTO knowledge_bases (name, description, created_at, updated_at) VALUES (?, ?, ?, ?)',
+                (name, description, now, now)
+            )
+            conn.commit()
+            kb_id = cursor.lastrowid
+            return {"id": kb_id, "name": name, "description": description, "created_at": now, "updated_at": now}
+        except sqlite3.IntegrityError:
+            return None
+
+    def get_knowledge_bases(self):
+        """获取所有知识库"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM knowledge_bases ORDER BY updated_at DESC')
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            kb = dict(row)
+            # 统计文档数
+            cursor.execute('SELECT COUNT(*) as cnt FROM knowledge_documents WHERE knowledge_base_id = ?', (kb["id"],))
+            kb["documentCount"] = cursor.fetchone()["cnt"]
+            # 统计文件夹数
+            cursor.execute('SELECT COUNT(*) as cnt FROM knowledge_folders WHERE knowledge_base_id = ?', (kb["id"],))
+            kb["folderCount"] = cursor.fetchone()["cnt"]
+            result.append(kb)
+        return result
+
+    def get_knowledge_base(self, kb_id: int):
+        """获取单个知识库"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM knowledge_bases WHERE id = ?', (kb_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def update_knowledge_base(self, kb_id: int, data: Dict):
+        """更新知识库"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now().isoformat()
+        cursor.execute(
+            'UPDATE knowledge_bases SET name = ?, description = ?, updated_at = ? WHERE id = ?',
+            (data.get("name"), data.get("description", ""), now, kb_id)
+        )
+        conn.commit()
+        cursor.execute('SELECT * FROM knowledge_bases WHERE id = ?', (kb_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def delete_knowledge_base(self, kb_id: int):
+        """删除知识库（级联删除文件夹和文档）"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        # 先删除关联文档的chunks
+        cursor.execute(
+            'DELETE FROM knowledge_chunks WHERE documentId IN (SELECT id FROM knowledge_documents WHERE knowledge_base_id = ?)',
+            (kb_id,)
+        )
+        cursor.execute('DELETE FROM knowledge_documents WHERE knowledge_base_id = ?', (kb_id,))
+        cursor.execute('DELETE FROM knowledge_folders WHERE knowledge_base_id = ?', (kb_id,))
+        cursor.execute('DELETE FROM knowledge_bases WHERE id = ?', (kb_id,))
+        conn.commit()
+        return True
+
+    # ============================================
+    # 知识库文件夹管理
+    # ============================================
+    def create_knowledge_folder(self, kb_id: int, name: str, description: str = ""):
+        """创建知识库文件夹"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now().isoformat()
+        try:
+            cursor.execute(
+                'INSERT INTO knowledge_folders (knowledge_base_id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+                (kb_id, name, description, now, now)
+            )
+            conn.commit()
+            folder_id = cursor.lastrowid
+            return {"id": folder_id, "knowledge_base_id": kb_id, "name": name, "description": description, "created_at": now, "updated_at": now}
+        except sqlite3.IntegrityError:
+            return None
+
+    def get_knowledge_folders(self, kb_id: int):
+        """获取知识库下的所有文件夹"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM knowledge_folders WHERE knowledge_base_id = ? ORDER BY name', (kb_id,))
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            folder = dict(row)
+            cursor.execute('SELECT COUNT(*) as cnt FROM knowledge_documents WHERE folder_id = ?', (folder["id"],))
+            folder["documentCount"] = cursor.fetchone()["cnt"]
+            result.append(folder)
+        return result
+
+    def get_knowledge_folder(self, folder_id: int):
+        """获取单个文件夹"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM knowledge_folders WHERE id = ?', (folder_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def delete_knowledge_folder(self, folder_id: int):
+        """删除文件夹（文档的folder_id置空）"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE knowledge_documents SET folder_id = NULL WHERE folder_id = ?', (folder_id,))
+        cursor.execute('DELETE FROM knowledge_folders WHERE id = ?', (folder_id,))
+        conn.commit()
+        return True
+
+    # ============================================
+    # 知识库文档管理
+    # ============================================
+    def add_knowledge_document(self, document: Dict):
+        """添加知识库文档"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now().isoformat()
+
+        cursor.execute('''
+            INSERT INTO knowledge_documents (title, content, category, knowledge_base_id, folder_id, sourceType, sourceUrl, fileType, fileSize, chunkCount, createdAt, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            document.get("title", ""),
+            document.get("content", ""),
+            document.get("category", "未分类"),
+            document.get("knowledge_base_id"),
+            document.get("folder_id"),
+            document.get("sourceType", "text"),
+            document.get("sourceUrl"),
+            document.get("fileType"),
+            document.get("fileSize"),
+            document.get("chunkCount", 0),
+            now,
+            now
+        ))
+        
+        doc_id = cursor.lastrowid
+        conn.commit()
+        
+        return {
+            **document,
+            "id": doc_id,
+            "createdAt": now,
+            "updatedAt": now
+        }
+    
+    def get_knowledge_documents(self, limit: int = 100, offset: int = 0, category: Optional[str] = None, knowledge_base_id: Optional[int] = None, folder_id: Optional[int] = None):
+        """获取知识库文档列表，支持按分类/知识库/文件夹筛选"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        conditions = []
+        params = []
+        if category and category != "全部":
+            conditions.append("category = ?")
+            params.append(category)
+        if knowledge_base_id is not None:
+            conditions.append("knowledge_base_id = ?")
+            params.append(knowledge_base_id)
+        if folder_id is not None:
+            conditions.append("folder_id = ?")
+            params.append(folder_id)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        cursor.execute(
+            f'SELECT * FROM knowledge_documents {where} ORDER BY updatedAt DESC LIMIT ? OFFSET ?',
+            params + [limit, offset]
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    
+    def get_knowledge_document(self, doc_id: int):
+        """获取单个知识库文档"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM knowledge_documents WHERE id = ?', (doc_id,))
+        row = cursor.fetchone()
+        
+        if row:
+            return dict(row)
+        return None
+    
+    def update_knowledge_document(self, doc_id: int, document: Dict):
+        """更新知识库文档 - 只更新提供的字段"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now().isoformat()
+        
+        # 构建动态SET子句，只更新提供的字段
+        set_clauses = ["updatedAt = ?"]
+        values = [now]
+        
+        for key, value in document.items():
+            if key in ("id", "createdAt"):
+                continue
+            if value is not None:
+                set_clauses.append(f"{key} = ?")
+                values.append(value)
+        
+        values.append(doc_id)
+        
+        cursor.execute(
+            f'UPDATE knowledge_documents SET {", ".join(set_clauses)} WHERE id = ?',
+            values
+        )
+        
+        conn.commit()
+        
+        # 获取更新后的文档
+        cursor.execute('SELECT * FROM knowledge_documents WHERE id = ?', (doc_id,))
+        row = cursor.fetchone()
+        
+        if row:
+            return dict(row)
+        return None
+    
+    def delete_knowledge_document(self, doc_id: int):
+        """删除知识库文档"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('DELETE FROM knowledge_chunks WHERE documentId = ?', (doc_id,))
+        cursor.execute('DELETE FROM knowledge_documents WHERE id = ?', (doc_id,))
+        conn.commit()
+
+        return True
+    
+    def add_knowledge_chunk(self, chunk: Dict):
+        """添加知识库文档片段"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now().isoformat()
+        
+        cursor.execute('''
+            INSERT INTO knowledge_chunks (documentId, chunkIndex, content, embedding, createdAt)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (
+            chunk.get("documentId"),
+            chunk.get("chunkIndex"),
+            chunk.get("content"),
+            chunk.get("embedding"),
+            now
+        ))
+        
+        chunk_id = cursor.lastrowid
+        conn.commit()
+        
+        return {
+            **chunk,
+            "id": chunk_id,
+            "createdAt": now
+        }
+    
+    def get_knowledge_chunks(self, doc_id: int):
+        """获取文档的所有片段"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT * FROM knowledge_chunks 
+            WHERE documentId = ? 
+            ORDER BY chunkIndex
+        ''', (doc_id,))
+        rows = cursor.fetchall()
+        
+        chunks = []
+        for row in rows:
+            chunks.append(dict(row))
+        return chunks
+    
+    def get_all_knowledge_chunks(self):
+        """获取所有知识库片段（用于检索）"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM knowledge_chunks ORDER BY documentId, chunkIndex')
+        rows = cursor.fetchall()
+        
+        chunks = []
+        for row in rows:
+            chunks.append(dict(row))
+        return chunks
+    
+    def get_knowledge_stats(self):
+        """获取知识库统计数据"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT COUNT(*) as total FROM knowledge_documents')
+        total_docs = cursor.fetchone()['total']
+        
+        cursor.execute('SELECT COUNT(*) as total FROM knowledge_chunks')
+        total_chunks = cursor.fetchone()['total']
+        
+        cursor.execute('SELECT SUM(LENGTH(content)) as total_chars FROM knowledge_documents')
+        total_chars_result = cursor.fetchone()['total_chars']
+        total_chars = total_chars_result or 0
+        
+        return {
+            "totalDocuments": total_docs,
+            "totalChunks": total_chunks,
+            "totalCharacters": total_chars
+        }
+
+    # ============================================
+    # 会话管理
+    # ============================================
+
+    def get_session_summaries(self):
+        """获取所有会话的聚合统计信息"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # 按 sessionId 聚合：消息数、最近消息内容、最后活跃时间
+        cursor.execute('''
+            SELECT
+                sessionId,
+                sessionType,
+                sessionName,
+                COUNT(*) as message_count,
+                MAX(createdAt) as last_active,
+                GROUP_CONCAT(message, '||') as recent_messages
+            FROM messages
+            GROUP BY sessionId
+            ORDER BY last_active DESC
+        ''')
+        rows = cursor.fetchall()
+
+        sessions = []
+        for row in rows:
+            session_id = row['sessionId']
+            session_type = row['sessionType']
+            session_name = row['sessionName'] or session_id
+            message_count = row['message_count']
+            last_active = row['last_active']
+
+            # 从最近消息中提取摘要（取最近3条用户消息）
+            raw_msgs = (row['recent_messages'] or '').split('||')
+            recent = [m for m in raw_msgs if m.strip()][-3:]
+            summary = '；'.join(recent[:3])
+            if len(summary) > 100:
+                summary = summary[:100] + '...'
+
+            # 查询该会话的机器人开关状态
+            cursor.execute(
+                'SELECT bot_enabled FROM session_settings WHERE sessionId = ?',
+                (session_id,)
+            )
+            setting_row = cursor.fetchone()
+            bot_enabled = setting_row['bot_enabled'] if setting_row else 1
+
+            sessions.append({
+                'sessionId': session_id,
+                'sessionType': session_type,
+                'sessionName': session_name,
+                'messageCount': message_count,
+                'lastActive': last_active,
+                'summary': summary,
+                'botEnabled': bool(bot_enabled),
+            })
+
+        return sessions
+
+    def set_session_bot_enabled(self, session_id: str, enabled: bool):
+        """设置某个会话的机器人开关"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        cursor.execute('''
+            INSERT INTO session_settings (sessionId, sessionType, sessionName, bot_enabled, updated_at)
+            VALUES (?, 'private', ?, ?, ?)
+            ON CONFLICT(sessionId) DO UPDATE SET bot_enabled = ?, updated_at = ?
+        ''', (session_id, session_id, int(enabled), now, int(enabled), now))
+        conn.commit()
+
+    def is_session_bot_enabled(self, session_id: str) -> bool:
+        """检查某个会话的机器人是否启用（默认启用）"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT bot_enabled FROM session_settings WHERE sessionId = ?',
+            (session_id,)
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return True  # 默认启用
+        return bool(row['bot_enabled'])
+
+    # ── Claw 工具 CRUD ──
+
+    def get_claw_tools(self) -> list:
+        """获取所有自定义 Claw 工具"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM claw_tools ORDER BY created_at DESC')
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_claw_tool_by_name(self, name: str) -> dict | None:
+        """按名称获取单个工具"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM claw_tools WHERE name = ?', (name,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def save_claw_tool(self, name: str, description: str, code: str, enabled: bool = True) -> int:
+        """创建或更新自定义 Claw 工具，返回工具 id"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute('''
+            INSERT INTO claw_tools (name, description, code, enabled, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(name) DO UPDATE SET
+                description = excluded.description,
+                code = excluded.code,
+                enabled = excluded.enabled,
+                updated_at = excluded.updated_at
+        ''', (name, description, code, int(enabled), now, now))
+        conn.commit()
+        return cursor.lastrowid
+
+    def delete_claw_tool(self, name: str) -> bool:
+        """删除自定义 Claw 工具"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM claw_tools WHERE name = ?', (name,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+# 全局数据库实例
+db = SQLiteDB()

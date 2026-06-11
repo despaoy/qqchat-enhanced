@@ -1,0 +1,898 @@
+"""
+访问权限精细化控制模块 - 基于角色的访问控制(RBAC)
+
+提供完整的访问控制功能，包括：
+- 基于角色的访问控制（admin/operator/viewer/api_user）
+- API Key认证和管理
+- FastAPI依赖注入中间件
+- 权限检查装饰器
+- 速率限制（每API Key独立）
+- 审计日志
+
+使用方式：
+    from access_control import (
+        AccessControlManager, Permission, Role,
+        require_permission, get_current_user
+    )
+
+    # FastAPI依赖注入
+    @router.post("/config")
+    async def update_config(user: dict = Depends(get_current_user)):
+        ...
+
+    # 权限检查装饰器
+    @router.delete("/loras/{id}")
+    @require_permission(Permission.DELETE_LORA)
+    async def delete_lora(id: str):
+        ...
+"""
+
+from __future__ import annotations
+
+import asyncio
+import functools
+import hashlib
+import logging
+import os
+import secrets
+import sqlite3
+import time
+from contextlib import contextmanager
+from enum import Enum, Flag, auto
+from pathlib import Path
+from typing import Any, Callable, Generator, Optional
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# 常量
+# ---------------------------------------------------------------------------
+
+# API Key前缀
+_API_KEY_PREFIX = "qqa_"
+
+# API Key随机部分长度（十六进制字符数）
+_API_KEY_RANDOM_LENGTH = 32
+
+# 默认速率限制：每分钟请求数
+_DEFAULT_RATE_LIMIT = 60
+
+# 速率限制窗口（秒）
+_RATE_LIMIT_WINDOW = 60
+
+# 审计日志最大保留条数
+_MAX_AUDIT_LOG_ENTRIES = 10000
+
+# 数据库路径
+_DB_PATH = Path(__file__).parent / "qq_assistant.db"
+
+
+# ---------------------------------------------------------------------------
+# 权限枚举
+# ---------------------------------------------------------------------------
+
+class Permission(Flag):
+    """系统权限枚举，使用Flag支持权限组合。"""
+
+    # 读取权限
+    READ_STATS = auto()
+    READ_MESSAGES = auto()
+    READ_LORAS = auto()
+    READ_KNOWLEDGE = auto()
+
+    # 写入权限
+    WRITE_CONFIG = auto()
+    WRITE_KNOWLEDGE = auto()
+    START_TRAINING = auto()
+
+    # 删除权限
+    DELETE_LORA = auto()
+    DELETE_KNOWLEDGE = auto()
+    CANCEL_TRAINING = auto()
+
+    # API调用权限
+    GENERATE_REPLY = auto()
+    SEARCH_KNOWLEDGE = auto()
+
+    # 用户管理权限
+    MANAGE_USERS = auto()
+
+    # 权限组
+    READ_ALL = READ_STATS | READ_MESSAGES | READ_LORAS | READ_KNOWLEDGE
+    WRITE_ALL = WRITE_CONFIG | WRITE_KNOWLEDGE | START_TRAINING
+    DELETE_ALL = DELETE_LORA | DELETE_KNOWLEDGE | CANCEL_TRAINING
+    API_ALL = GENERATE_REPLY | SEARCH_KNOWLEDGE
+    ALL = READ_ALL | WRITE_ALL | DELETE_ALL | API_ALL | MANAGE_USERS
+
+
+# ---------------------------------------------------------------------------
+# 角色定义
+# ---------------------------------------------------------------------------
+
+class Role(Enum):
+    """系统角色定义，每个角色关联一组权限。"""
+
+    ADMIN = "admin"
+    OPERATOR = "operator"
+    VIEWER = "viewer"
+    API_USER = "api_user"
+
+
+# 角色-权限映射
+_ROLE_PERMISSIONS: dict[Role, Permission] = {
+    Role.ADMIN: Permission.ALL,
+    Role.OPERATOR: (
+        Permission.READ_ALL
+        | Permission.WRITE_ALL
+        | Permission.API_ALL
+    ),
+    Role.VIEWER: Permission.READ_ALL,
+    Role.API_USER: (
+        Permission.READ_STATS
+        | Permission.GENERATE_REPLY
+        | Permission.SEARCH_KNOWLEDGE
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
+# 异常类
+# ---------------------------------------------------------------------------
+
+class AuthenticationError(Exception):
+    """认证失败异常。"""
+    pass
+
+
+class AuthorizationError(Exception):
+    """授权失败异常。"""
+    pass
+
+
+class RateLimitError(Exception):
+    """速率限制超出异常。"""
+
+    def __init__(self, retry_after: int = 60) -> None:
+        self.retry_after = retry_after
+        super().__init__(f"请求频率超限，请 {retry_after} 秒后重试")
+
+
+class APIKeyError(Exception):
+    """API Key操作异常。"""
+    pass
+
+
+# ---------------------------------------------------------------------------
+# 速率限制器
+# ---------------------------------------------------------------------------
+
+class RateLimiter:
+    """基于滑动窗口的速率限制器。
+
+    每个API Key独立计数，使用内存存储请求时间戳。
+
+    Attributes:
+        _windows: API Key到请求时间戳列表的映射
+        _limit: 窗口内允许的最大请求数
+        _window_seconds: 窗口时间（秒）
+    """
+
+    def __init__(
+        self,
+        limit: int = _DEFAULT_RATE_LIMIT,
+        window_seconds: int = _RATE_LIMIT_WINDOW,
+    ) -> None:
+        """初始化速率限制器。
+
+        Args:
+            limit: 窗口内允许的最大请求数
+            window_seconds: 窗口时间（秒）
+        """
+        self._limit = limit
+        self._window_seconds = window_seconds
+        self._windows: dict[str, list[float]] = {}
+        self._lock = asyncio.Lock()
+        logger.info("速率限制器初始化: %d次/%d秒", limit, window_seconds)
+
+    async def check(self, api_key: str) -> bool:
+        """检查API Key是否在速率限制内。
+
+        如果超出限制，抛出RateLimitError。
+
+        Args:
+            api_key: API Key
+
+        Returns:
+            True如果请求被允许
+
+        Raises:
+            RateLimitError: 超出速率限制
+        """
+        async with self._lock:
+            now = time.time()
+            window_start = now - self._window_seconds
+
+            # 获取或创建请求记录
+            if api_key not in self._windows:
+                self._windows[api_key] = []
+
+            # 清理过期记录
+            self._windows[api_key] = [
+                ts for ts in self._windows[api_key] if ts > window_start
+            ]
+
+            # 检查限制
+            if len(self._windows[api_key]) >= self._limit:
+                oldest = self._windows[api_key][0]
+                retry_after = int(oldest + self._window_seconds - now) + 1
+                logger.warning("API Key %s*** 速率限制触发", api_key[:8])
+                raise RateLimitError(retry_after=max(1, retry_after))
+
+            # 记录本次请求
+            self._windows[api_key].append(now)
+            return True
+
+    def cleanup(self) -> None:
+        """清理所有过期的请求记录，释放内存。"""
+        now = time.time()
+        window_start = now - self._window_seconds
+        expired_keys = []
+
+        for key, timestamps in self._windows.items():
+            self._windows[key] = [ts for ts in timestamps if ts > window_start]
+            if not self._windows[key]:
+                expired_keys.append(key)
+
+        for key in expired_keys:
+            del self._windows[key]
+
+        logger.debug("速率限制器清理完成，活跃Key数: %d", len(self._windows))
+
+
+# ---------------------------------------------------------------------------
+# 审计日志
+# ---------------------------------------------------------------------------
+
+class AuditLogger:
+    """审计日志记录器，记录所有敏感操作。
+
+    审计日志存储在SQLite数据库的audit_logs表中。
+    """
+
+    def __init__(self, db_path: str | Path = _DB_PATH) -> None:
+        """初始化审计日志记录器。
+
+        Args:
+            db_path: SQLite数据库文件路径
+        """
+        self._db_path = str(db_path)
+        self._init_table()
+
+    def _init_table(self) -> None:
+        """初始化审计日志表。"""
+        with self._get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS audit_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp REAL NOT NULL,
+                    api_key_hash TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    resource TEXT,
+                    detail TEXT,
+                    ip_address TEXT
+                )
+            """)
+            conn.commit()
+
+    @contextmanager
+    def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
+        """获取数据库连接的上下文管理器。"""
+        conn = sqlite3.connect(self._db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    def log(
+        self,
+        api_key_hash: str,
+        role: str,
+        action: str,
+        resource: Optional[str] = None,
+        detail: Optional[str] = None,
+        ip_address: Optional[str] = None,
+    ) -> None:
+        """记录审计日志。
+
+        Args:
+            api_key_hash: API Key的哈希值（不存储原始Key）
+            role: 操作者角色
+            action: 操作类型
+            resource: 操作的资源标识
+            detail: 操作详情
+            ip_address: 请求来源IP
+        """
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO audit_logs (timestamp, api_key_hash, role, action, resource, detail, ip_address)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (time.time(), api_key_hash, role, action, resource, detail, ip_address),
+                )
+                conn.commit()
+
+                # 清理过多的日志
+                conn.execute(
+                    "DELETE FROM audit_logs WHERE id NOT IN "
+                    "(SELECT id FROM audit_logs ORDER BY id DESC LIMIT ?)",
+                    (_MAX_AUDIT_LOG_ENTRIES,),
+                )
+                conn.commit()
+
+            logger.debug("审计日志已记录: %s %s", action, resource or "")
+        except Exception as exc:
+            logger.error("审计日志记录失败: %s", exc)
+
+    def get_logs(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        role: Optional[str] = None,
+        action: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """查询审计日志。
+
+        Args:
+            limit: 返回条数上限
+            offset: 偏移量
+            role: 按角色筛选
+            action: 按操作类型筛选
+
+        Returns:
+            审计日志列表
+        """
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        if role:
+            conditions.append("role = ?")
+            params.append(role)
+        if action:
+            conditions.append("action = ?")
+            params.append(action)
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        query = f"""
+            SELECT * FROM audit_logs {where_clause}
+            ORDER BY id DESC LIMIT ? OFFSET ?
+        """
+        params.extend([limit, offset])
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(query, params)
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as exc:
+            logger.error("查询审计日志失败: %s", exc)
+            return []
+
+
+# ---------------------------------------------------------------------------
+# 访问控制管理器
+# ---------------------------------------------------------------------------
+
+class AccessControlManager:
+    """基于角色的访问控制管理器。
+
+    提供API Key管理、认证、授权和速率限制功能。
+
+    Attributes:
+        _db_path: SQLite数据库路径
+        _rate_limiter: 速率限制器
+        _audit_logger: 审计日志记录器
+    """
+
+    def __init__(
+        self,
+        db_path: str | Path = _DB_PATH,
+        rate_limit: int = _DEFAULT_RATE_LIMIT,
+    ) -> None:
+        """初始化访问控制管理器。
+
+        Args:
+            db_path: SQLite数据库路径
+            rate_limit: 每分钟默认请求限制
+        """
+        self._db_path = str(db_path)
+        self._rate_limiter = RateLimiter(limit=rate_limit)
+        self._audit_logger = AuditLogger(db_path)
+        self._init_tables()
+        logger.info("AccessControlManager 初始化完成")
+
+    def _init_tables(self) -> None:
+        """初始化数据库表。"""
+        with self._get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key_hash TEXT NOT NULL UNIQUE,
+                    key_prefix TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    description TEXT,
+                    created_at REAL NOT NULL,
+                    revoked_at REAL,
+                    last_used_at REAL,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    rate_limit INTEGER
+                )
+            """)
+            conn.commit()
+
+    @contextmanager
+    def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
+        """获取数据库连接的上下文管理器。"""
+        conn = sqlite3.connect(self._db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _hash_api_key(api_key: str) -> str:
+        """计算API Key的SHA-256哈希值。
+
+        使用SHA-256对API Key进行哈希，存储哈希值而非原始Key。
+
+        Args:
+            api_key: 原始API Key
+
+        Returns:
+            十六进制格式的哈希值
+        """
+        return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+
+    # -------------------------------------------------------------------
+    # API Key管理
+    # -------------------------------------------------------------------
+
+    def create_api_key(
+        self,
+        role: Role,
+        description: Optional[str] = None,
+        rate_limit: Optional[int] = None,
+    ) -> dict[str, Any]:
+        """创建新的API Key。
+
+        API Key格式：qqa_{role}_{random_hex}
+
+        Args:
+            role: 关联的角色
+            description: Key的描述信息
+            rate_limit: 自定义速率限制（None则使用默认值）
+
+        Returns:
+            包含API Key和元数据的字典
+
+        Raises:
+            APIKeyError: 创建失败
+        """
+        # 生成API Key
+        random_hex = secrets.token_hex(_API_KEY_RANDOM_LENGTH // 2)
+        api_key = f"{_API_KEY_PREFIX}{role.value}_{random_hex}"
+        key_hash = self._hash_api_key(api_key)
+        key_prefix = f"{_API_KEY_PREFIX}{role.value}_"
+        created_at = time.time()
+
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO api_keys (key_hash, key_prefix, role, description, created_at, rate_limit)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (key_hash, key_prefix, role.value, description, created_at, rate_limit),
+                )
+                conn.commit()
+
+            logger.info("API Key创建成功: %s*** (角色: %s)", key_prefix, role.value)
+
+            # 审计日志
+            self._audit_logger.log(
+                api_key_hash=key_hash,
+                role=role.value,
+                action="create_api_key",
+                detail=f"创建了角色为 {role.value} 的API Key",
+            )
+
+            return {
+                "api_key": api_key,
+                "key_prefix": key_prefix,
+                "role": role.value,
+                "description": description,
+                "created_at": created_at,
+                "rate_limit": rate_limit,
+            }
+        except Exception as exc:
+            logger.error("创建API Key失败: %s", exc)
+            raise APIKeyError(f"创建API Key失败: {exc}") from exc
+
+    def revoke_api_key(self, api_key: str) -> bool:
+        """吊销API Key。
+
+        Args:
+            api_key: 要吊销的API Key
+
+        Returns:
+            True如果成功吊销，False如果Key不存在或已吊销
+
+        Raises:
+            APIKeyError: 吊销操作失败
+        """
+        key_hash = self._hash_api_key(api_key)
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE api_keys
+                    SET is_active = 0, revoked_at = ?
+                    WHERE key_hash = ? AND is_active = 1
+                    """,
+                    (time.time(), key_hash),
+                )
+                conn.commit()
+
+                revoked = cursor.rowcount > 0
+
+            if revoked:
+                logger.info("API Key已吊销: %s***", api_key[:12])
+
+                self._audit_logger.log(
+                    api_key_hash=key_hash,
+                    role="system",
+                    action="revoke_api_key",
+                    detail="API Key已被吊销",
+                )
+
+            return revoked
+        except Exception as exc:
+            logger.error("吊销API Key失败: %s", exc)
+            raise APIKeyError(f"吊销API Key失败: {exc}") from exc
+
+    def list_api_keys(self, include_revoked: bool = False) -> list[dict[str, Any]]:
+        """列出所有API Key。
+
+        注意：不返回完整的Key，仅返回前缀和元数据。
+
+        Args:
+            include_revoked: 是否包含已吊销的Key
+
+        Returns:
+            API Key元数据列表
+        """
+        query = "SELECT key_prefix, role, description, created_at, revoked_at, is_active, rate_limit FROM api_keys"
+        if not include_revoked:
+            query += " WHERE is_active = 1"
+        query += " ORDER BY created_at DESC"
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(query)
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as exc:
+            logger.error("列出API Key失败: %s", exc)
+            return []
+
+    # -------------------------------------------------------------------
+    # 认证与授权
+    # -------------------------------------------------------------------
+
+    async def authenticate(self, api_key: str) -> dict[str, Any]:
+        """认证API Key，返回关联的用户信息。
+
+        同时执行速率限制检查。
+
+        Args:
+            api_key: 请求中的API Key
+
+        Returns:
+            用户信息字典，包含 role, permissions, key_hash 等
+
+        Raises:
+            AuthenticationError: 认证失败
+            RateLimitError: 速率限制超出
+        """
+        if not api_key:
+            raise AuthenticationError("缺少API Key")
+
+        key_hash = self._hash_api_key(api_key)
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    """
+                    SELECT key_hash, role, is_active, rate_limit
+                    FROM api_keys
+                    WHERE key_hash = ?
+                    """,
+                    (key_hash,),
+                )
+                row = cursor.fetchone()
+
+            if row is None:
+                logger.warning("认证失败: 无效的API Key %s***", api_key[:8])
+                raise AuthenticationError("无效的API Key")
+
+            if not row["is_active"]:
+                logger.warning("认证失败: API Key已吊销 %s***", api_key[:8])
+                raise AuthenticationError("API Key已被吊销")
+
+            role = Role(row["role"])
+            permissions = _ROLE_PERMISSIONS.get(role, Permission(0))
+
+            # 更新最后使用时间
+            with self._get_connection() as conn:
+                conn.execute(
+                    "UPDATE api_keys SET last_used_at = ? WHERE key_hash = ?",
+                    (time.time(), key_hash),
+                )
+                conn.commit()
+
+            # 速率限制检查
+            custom_limit = row["rate_limit"]
+            if custom_limit:
+                # 使用自定义限制创建临时检查
+                temp_limiter = RateLimiter(limit=custom_limit)
+                await temp_limiter.check(api_key)
+            else:
+                await self._rate_limiter.check(api_key)
+
+            return {
+                "role": role,
+                "permissions": permissions,
+                "key_hash": key_hash,
+                "rate_limit": custom_limit or _DEFAULT_RATE_LIMIT,
+            }
+
+        except (AuthenticationError, RateLimitError):
+            raise
+        except Exception as exc:
+            logger.error("认证过程异常: %s", exc)
+            raise AuthenticationError(f"认证失败: {exc}") from exc
+
+    def authorize(self, user_info: dict[str, Any], required_permission: Permission) -> bool:
+        """检查用户是否拥有所需权限。
+
+        Args:
+            user_info: authenticate()返回的用户信息
+            required_permission: 需要的权限
+
+        Returns:
+            True如果用户拥有所需权限
+
+        Raises:
+            AuthorizationError: 权限不足
+        """
+        user_permissions: Permission = user_info.get("permissions", Permission(0))
+
+        if not (user_permissions & required_permission):
+            role = user_info.get("role", Role.VIEWER)
+            logger.warning(
+                "授权失败: 角色 %s 缺少权限 %s",
+                role.value if isinstance(role, Role) else role,
+                required_permission.name,
+            )
+            raise AuthorizationError(
+                f"权限不足：需要 {required_permission.name} 权限"
+            )
+
+        return True
+
+    # -------------------------------------------------------------------
+    # 审计日志
+    # -------------------------------------------------------------------
+
+    def get_audit_logs(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        role: Optional[str] = None,
+        action: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """查询审计日志。
+
+        Args:
+            limit: 返回条数上限
+            offset: 偏移量
+            role: 按角色筛选
+            action: 按操作类型筛选
+
+        Returns:
+            审计日志列表
+        """
+        return self._audit_logger.get_logs(limit, offset, role, action)
+
+    def log_action(
+        self,
+        user_info: dict[str, Any],
+        action: str,
+        resource: Optional[str] = None,
+        detail: Optional[str] = None,
+        ip_address: Optional[str] = None,
+    ) -> None:
+        """记录用户操作审计日志。
+
+        Args:
+            user_info: 用户信息
+            action: 操作类型
+            resource: 操作资源
+            detail: 操作详情
+            ip_address: 请求IP
+        """
+        role = user_info.get("role", Role.VIEWER)
+        role_value = role.value if isinstance(role, Role) else str(role)
+        key_hash = user_info.get("key_hash", "unknown")
+
+        self._audit_logger.log(
+            api_key_hash=key_hash,
+            role=role_value,
+            action=action,
+            resource=resource,
+            detail=detail,
+            ip_address=ip_address,
+        )
+
+
+# ---------------------------------------------------------------------------
+# FastAPI集成
+# ---------------------------------------------------------------------------
+
+def get_current_user() -> Callable:
+    """FastAPI依赖注入函数，从请求头获取并验证API Key。
+
+    从X-API-Key请求头读取API Key，执行认证和速率限制。
+
+    Returns:
+        依赖注入函数
+
+    使用示例:
+        from fastapi import Depends
+
+        @router.get("/stats")
+        async def get_stats(user: dict = Depends(get_current_user())):
+            ...
+    """
+    from fastapi import Request
+
+    _manager: Optional[AccessControlManager] = None
+
+    async def _get_user(request: Request) -> dict[str, Any]:
+        nonlocal _manager
+        if _manager is None:
+            _manager = AccessControlManager()
+
+        api_key = request.headers.get("X-API-Key", "")
+        if not api_key:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=401,
+                detail="缺少API Key，请在请求头中提供 X-API-Key",
+            )
+
+        try:
+            user_info = await _manager.authenticate(api_key)
+            # 将用户信息存储到request.state供后续使用
+            request.state.user = user_info
+            return user_info
+        except AuthenticationError as exc:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+        except RateLimitError as exc:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=429,
+                detail=str(exc),
+                headers={"Retry-After": str(exc.retry_after)},
+            ) from exc
+
+    return _get_user
+
+
+def require_permission(permission: Permission) -> Callable:
+    """权限检查装饰器，用于FastAPI路由函数。
+
+    需要与get_current_user()依赖注入配合使用。
+
+    Args:
+        permission: 需要的权限
+
+    Returns:
+        装饰器函数
+
+    使用示例:
+        @router.delete("/loras/{id}")
+        @require_permission(Permission.DELETE_LORA)
+        async def delete_lora(id: str, user: dict = Depends(get_current_user())):
+            ...
+    """
+    _manager: Optional[AccessControlManager] = None
+
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            nonlocal _manager
+            if _manager is None:
+                _manager = AccessControlManager()
+
+            # 从kwargs中查找user参数
+            user_info = kwargs.get("user")
+
+            # 如果没有在kwargs中，尝试从args中查找
+            if user_info is None:
+                for arg in args:
+                    if isinstance(arg, dict) and "permissions" in arg:
+                        user_info = arg
+                        break
+
+            # 尝试从request.state获取
+            if user_info is None:
+                for arg in args:
+                    if hasattr(arg, "state") and hasattr(arg.state, "user"):
+                        user_info = arg.state.user
+                        break
+
+            if user_info is None:
+                from fastapi import HTTPException
+                raise HTTPException(
+                    status_code=401,
+                    detail="未认证，请先通过API Key认证",
+                )
+
+            try:
+                _manager.authorize(user_info, permission)
+
+                # 记录审计日志
+                _manager.log_action(
+                    user_info=user_info,
+                    action=func.__name__,
+                    resource=str(kwargs.get("id", "")),
+                )
+
+            except AuthorizationError as exc:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+            return await func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+# ---------------------------------------------------------------------------
+# 全局单例（懒加载）
+# ---------------------------------------------------------------------------
+
+_access_control_manager: Optional[AccessControlManager] = None
+
+
+def get_access_control_manager() -> AccessControlManager:
+    """获取全局访问控制管理器单例。
+
+    Returns:
+        AccessControlManager实例
+    """
+    global _access_control_manager
+    if _access_control_manager is None:
+        _access_control_manager = AccessControlManager()
+    return _access_control_manager
