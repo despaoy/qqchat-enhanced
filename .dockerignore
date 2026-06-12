@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+*.md
+.env
+.env.local
+backend/venv
+backend/__pycache__
+backend/**/__pycache__
+backend/*.db
+backend/knowledge_bases
+backend/loras
+deploy

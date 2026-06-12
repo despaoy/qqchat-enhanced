@@ -13,15 +13,6 @@
 
 const API_BASE_URL = '/api';
 
-/**
- * 从 localStorage 获取 JWT token，构建 Authorization header
- */
-function getAuthHeaders(): Record<string, string> {
-  if (typeof window === 'undefined') return {};
-  const token = localStorage.getItem('qq_assistant_token');
-  return token ? { 'Authorization': `Bearer ${token}` } : {};
-}
-
 /** 系统统计响应 - 包含今日回复数、响应时间、活跃会话、资源使用等指标 */
 export interface StatsResponse {
   todayReplies: number;
@@ -582,22 +573,60 @@ export interface MemoryInfoResponse {
  */
 class ApiClient {
   /**
-   * 通用请求方法 - 封装 fetch 调用，统一处理请求头和错误
+   * 通用请求方法 - 封装 fetch 调用，统一处理认证、请求头和错误
+   *
+   * 统一特性：
+   * - credentials: 'include' 确保 httpOnly Cookie 随请求发送（Edge浏览器兼容）
+   * - 自动注入 Content-Type: application/json（有body时）
+   * - 统一错误处理：尝试提取后端错误信息
+   *
    * @param {string} path - API 路径（相对于 /api）
    * @param {RequestInit} [options] - fetch 选项
    * @returns {Promise<T>} 解析后的 JSON 响应
    */
   private async request<T>(path: string, options?: RequestInit): Promise<T> {
-    const response = await fetch(`${API_BASE_URL}${path}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
-      ...options,
-    });
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
+    const hasBody = options?.body !== undefined;
+    const headers: Record<string, string> = {};
+
+    // 有请求体时自动设置 Content-Type（FormData 除外，让浏览器自动设置 boundary）
+    if (hasBody && !(options?.body instanceof FormData)) {
+      headers['Content-Type'] = 'application/json';
     }
+
+    // 合并自定义 headers
+    if (options?.headers) {
+      if (options.headers instanceof Headers) {
+        options.headers.forEach((v, k) => { headers[k] = v; });
+      } else if (Array.isArray(options.headers)) {
+        for (const [k, v] of options.headers) { headers[k] = v; }
+      } else {
+        Object.assign(headers, options.headers);
+      }
+    }
+
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      credentials: 'include',
+      ...options,
+      headers,
+    });
+
+    if (!response.ok) {
+      // 尝试提取后端错误详情
+      let detail = '';
+      try {
+        const errBody = await response.json();
+        detail = errBody?.detail || errBody?.message || JSON.stringify(errBody);
+      } catch {
+        detail = response.statusText;
+      }
+      throw new Error(`Request failed: ${response.status} - ${detail}`);
+    }
+
+    // 204 No Content
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
     return response.json();
   }
 
@@ -605,15 +634,10 @@ class ApiClient {
    * 批量删除消息（基于筛选条件）
    */
   async deleteMessagesBatch(filters: { search?: string; sessionType?: string; lora?: string; sessionName?: string }): Promise<{ success: boolean; deleted: number; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/messages/batch`, {
+    return this.request<{ success: boolean; deleted: number; message: string }>('/messages/batch', {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(filters),
     });
-    if (!response.ok) {
-      throw new Error('Failed to delete messages batch');
-    }
-    return response.json();
   }
 
   /**
@@ -621,10 +645,9 @@ class ApiClient {
    * @returns {Promise<HealthResponse>} 服务健康状态及时间戳
    */
   async health(): Promise<HealthResponse> {
-    const response = await fetch(`${API_BASE_URL.replace('/api', '')}/health`);
-    if (!response.ok) {
-      throw new Error('Health check failed');
-    }
+    // 健康检查端点在 /health，不在 /api/health 下
+    const response = await fetch('/health', { credentials: 'include' });
+    if (!response.ok) throw new Error('Health check failed');
     return response.json();
   }
 
@@ -633,11 +656,7 @@ class ApiClient {
    * @returns {Promise<StatsResponse>} 包含今日回复数、响应时间、活跃会话、CPU/内存/GPU 等指标
    */
   async getStats(): Promise<StatsResponse> {
-    const response = await fetch(`${API_BASE_URL}/stats`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch stats');
-    }
-    return response.json();
+    return this.request<StatsResponse>('/stats');
   }
 
   /**
@@ -650,13 +669,8 @@ class ApiClient {
     const params = new URLSearchParams();
     if (limit) params.append('limit', limit.toString());
     if (offset) params.append('offset', offset.toString());
-    
-    const url = `${API_BASE_URL}/messages${params.toString() ? '?' + params.toString() : ''}`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error('Failed to fetch messages');
-    }
-    return response.json();
+    const qs = params.toString();
+    return this.request<MessagesResponse>(`/messages${qs ? '?' + qs : ''}`);
   }
 
   /**
@@ -664,39 +678,26 @@ class ApiClient {
    * @param {string} id - 消息 ID
    */
   async deleteMessage(id: string): Promise<{ success: boolean; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/messages/${id}`, {
+    return this.request<{ success: boolean; message: string }>(`/messages/${id}`, {
       method: 'DELETE',
     });
-    if (!response.ok) {
-      throw new Error('Failed to delete message');
-    }
-    return response.json();
   }
 
   /**
    * 获取会话列表（聚合统计）
    */
   async getSessionSummaries(): Promise<SessionsResponse> {
-    const response = await fetch(`${API_BASE_URL}/sessions`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch sessions');
-    }
-    return response.json();
+    return this.request<SessionsResponse>('/sessions');
   }
 
   /**
    * 设置会话机器人开关
    */
   async toggleSessionBot(sessionId: string, enabled: boolean): Promise<{ success: boolean; sessionId: string; botEnabled: boolean }> {
-    const response = await fetch(`${API_BASE_URL}/sessions/bot-toggle`, {
+    return this.request<{ success: boolean; sessionId: string; botEnabled: boolean }>('/sessions/bot-toggle', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId, enabled }),
     });
-    if (!response.ok) {
-      throw new Error('Failed to toggle session bot');
-    }
-    return response.json();
   }
 
   /**
@@ -704,11 +705,7 @@ class ApiClient {
    * @returns {Promise<LorasResponse>} LoRA 模型列表及总数
    */
   async getLoras(): Promise<LorasResponse> {
-    const response = await fetch(`${API_BASE_URL}/loras`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch loras');
-    }
-    const data = await response.json();
+    const data = await this.request<{ loras: LoraModel[] }>('/loras');
     return {
       loras: data.loras,
       total: data.loras.length
@@ -723,17 +720,10 @@ class ApiClient {
    */
   async toggleLoraStatus(id: string, currentStatus: string): Promise<LoraModel> {
     const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
-    const response = await fetch(`${API_BASE_URL}/loras/${id}/status`, {
+    const result = await this.request<{ lora: LoraModel }>(`/loras/${id}/status`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify({ status: newStatus }),
     });
-    if (!response.ok) {
-      throw new Error('Failed to toggle lora status');
-    }
-    const result = await response.json();
     return result.lora;
   }
 
@@ -743,26 +733,18 @@ class ApiClient {
    * @returns {Promise<{success: boolean; message: string}>} 删除结果
    */
   async deleteLora(id: string): Promise<{ success: boolean; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/loras/${id}`, {
+    return this.request<{ success: boolean; message: string }>(`/loras/${id}`, {
       method: 'DELETE',
     });
-    if (!response.ok) {
-      throw new Error('Failed to delete lora');
-    }
-    return response.json();
   }
 
   /**
    * 扫描 loras 目录，自动发现并注册新的 LoRA 适配器
    */
   async scanLoras(): Promise<{ success: boolean; message: string; new_count: number }> {
-    const response = await fetch(`${API_BASE_URL}/loras/scan`, {
+    return this.request<{ success: boolean; message: string; new_count: number }>('/loras/scan', {
       method: 'POST',
     });
-    if (!response.ok) {
-      throw new Error('扫描LoRA失败');
-    }
-    return response.json();
   }
 
   /**
@@ -771,17 +753,10 @@ class ApiClient {
    * @returns {Promise<GenerateResponse>} 机器人回复内容及耗时
    */
   async generateReply(request: GenerateRequest): Promise<GenerateResponse> {
-    const response = await fetch(`${API_BASE_URL}/generate`, {
+    return this.request<GenerateResponse>('/generate', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify(request),
     });
-    if (!response.ok) {
-      throw new Error('Failed to generate reply');
-    }
-    return response.json();
   }
 
   /**
@@ -789,11 +764,7 @@ class ApiClient {
    * @returns {Promise<ActivityResponse>} 每小时的接收消息数和回复消息数
    */
   async getActivity(): Promise<ActivityResponse> {
-    const response = await fetch(`${API_BASE_URL}/stats/activity`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch activity');
-    }
-    return response.json();
+    return this.request<ActivityResponse>('/stats/activity');
   }
 
   /**
@@ -801,11 +772,7 @@ class ApiClient {
    * @returns {Promise<ServicesResponse>} 各服务名称、状态、运行时长
    */
   async getServices(): Promise<ServicesResponse> {
-    const response = await fetch(`${API_BASE_URL}/stats/services`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch services');
-    }
-    return response.json();
+    return this.request<ServicesResponse>('/stats/services');
   }
 
 
@@ -814,11 +781,7 @@ class ApiClient {
    * @returns {Promise<DatasetsResponse>} 数据集列表
    */
   async listDatasets(): Promise<DatasetsResponse> {
-    const response = await fetch(`${API_BASE_URL}/training/datasets`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch datasets');
-    }
-    return response.json();
+    return this.request<DatasetsResponse>('/training/datasets');
   }
 
   /**
@@ -827,17 +790,10 @@ class ApiClient {
    * @returns {Promise<{success: boolean; message: string; dataset_name: string}>} 创建结果
    */
   async createDataset(request: CreateDatasetRequest): Promise<{ success: boolean; message: string; dataset_name: string }> {
-    const response = await fetch(`${API_BASE_URL}/training/datasets`, {
+    return this.request<{ success: boolean; message: string; dataset_name: string }>('/training/datasets', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify(request),
     });
-    if (!response.ok) {
-      throw new Error('Failed to create dataset');
-    }
-    return response.json();
   }
 
   /**
@@ -845,11 +801,7 @@ class ApiClient {
    * @returns {Promise<ModelConfigsResponse>} GPU 优化训练配置列表
    */
   async listModelConfigs(): Promise<ModelConfigsResponse> {
-    const response = await fetch(`${API_BASE_URL}/training/models`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch model configs');
-    }
-    return response.json();
+    return this.request<ModelConfigsResponse>('/training/models');
   }
 
   /**
@@ -858,7 +810,9 @@ class ApiClient {
    * @returns {Promise<Response>} ZIP 文件的 Response 对象
    */
   async exportDataset(datasetName: string): Promise<Response> {
-    const response = await fetch(`${API_BASE_URL}/training/datasets/${encodeURIComponent(datasetName)}/export`);
+    const response = await fetch(`${API_BASE_URL}/training/datasets/${encodeURIComponent(datasetName)}/export`, {
+      credentials: 'include',
+    });
     return response;
   }
 
@@ -868,26 +822,17 @@ class ApiClient {
    */
   async scanDatasets(folder?: string): Promise<{ success: boolean; scan_path: string; datasets: Array<{ name: string; path: string; file_count: number; files: string[]; valid: boolean }>; count: number }> {
     const params = folder ? `?folder=${encodeURIComponent(folder)}` : '';
-    const response = await fetch(`${API_BASE_URL}/training/datasets/scan${params}`);
-    if (!response.ok) {
-      throw new Error('Failed to scan datasets');
-    }
-    return response.json();
+    return this.request<{ success: boolean; scan_path: string; datasets: Array<{ name: string; path: string; file_count: number; files: string[]; valid: boolean }>; count: number }>(`/training/datasets/scan${params}`);
   }
 
   /**
    * 从扫描结果导入数据集
    */
   async importDataset(sourcePath: string, datasetName?: string): Promise<{ success: boolean; name: string; path: string; stats: { total: number; train: number; eval: number } }> {
-    const response = await fetch(`${API_BASE_URL}/training/datasets/scan/import`, {
+    return this.request<{ success: boolean; name: string; path: string; stats: { total: number; train: number; eval: number } }>('/training/datasets/scan/import', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ source_path: sourcePath, dataset_name: datasetName }),
     });
-    if (!response.ok) {
-      throw new Error('Failed to import dataset');
-    }
-    return response.json();
   }
 
   /**
@@ -896,19 +841,10 @@ class ApiClient {
    * @returns {Promise<{success: boolean; task_id: string; message: string}>} 启动的训练任务信息
    */
   async startTraining(request: StartTrainingRequest): Promise<{ success: boolean; task_id: string; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/training/start`, {
+    return this.request<{ success: boolean; task_id: string; message: string }>('/training/start', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify(request),
     });
-    const data = await response.json();
-    if (!response.ok) {
-      const msg = data.message || data.detail || '启动训练失败';
-      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
-    }
-    return data;
   }
 
   /**
@@ -916,11 +852,7 @@ class ApiClient {
    * @returns {Promise<TrainingTasksResponse>} 训练任务列表
    */
   async listTrainingTasks(): Promise<TrainingTasksResponse> {
-    const response = await fetch(`${API_BASE_URL}/training/tasks`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch training tasks');
-    }
-    return response.json();
+    return this.request<TrainingTasksResponse>('/training/tasks');
   }
 
   /**
@@ -929,11 +861,7 @@ class ApiClient {
    * @returns {Promise<TrainingTaskResponse>} 任务详情（状态、进度等）
    */
   async getTrainingTask(taskId: string): Promise<TrainingTaskResponse> {
-    const response = await fetch(`${API_BASE_URL}/training/tasks/${taskId}`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch training task');
-    }
-    return response.json();
+    return this.request<TrainingTaskResponse>(`/training/tasks/${taskId}`);
   }
 
   /**
@@ -942,13 +870,9 @@ class ApiClient {
    * @returns {Promise<{success: boolean; message: string}>} 取消结果
    */
   async cancelTrainingTask(taskId: string): Promise<{ success: boolean; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/training/tasks/${taskId}/cancel`, {
+    return this.request<{ success: boolean; message: string }>(`/training/tasks/${taskId}/cancel`, {
       method: 'POST',
     });
-    if (!response.ok) {
-      throw new Error('Failed to cancel training task');
-    }
-    return response.json();
   }
 
   /**
@@ -956,11 +880,7 @@ class ApiClient {
    * @returns {Promise<StylesResponse>} 风格列表
    */
   async listStyles(): Promise<StylesResponse> {
-    const response = await fetch(`${API_BASE_URL}/training/styles`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch styles');
-    }
-    return response.json();
+    return this.request<StylesResponse>('/training/styles');
   }
 
   /**
@@ -976,13 +896,8 @@ class ApiClient {
     if (category && category !== '全部') params.append('category', category);
     if (knowledgeBaseId) params.append('knowledge_base_id', knowledgeBaseId.toString());
     if (folderId) params.append('folder_id', folderId.toString());
-    
-    const url = `${API_BASE_URL}/knowledge/documents${params.toString() ? '?' + params.toString() : ''}`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error('Failed to fetch knowledge documents');
-    }
-    return response.json();
+    const qs = params.toString();
+    return this.request<KnowledgeDocumentsResponse>(`/knowledge/documents${qs ? '?' + qs : ''}`);
   }
 
   /**
@@ -991,11 +906,7 @@ class ApiClient {
    * @returns {Promise<KnowledgeDocumentResponse>} 文档详情及内容分块
    */
   async getKnowledgeDocument(docId: number): Promise<KnowledgeDocumentResponse> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/documents/${docId}`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch knowledge document');
-    }
-    return response.json();
+    return this.request<KnowledgeDocumentResponse>(`/knowledge/documents/${docId}`);
   }
 
   /**
@@ -1004,17 +915,10 @@ class ApiClient {
    * @returns {Promise<{success: boolean; document: KnowledgeDocument}>} 创建结果
    */
   async createKnowledgeDocument(request: KnowledgeCreateRequest): Promise<{ success: boolean; document: KnowledgeDocument }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/documents`, {
+    return this.request<{ success: boolean; document: KnowledgeDocument }>('/knowledge/documents', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify(request),
     });
-    if (!response.ok) {
-      throw new Error('Failed to create knowledge document');
-    }
-    return response.json();
   }
 
   /**
@@ -1024,17 +928,10 @@ class ApiClient {
    * @returns {Promise<{success: boolean; document: KnowledgeDocument}>} 更新结果
    */
   async updateKnowledgeDocument(docId: number, request: KnowledgeUpdateRequest): Promise<{ success: boolean; document: KnowledgeDocument }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/documents/${docId}`, {
+    return this.request<{ success: boolean; document: KnowledgeDocument }>(`/knowledge/documents/${docId}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify(request),
     });
-    if (!response.ok) {
-      throw new Error('Failed to update knowledge document');
-    }
-    return response.json();
   }
 
   /**
@@ -1043,13 +940,9 @@ class ApiClient {
    * @returns {Promise<{success: boolean; message: string}>} 删除结果
    */
   async deleteKnowledgeDocument(docId: number): Promise<{ success: boolean; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/documents/${docId}`, {
+    return this.request<{ success: boolean; message: string }>(`/knowledge/documents/${docId}`, {
       method: 'DELETE',
     });
-    if (!response.ok) {
-      throw new Error('Failed to delete knowledge document');
-    }
-    return response.json();
   }
 
   /**
@@ -1058,17 +951,10 @@ class ApiClient {
    * @returns {Promise<KnowledgeSearchResponse>} 按照相关性排序的搜索结果
    */
   async searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/search`, {
+    return this.request<KnowledgeSearchResponse>('/knowledge/search', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify(request),
     });
-    if (!response.ok) {
-      throw new Error('Failed to search knowledge');
-    }
-    return response.json();
   }
 
   /**
@@ -1076,11 +962,7 @@ class ApiClient {
    * @returns {Promise<KnowledgeStatsResponse>} 文档总数、分块总数、总字符数
    */
   async getKnowledgeStats(): Promise<KnowledgeStatsResponse> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/stats`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch knowledge stats');
-    }
-    return response.json();
+    return this.request<KnowledgeStatsResponse>('/knowledge/stats');
   }
 
   // ============================================
@@ -1089,91 +971,65 @@ class ApiClient {
 
   /** 获取所有知识库 */
   async getKnowledgeBases(): Promise<{ success: boolean; bases: KnowledgeBase[] }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/bases`);
-    if (!response.ok) throw new Error('获取知识库列表失败');
-    return response.json();
+    return this.request<{ success: boolean; bases: KnowledgeBase[] }>('/knowledge/bases');
   }
 
   /** 创建知识库 */
   async createKnowledgeBase(name: string, description: string = ''): Promise<{ success: boolean; base: KnowledgeBase }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/bases`, {
+    return this.request<{ success: boolean; base: KnowledgeBase }>('/knowledge/bases', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, description }),
     });
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.detail || '创建知识库失败');
-    }
-    return response.json();
   }
 
   /** 更新知识库 */
   async updateKnowledgeBase(kbId: number, data: { name?: string; description?: string }): Promise<{ success: boolean; base: KnowledgeBase }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/bases/${kbId}`, {
+    return this.request<{ success: boolean; base: KnowledgeBase }>(`/knowledge/bases/${kbId}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('更新知识库失败');
-    return response.json();
   }
 
   /** 删除知识库 */
   async deleteKnowledgeBase(kbId: number): Promise<{ success: boolean; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/bases/${kbId}`, { method: 'DELETE' });
-    if (!response.ok) throw new Error('删除知识库失败');
-    return response.json();
+    return this.request<{ success: boolean; message: string }>(`/knowledge/bases/${kbId}`, {
+      method: 'DELETE',
+    });
   }
 
   /** 获取知识库下的文件夹 */
   async getKnowledgeFolders(kbId: number): Promise<{ success: boolean; folders: KnowledgeFolder[] }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/bases/${kbId}/folders`);
-    if (!response.ok) throw new Error('获取文件夹列表失败');
-    return response.json();
+    return this.request<{ success: boolean; folders: KnowledgeFolder[] }>(`/knowledge/bases/${kbId}/folders`);
   }
 
   /** 创建文件夹 */
   async createKnowledgeFolder(kbId: number, name: string, description: string = ''): Promise<{ success: boolean; folder: KnowledgeFolder }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/bases/${kbId}/folders`, {
+    return this.request<{ success: boolean; folder: KnowledgeFolder }>(`/knowledge/bases/${kbId}/folders`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, description }),
     });
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.detail || '创建文件夹失败');
-    }
-    return response.json();
   }
 
   /** 删除文件夹 */
   async deleteKnowledgeFolder(folderId: number): Promise<{ success: boolean; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/folders/${folderId}`, { method: 'DELETE' });
-    if (!response.ok) throw new Error('删除文件夹失败');
-    return response.json();
+    return this.request<{ success: boolean; message: string }>(`/knowledge/folders/${folderId}`, {
+      method: 'DELETE',
+    });
   }
 
   /** 上传ZIP文件到知识库 */
   async uploadKnowledgeZip(kbId: number, file: File): Promise<ZipUploadResponse> {
     const formData = new FormData();
     formData.append('file', file);
-    const response = await fetch(`${API_BASE_URL}/knowledge/bases/${kbId}/upload-zip`, {
+    return this.request<ZipUploadResponse>(`/knowledge/bases/${kbId}/upload-zip`, {
       method: 'POST',
       body: formData,
     });
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.detail || '上传ZIP失败');
-    }
-    return response.json();
   }
 
   /** 扫描知识库文件夹目录 */
   async scanKnowledgeDirs(): Promise<{ success: boolean; directories: ScanDirectory[]; message?: string }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/scan`);
-    if (!response.ok) throw new Error('扫描知识库目录失败');
-    return response.json();
+    return this.request<{ success: boolean; directories: ScanDirectory[]; message?: string }>('/knowledge/scan');
   }
 
   /** 导入扫描到的目录 */
@@ -1181,14 +1037,9 @@ class ApiClient {
     const params = new URLSearchParams();
     params.append('directory_name', directoryName);
     if (kbId) params.append('kb_id', kbId.toString());
-    const response = await fetch(`${API_BASE_URL}/knowledge/scan/import?${params.toString()}`, {
+    return this.request<ZipUploadResponse & { knowledgeBase?: KnowledgeBase }>(`/knowledge/scan/import?${params.toString()}`, {
       method: 'POST',
     });
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.detail || '导入目录失败');
-    }
-    return response.json();
   }
 
   /**
@@ -1196,11 +1047,7 @@ class ApiClient {
    * @returns {Promise<ConfigResponse>} 系统配置键值对
    */
   async getConfig(): Promise<ConfigResponse> {
-    const response = await fetch(`${API_BASE_URL}/config`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch config');
-    }
-    return response.json();
+    return this.request<ConfigResponse>('/config');
   }
 
   /**
@@ -1209,17 +1056,10 @@ class ApiClient {
    * @returns {Promise<ConfigUpdateResponse>} 更新结果
    */
   async updateConfig(config: SystemConfig): Promise<ConfigUpdateResponse> {
-    const response = await fetch(`${API_BASE_URL}/config`, {
+    return this.request<ConfigUpdateResponse>('/config', {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify(config),
     });
-    if (!response.ok) {
-      throw new Error('Failed to update config');
-    }
-    return response.json();
   }
 
   /**
@@ -1227,11 +1067,7 @@ class ApiClient {
    * @returns {Promise<ModelsResponse>} 模型列表
    */
   async getModels(): Promise<ModelsResponse> {
-    const response = await fetch(`${API_BASE_URL}/models`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch models');
-    }
-    return response.json();
+    return this.request<ModelsResponse>('/models');
   }
 
   /**
@@ -1240,47 +1076,35 @@ class ApiClient {
    * @returns {Promise<DialogueGenerateResponse>} 生成的对话数据
    */
   async generateDialogues(request: DialogueGenerateRequest, signal?: AbortSignal): Promise<DialogueGenerateResponse> {
-    const response = await fetch(`${API_BASE_URL}/training/generate-dialogues`, {
+    return this.request<DialogueGenerateResponse>('/training/generate-dialogues', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
       signal,
     });
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Failed to generate dialogues' }));
-      throw new Error(error.detail || 'Failed to generate dialogues');
-    }
-    return response.json();
   }
 
   /** 取消对话生成 */
   async cancelDialogueGeneration(): Promise<{ success: boolean; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/training/generate-dialogues/cancel`, {
+    return this.request<{ success: boolean; message: string }>('/training/generate-dialogues/cancel', {
       method: 'POST',
     });
-    if (!response.ok) throw new Error('取消生成失败');
-    return response.json();
   }
 
   /** 强制重置生成状态（用于断线重连后清理残留状态） */
   async forceResetGeneration(): Promise<{ success: boolean; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/training/generate-dialogues/force-reset`, {
+    return this.request<{ success: boolean; message: string }>('/training/generate-dialogues/force-reset', {
       method: 'POST',
     });
-    if (!response.ok) throw new Error('重置状态失败');
-    return response.json();
   }
 
   /** 获取对话生成进度 */
   async getDialogueGenerationProgress(): Promise<DialogueGenerationProgress> {
-    const response = await fetch(`${API_BASE_URL}/training/generate-dialogues/progress`);
-    if (!response.ok) throw new Error('获取进度失败');
-    return response.json();
+    return this.request<DialogueGenerationProgress>('/training/generate-dialogues/progress');
   }
 
   /** 用户注册 */
   async register(request: RegisterRequest): Promise<{ success: boolean; user: User; token: string }> {
-    return this.request('/auth/register', {
+    return this.request<{ success: boolean; user: User; token: string }>('/auth/register', {
       method: 'POST',
       body: JSON.stringify(request),
     });
@@ -1288,73 +1112,56 @@ class ApiClient {
 
   /** 用户登录 */
   async login(request: LoginRequest): Promise<{ success: boolean; user: User; token: string }> {
-    return this.request('/auth/login', {
+    return this.request<{ success: boolean; user: User; token: string }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify(request),
     });
   }
 
-  /** 获取当前用户信息（使用 JWT token） */
+  /** 获取当前用户信息 */
   async getCurrentUser(): Promise<{ success: boolean; user: User }> {
-    return this.request('/auth/me', {
-      headers: getAuthHeaders(),
-    });
+    return this.request<{ success: boolean; user: User }>('/auth/me');
   }
 
-  /** 保存用户表单数据（使用 JWT token） */
+  /** 保存用户表单数据 */
   async saveUserData(pageKey: string, dataJson: string): Promise<{ success: boolean; message: string }> {
-    return this.request('/user/data', {
+    return this.request<{ success: boolean; message: string }>('/user/data', {
       method: 'PUT',
-      headers: { ...getAuthHeaders() },
       body: JSON.stringify({ page_key: pageKey, data_json: dataJson }),
     });
   }
 
-  /** 获取用户表单数据（使用 JWT token） */
+  /** 获取用户表单数据 */
   async getUserData(pageKey?: string): Promise<{ success: boolean; data: Record<string, { data_json: string; updated_at: string }> | { page_key: string; data_json: string; updated_at: string } | null }> {
     const params = new URLSearchParams();
     if (pageKey) params.set('page_key', pageKey);
     const qs = params.toString();
-    return this.request(`/user/data${qs ? '?' + qs : ''}`, {
-      headers: getAuthHeaders(),
-    });
+    return this.request<{ success: boolean; data: Record<string, { data_json: string; updated_at: string }> | { page_key: string; data_json: string; updated_at: string } | null }>(`/user/data${qs ? '?' + qs : ''}`);
   }
 
   /** 保存对话数据 */
   async saveDialogues(request: SaveDialoguesRequest): Promise<{ success: boolean; id: number; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/training/saved-dialogues`, {
+    return this.request<{ success: boolean; id: number; message: string }>('/training/saved-dialogues', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
     });
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.detail || err.error || '保存失败');
-    }
-    return response.json();
   }
 
   /** 列出所有已保存对话 */
   async listSavedDialogues(): Promise<{ success: boolean; items: SavedDialogueItem[] }> {
-    const response = await fetch(`${API_BASE_URL}/training/saved-dialogues`);
-    if (!response.ok) throw new Error('获取列表失败');
-    return response.json();
+    return this.request<{ success: boolean; items: SavedDialogueItem[] }>('/training/saved-dialogues');
   }
 
   /** 获取单条已保存对话 */
   async getSavedDialogue(id: number): Promise<SavedDialogueFull> {
-    const response = await fetch(`${API_BASE_URL}/training/saved-dialogues/${id}`);
-    if (!response.ok) throw new Error('获取对话失败');
-    return response.json();
+    return this.request<SavedDialogueFull>(`/training/saved-dialogues/${id}`);
   }
 
   /** 删除已保存对话 */
   async deleteSavedDialogue(id: number): Promise<{ success: boolean; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/training/saved-dialogues/${id}`, {
+    return this.request<{ success: boolean; message: string }>(`/training/saved-dialogues/${id}`, {
       method: 'DELETE',
     });
-    if (!response.ok) throw new Error('删除失败');
-    return response.json();
   }
 
   // ── Claw 工具管理 ──
@@ -1363,65 +1170,52 @@ class ApiClient {
    * 列出所有 Claw 工具
    */
   async listClawTools(): Promise<{ success: boolean; tools: Array<{ name: string; description: string; code: string; enabled: boolean; builtin: boolean; created_at?: string; updated_at?: string }>; total: number }> {
-    const response = await fetch(`${API_BASE_URL}/claw/tools`);
-    if (!response.ok) throw new Error('获取工具列表失败');
-    return response.json();
+    return this.request<{ success: boolean; tools: Array<{ name: string; description: string; code: string; enabled: boolean; builtin: boolean; created_at?: string; updated_at?: string }>; total: number }>('/claw/tools');
   }
 
   /**
    * 保存（创建/更新）Claw 工具
    */
   async saveClawTool(data: { name: string; description: string; code: string; enabled: boolean }): Promise<{ success: boolean; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/claw/tools`, {
+    return this.request<{ success: boolean; message: string }>('/claw/tools', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('保存工具失败');
-    return response.json();
   }
 
   /**
    * 删除 Claw 工具
    */
   async deleteClawTool(name: string): Promise<{ success: boolean; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/claw/tools/${encodeURIComponent(name)}`, {
+    return this.request<{ success: boolean; message: string }>(`/claw/tools/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     });
-    if (!response.ok) throw new Error('删除工具失败');
-    return response.json();
   }
 
   /**
    * 测试执行 Claw 工具代码
    */
   async executeClawTool(code: string, args?: Record<string, unknown>): Promise<{ success: boolean; output: string; error: string; result: string }> {
-    const response = await fetch(`${API_BASE_URL}/claw/tools/execute`, {
+    return this.request<{ success: boolean; output: string; error: string; result: string }>('/claw/tools/execute', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code, args: args || {} }),
     });
-    return response.json();
   }
 
   /** 从已保存对话中删除单条对话 */
   async deleteDialogueFromSaved(id: number, index: number): Promise<{ success: boolean; message: string; remaining_count: number }> {
-    const response = await fetch(`${API_BASE_URL}/training/saved-dialogues/${id}/dialogues/${index}`, {
+    return this.request<{ success: boolean; message: string; remaining_count: number }>(`/training/saved-dialogues/${id}/dialogues/${index}`, {
       method: 'DELETE',
     });
-    if (!response.ok) throw new Error('删除失败');
-    return response.json();
   }
 
   /** 从已保存对话创建数据集 */
   async createDatasetFromSaved(id: number, datasetName?: string): Promise<{ success: boolean; dataset: Record<string, unknown> }> {
     const params = new URLSearchParams();
     if (datasetName) params.set('dataset_name', datasetName);
-    const response = await fetch(`${API_BASE_URL}/training/saved-dialogues/${id}/create-dataset?${params.toString()}`, {
+    return this.request<{ success: boolean; dataset: Record<string, unknown> }>(`/training/saved-dialogues/${id}/create-dataset?${params.toString()}`, {
       method: 'POST',
     });
-    if (!response.ok) throw new Error('创建数据集失败');
-    return response.json();
   }
 
   // ============================================
@@ -1453,127 +1247,81 @@ class ApiClient {
 
   /** 删除样本 */
   async deleteIntentSample(label: string, index: number): Promise<{ success: boolean }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/samples?label=${encodeURIComponent(label)}&index=${index}`, {
+    return this.request<{ success: boolean }>(`/knowledge/train-intent/samples?label=${encodeURIComponent(label)}&index=${index}`, {
       method: 'DELETE',
-      credentials: 'include',
     });
-    if (!response.ok) throw new Error('删除样本失败');
-    return response.json();
   }
 
   /** 获取训练样本 */
   async getIntentSamples(): Promise<{ success: boolean; samples: Record<string, string[]>; stats: Record<string, number> }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/samples`, {
-      credentials: 'include',
-    });
-    if (!response.ok) throw new Error('获取样本失败');
-    return response.json();
+    return this.request<{ success: boolean; samples: Record<string, string[]>; stats: Record<string, number> }>('/knowledge/train-intent/samples');
   }
 
   /** 保存全部样本（批量覆盖） */
   async saveIntentSamples(samples: Record<string, string[]>): Promise<{ success: boolean; stats: Record<string, number> }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/samples`, {
+    return this.request<{ success: boolean; stats: Record<string, number> }>('/knowledge/train-intent/samples', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ samples }),
-      credentials: 'include',
     });
-    if (!response.ok) throw new Error('保存样本失败');
-    return response.json();
   }
 
   /** 编辑样本 */
   async updateIntentSample(label: string, index: number, text: string): Promise<{ success: boolean }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/samples`, {
+    return this.request<{ success: boolean }>('/knowledge/train-intent/samples', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ label, index, text }),
-      credentials: 'include',
     });
-    if (!response.ok) throw new Error('编辑样本失败');
-    return response.json();
   }
 
   /** 添加样本 */
   async addIntentSample(label: string, text: string): Promise<{ success: boolean }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/samples`, {
+    return this.request<{ success: boolean }>('/knowledge/train-intent/samples', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ label, text }),
-      credentials: 'include',
     });
-    if (!response.ok) throw new Error('添加样本失败');
-    return response.json();
   }
 
   /** 生成训练样本（LLM基于知识库文档） */
   async generateIntentSamples(params: { kb_ids: number[]; samples_per_kb?: number; negative_count?: number; lora_name?: string }): Promise<{ success: boolean; message?: string; error?: string }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/generate`, {
+    return this.request<{ success: boolean; message?: string; error?: string }>('/knowledge/train-intent/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
-      credentials: 'include',
     });
-    if (!response.ok) throw new Error('启动样本生成失败');
-    return response.json();
   }
 
   /** 查询样本生成进度 */
   async getGenerationStatus(): Promise<{ success: boolean; status: { running: boolean; progress: number; stage: string; message: string } }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/generate/status`, {
-      credentials: 'include',
-    });
-    if (!response.ok) throw new Error('获取生成状态失败');
-    return response.json();
+    return this.request<{ success: boolean; status: { running: boolean; progress: number; stage: string; message: string } }>('/knowledge/train-intent/generate/status');
   }
 
   /** 启动意图分类器训练 */
   async trainIntentClassifier(params?: { kb_ids?: number[] }): Promise<{ success: boolean; message?: string; error?: string }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent`, {
+    return this.request<{ success: boolean; message?: string; error?: string }>('/knowledge/train-intent', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params || {}),
-      credentials: 'include',
     });
-    if (!response.ok) throw new Error('启动训练失败');
-    return response.json();
   }
 
   /** 查询训练状态 */
   async getIntentTrainingStatus(): Promise<{ success: boolean; status: { running: boolean; progress: number; stage: string; message: string; logs?: string[]; result?: Record<string, unknown> } }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/status`, {
-      credentials: 'include',
-    });
-    if (!response.ok) throw new Error('获取训练状态失败');
-    return response.json();
+    return this.request<{ success: boolean; status: { running: boolean; progress: number; stage: string; message: string; logs?: string[]; result?: Record<string, unknown> } }>('/knowledge/train-intent/status');
   }
 
   /** 取消训练/生成 */
   async cancelIntentTraining(): Promise<{ success: boolean; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/cancel`, {
+    return this.request<{ success: boolean; message: string }>('/knowledge/train-intent/cancel', {
       method: 'POST',
-      credentials: 'include',
     });
-    if (!response.ok) throw new Error('取消失败');
-    return response.json();
   }
 
   /** 获取意图分类模型信息 */
   async getIntentModelInfo(): Promise<{ success: boolean; model: { exists: boolean; model_type?: string; label_names?: string[]; training_samples?: number; accuracy?: number; trained_at?: string; samples_per_class?: Record<string, number> } }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/model`, {
-      credentials: 'include',
-    });
-    if (!response.ok) throw new Error('获取模型信息失败');
-    return response.json();
+    return this.request<{ success: boolean; model: { exists: boolean; model_type?: string; label_names?: string[]; training_samples?: number; accuracy?: number; trained_at?: string; samples_per_class?: Record<string, number> } }>('/knowledge/train-intent/model');
   }
 
   /** 获取活跃知识库 */
   async getActiveKnowledgeBases(): Promise<{ success: boolean; active_kbs: { kbName: string; isActive: number }[] }> {
-    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/active-kbs`, {
-      credentials: 'include',
-    });
-    if (!response.ok) throw new Error('获取活跃知识库失败');
-    return response.json();
+    return this.request<{ success: boolean; active_kbs: { kbName: string; isActive: number }[] }>('/knowledge/train-intent/active-kbs');
   }
 }
 

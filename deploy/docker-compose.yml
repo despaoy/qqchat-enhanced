@@ -1,64 +1,47 @@
-# QQ智能助手 - Docker Compose 编排配置
-# 包含：vLLM x2 + FastAPI + Next.js + Nginx
-
 version: "3.8"
 
-# ============================================
-# 共享卷定义
-# ============================================
-volumes:
-  models:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ./data/models
-  loras:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ./data/loras
-  data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ./data/app
-  nginx_logs:
-    driver: local
-
-# ============================================
-# 服务定义
-# ============================================
 services:
-
-  # ------------------------------------------
-  # vLLM 推理服务 1（GPU 0）
-  # ------------------------------------------
-  vllm1:
-    image: vllm/vllm-openai:latest
-    container_name: qq-assistant-vllm1
+  # PostgreSQL + pgvector
+  postgres:
+    image: pgvector/pgvector:pg14
     restart: unless-stopped
-    ports:
-      - "8001:8000"
-    volumes:
-      - models:/models:ro
-      - loras:/loras:ro
     environment:
-      - CUDA_VISIBLE_DEVICES=0
-      - VLLM_WORKER_MULTIPROC_METHOD=spawn
-    command: >
-      --model /models/Qwen2.5-7B-Instruct
-      --enable-lora
-      --max-loras 4
-      --max-lora-rank 64
-      --gpu-memory-utilization 0.9
-      --max-model-len 4096
-      --dtype bfloat16
-      --tensor-parallel-size 1
-      --host 0.0.0.0
-      --port 8000
+      POSTGRES_USER: qqassistant
+      POSTGRES_PASSWORD: qqassistant2026
+      POSTGRES_DB: qqassistant
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qqassistant"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  # vLLM Inference Engine
+  vllm:
+    image: vllm/vllm-openai:latest
+    restart: unless-stopped
     deploy:
       resources:
         reservations:
@@ -66,185 +49,89 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-        limits:
-          memory: 12G
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 120s
-    networks:
-      - qq-assistant-net
-
-  # ------------------------------------------
-  # vLLM 推理服务 2（GPU 1）
-  # ------------------------------------------
-  vllm2:
-    image: vllm/vllm-openai:latest
-    container_name: qq-assistant-vllm2
-    restart: unless-stopped
-    ports:
-      - "8002:8000"
-    volumes:
-      - models:/models:ro
-      - loras:/loras:ro
-    environment:
-      - CUDA_VISIBLE_DEVICES=1
-      - VLLM_WORKER_MULTIPROC_METHOD=spawn
     command: >
       --model /models/Qwen2.5-7B-Instruct
       --enable-lora
-      --max-loras 4
+      --max-loras 8
       --max-lora-rank 64
+      --enable-prefix-caching
       --gpu-memory-utilization 0.9
       --max-model-len 4096
       --dtype bfloat16
-      --tensor-parallel-size 1
       --host 0.0.0.0
-      --port 8000
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-        limits:
-          memory: 12G
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 120s
+      --port 8001
+      --lora-modules-dir /loras
+      --trust-remote-code
+    volumes:
+      - /root/autodl-tmp/Qwen2.5-7B-Instruct:/models/Qwen2.5-7B-Instruct
+      - /root/autodl-tmp/qqchat-enhanced/backend/loras:/loras
+    ports:
+      - "8001:8001"
     networks:
-      - qq-assistant-net
+      - internal
 
-  # ------------------------------------------
-  # FastAPI 后端服务
-  # ------------------------------------------
+  # FastAPI Backend
   backend:
     build:
       context: ../backend
       dockerfile: Dockerfile
-    container_name: qq-assistant-backend
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      USE_POSTGRESQL: "true"
+      PG_HOST: postgres
+      PG_PORT: "5432"
+      PG_USER: qqassistant
+      PG_PASSWORD: qqassistant2026
+      PG_DATABASE: qqassistant
+      REDIS_URL: redis://redis:6379/0
+      VLLM_ENABLED: "true"
+      VLLM_BASE_URL: http://vllm:8001
+    volumes:
+      - ../backend/knowledge_bases:/app/knowledge_bases
+      - ../backend/loras:/app/loras
     ports:
       - "8000:8000"
-    volumes:
-      - data:/app/data
-      - loras:/app/loras
-      - models:/app/models:ro
-    environment:
-      - VLLM_API_URL_1=http://vllm1:8000
-      - VLLM_API_URL_2=http://vllm2:8000
-      - VLLM_LOAD_BALANCE=round_robin
-      - DATABASE_PATH=/app/data/qq_assistant.db
-      - VECTOR_DB_PATH=/app/data/vector_db
-      - LORA_PATH=/app/loras
-      - MODEL_PATH=/app/models
-      - LOG_LEVEL=INFO
-      - CORS_ORIGINS=http://localhost:5000,http://localhost:80
-    depends_on:
-      vllm1:
-        condition: service_healthy
-      vllm2:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          memory: 4G
-        reservations:
-          memory: 1G
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
     networks:
-      - qq-assistant-net
+      - internal
 
-  # ------------------------------------------
-  # Next.js 前端服务
-  # ------------------------------------------
+  # Next.js Frontend
   frontend:
     build:
       context: ..
       dockerfile: Dockerfile
-      args:
-        - NEXT_PUBLIC_API_URL=/api
-    container_name: qq-assistant-frontend
     restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      BACKEND_URL: http://backend:8000
     ports:
       - "5000:5000"
-    environment:
-      - NEXT_PUBLIC_API_URL=/api
-      - BACKEND_URL=http://backend:8000
-      - PORT=5000
-    depends_on:
-      backend:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-        reservations:
-          memory: 512M
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
     networks:
-      - qq-assistant-net
+      - internal
 
-  # ------------------------------------------
-  # Nginx 负载均衡 / 反向代理
-  # ------------------------------------------
+  # Nginx Reverse Proxy
   nginx:
-    image: nginx:1.25-alpine
-    container_name: qq-assistant-nginx
+    image: nginx:alpine
     restart: unless-stopped
+    depends_on:
+      - frontend
+      - backend
     ports:
       - "80:80"
-      - "443:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      # HTTPS 证书（取消注释以启用）
-      # - ./nginx/ssl/cert.pem:/etc/nginx/ssl/cert.pem:ro
-      # - ./nginx/ssl/key.pem:/etc/nginx/ssl/key.pem:ro
-      - nginx_logs:/var/log/nginx
-    depends_on:
-      - vllm1
-      - vllm2
-      - backend
-      - frontend
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 128M
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     networks:
-      - qq-assistant-net
+      - internal
 
-# ============================================
-# 网络定义
-# ============================================
+volumes:
+  pgdata:
+  redisdata:
+
 networks:
-  qq-assistant-net:
+  internal:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.28.0.0/16
-
-

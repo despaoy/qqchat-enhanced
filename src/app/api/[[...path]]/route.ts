@@ -1,0 +1,88 @@
+import { proxyRequest } from '@/lib/proxy';
+
+type RouteContext = { params: Promise<{ path?: string[] }> };
+
+function buildPath(segments: string[], search: string): string {
+  const base = segments.length > 0 ? `/api/${segments.join('/')}` : '';
+  return search ? `${base}?${search}` : base;
+}
+
+export async function GET(request: Request, { params }: RouteContext) {
+  const { path } = await params;
+  const segments = path || [];
+  if (segments.length === 0) {
+    return Response.json({ error: 'Not Found' }, { status: 404 });
+  }
+  const { searchParams } = new URL(request.url);
+  const backendPath = buildPath(segments, searchParams.toString());
+  return proxyRequest(request, backendPath);
+}
+
+export async function POST(request: Request, { params }: RouteContext) {
+  const { path } = await params;
+  const segments = path || [];
+  if (segments.length === 0) {
+    return Response.json({ error: 'Not Found' }, { status: 404 });
+  }
+  const { searchParams } = new URL(request.url);
+  const backendPath = buildPath(segments, searchParams.toString());
+
+  const contentType = request.headers.get('Content-Type') || '';
+  if (contentType.includes('multipart/form-data')) {
+    const formData = await request.formData();
+    return proxyRequest(request, backendPath, {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  const body = await request.json();
+  return proxyRequest(request, backendPath, {
+    method: 'POST',
+    body,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+export async function PUT(request: Request, { params }: RouteContext) {
+  const { path } = await params;
+  const segments = path || [];
+  if (segments.length === 0) {
+    return Response.json({ error: 'Not Found' }, { status: 404 });
+  }
+  const { searchParams } = new URL(request.url);
+  const backendPath = buildPath(segments, searchParams.toString());
+  const body = await request.json();
+  return proxyRequest(request, backendPath, {
+    method: 'PUT',
+    body,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+export async function PATCH(request: Request, { params }: RouteContext) {
+  const { path } = await params;
+  const segments = path || [];
+  if (segments.length === 0) {
+    return Response.json({ error: 'Not Found' }, { status: 404 });
+  }
+  const { searchParams } = new URL(request.url);
+  const backendPath = buildPath(segments, searchParams.toString());
+  const body = await request.json();
+  return proxyRequest(request, backendPath, {
+    method: 'PATCH',
+    body,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+export async function DELETE(request: Request, { params }: RouteContext) {
+  const { path } = await params;
+  const segments = path || [];
+  if (segments.length === 0) {
+    return Response.json({ error: 'Not Found' }, { status: 404 });
+  }
+  const { searchParams } = new URL(request.url);
+  const backendPath = buildPath(segments, searchParams.toString());
+  return proxyRequest(request, backendPath, { method: 'DELETE' });
+}
