@@ -1,4 +1,5 @@
 """LoRA训练管理API"""
+import asyncio
 import json
 import logging
 import math
@@ -280,7 +281,7 @@ async def start_training(request: TrainingStartRequest):
         merged_config = {**base_config_dict, **custom_config}
 
         # 启动训练
-        task_id = trainer.start_training(
+        task_id = await trainer.start_training(
             lora_name=request.lora_name,
             dataset_path=dataset_dir,
             config=merged_config
@@ -307,7 +308,7 @@ async def list_training_tasks():
         from training.task_manager import get_simple_lora_trainer
         trainer = get_simple_lora_trainer()
 
-        tasks = trainer.get_all_tasks()
+        tasks = await trainer.get_all_tasks()
         return {"success": True, "tasks": tasks}
     except Exception as e:
         logger.error(f"获取训练任务列表失败: {e}")
@@ -321,7 +322,7 @@ async def get_training_task(task_id: str):
         from training.task_manager import get_simple_lora_trainer
         trainer = get_simple_lora_trainer()
 
-        task = trainer.get_task_status(task_id)
+        task = await trainer.get_task_status(task_id)
         if not task:
             raise HTTPException(status_code=404, detail="训练任务不存在")
 
@@ -340,7 +341,7 @@ async def cancel_training_task(task_id: str):
         from training.task_manager import get_simple_lora_trainer
         trainer = get_simple_lora_trainer()
 
-        success = trainer.cancel_task(task_id)
+        success = await trainer.cancel_task(task_id)
         if success:
             return {"success": True, "message": "训练任务已取消"}
         else:
@@ -376,11 +377,11 @@ async def list_predefined_styles():
 
 
 @router.post("/api/training/generate-dialogues")
-def generate_dialogues(request: DialogueGenerateRequest):
+async def generate_dialogues(request: DialogueGenerateRequest):
     """基于角色描述生成LoRA训练对话数据"""
 
-    # 防止重复生成（线程安全检查+初始化）
-    with generation_state_lock:
+    # 防止重复生成（异步安全检查+初始化）
+    async with generation_state_lock:
         if generation_state["is_generating"]:
             raise HTTPException(status_code=409, detail="已有生成任务正在运行")
 
@@ -403,7 +404,7 @@ def generate_dialogues(request: DialogueGenerateRequest):
         manager = get_model_manager()
 
         # 双模块架构：训练模式下优先使用API生成，避免加载本地模型
-        module_mgr = get_module_manager()
+        module_mgr = await get_module_manager()
         if module_mgr.is_training_mode:
             # 训练模式：强制使用API提供商（不加载本地模型）
             from inference.model_manager import ModelProvider
@@ -441,7 +442,7 @@ def generate_dialogues(request: DialogueGenerateRequest):
         # ============================================================
         character_context = ""
         try:
-            search_results = _search_character_info(request.character_description)
+            search_results = await asyncio.to_thread(_search_character_info, request.character_description)
             if search_results:
                 character_context = f"""
 
@@ -528,7 +529,7 @@ def generate_dialogues(request: DialogueGenerateRequest):
                 global_batch_num += 1
                 batch_count = min(BATCH_SIZE_PER_TURN, need_count - generated_this_turn)
 
-                with generation_state_lock:
+                async with generation_state_lock:
                     generation_state.update({
                         "batch_num": global_batch_num,
                         "generated_count": len(all_validated),
@@ -605,7 +606,8 @@ def generate_dialogues(request: DialogueGenerateRequest):
 
                 # 根据轮次计算合理输出上限（本地模型 context 有限，系统 prompt 已占 ~1000-1500 tokens）
                 max_tok = 2048 if target_turns <= 2 else 4096 if target_turns <= 5 else 6144
-                result, cost = manager.generate(
+                result, cost = await asyncio.to_thread(
+                    manager.generate,
                     prompt=system_prompt,
                     session_history=[],
                     rag_docs=[],
@@ -685,7 +687,7 @@ def generate_dialogues(request: DialogueGenerateRequest):
 
                 new_in_batch = all_validated[batch_start_count:]
                 if new_in_batch:
-                    with generation_state_lock:
+                    async with generation_state_lock:
                         generation_state["new_dialogues"] = new_in_batch
                         generation_state["all_generated_dialogues"].extend(new_in_batch)
 
@@ -730,7 +732,7 @@ def generate_dialogues(request: DialogueGenerateRequest):
 @router.post("/api/training/generate-dialogues/cancel")
 async def cancel_dialogue_generation():
     """取消正在进行的对话生成"""
-    with generation_state_lock:
+    async with generation_state_lock:
         if not generation_state["is_generating"]:
             return {"success": False, "message": "没有正在进行的生成任务"}
         generation_state["cancel_requested"] = True
@@ -740,7 +742,7 @@ async def cancel_dialogue_generation():
 @router.get("/api/training/generate-dialogues/progress")
 async def get_dialogue_generation_progress():
     """获取对话生成进度（含新增对话的实时推送 + 所有已生成对话）"""
-    with generation_state_lock:
+    async with generation_state_lock:
         new_dialogues = generation_state.get("new_dialogues", [])
         generation_state["new_dialogues"] = []
         result = {**generation_state, "new_dialogues": new_dialogues}
@@ -750,7 +752,7 @@ async def get_dialogue_generation_progress():
 @router.post("/api/training/generate-dialogues/force-reset")
 async def force_reset_generation():
     """强制重置生成状态（用于断线重连后清理残留状态）"""
-    with generation_state_lock:
+    async with generation_state_lock:
         if not generation_state["is_generating"] and not generation_state["cancel_requested"]:
             return {"success": False, "message": "没有正在进行的生成任务"}
         generation_state.update({

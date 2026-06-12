@@ -7,7 +7,7 @@ LoRA训练器兼容层
 import logging
 import os
 import json
-import threading
+import asyncio
 import time
 import uuid
 from pathlib import Path
@@ -124,9 +124,9 @@ class SimpleLoRATrainer:
         self.loras_dir = self.base_dir / "loras"
         self.loras_dir.mkdir(exist_ok=True)
         self.tasks: Dict[str, Dict[str, Any]] = {}
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()
 
-    def start_training(self, lora_name: str, dataset_path: Path, config: Dict[str, Any]) -> str:
+    async def start_training(self, lora_name: str, dataset_path: Path, config: Dict[str, Any]) -> str:
         """启动异步LoRA训练任务。
 
         Args:
@@ -157,21 +157,16 @@ class SimpleLoRATrainer:
             "output_dir": str(self.loras_dir / lora_name),
         }
 
-        with self._lock:
+        async with self._lock:
             self.tasks[task_id] = task
 
-        thread = threading.Thread(
-            target=self._run_training,
-            args=(task_id, lora_name, dataset_path, config),
-            daemon=True,
-        )
-        thread.start()
+        asyncio.create_task(self._run_training(task_id, lora_name, dataset_path, config))
 
         logger.info(f"训练任务已创建: {task_id}, LoRA: {lora_name}")
         return task_id
 
-    def _run_training(self, task_id: str, lora_name: str, dataset_path: Path, config: Dict[str, Any]):
-        with self._lock:
+    async def _run_training(self, task_id: str, lora_name: str, dataset_path: Path, config: Dict[str, Any]):
+        async with self._lock:
             self.tasks[task_id]["status"] = "training"
             self.tasks[task_id]["started_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
             self.tasks[task_id]["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -185,7 +180,7 @@ class SimpleLoRATrainer:
                 raise ValueError(f"训练配置错误: {'; '.join(errors)}")
 
             # 检查是否在配置阶段已被取消
-            with self._lock:
+            async with self._lock:
                 if self.tasks[task_id]["status"] == "cancelled":
                     logger.info(f"训练任务在配置阶段被取消: {task_id}")
                     return
@@ -196,17 +191,18 @@ class SimpleLoRATrainer:
 
             trainer = LoRATrainer(train_config)
 
-            with self._lock:
+            async with self._lock:
                 if self.tasks[task_id]["status"] == "cancelled":
                     logger.info(f"训练任务在启动前被取消: {task_id}")
                     return
                 self.tasks[task_id]["progress"] = 0.1
                 self.tasks[task_id]["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
 
-            output_path = trainer.train()
+            # 在线程中执行阻塞的训练操作
+            output_path = await asyncio.to_thread(trainer.train)
 
             # 训练完成后再次检查是否被取消
-            with self._lock:
+            async with self._lock:
                 if self.tasks[task_id]["status"] == "cancelled":
                     logger.info(f"训练任务完成后发现已被取消: {task_id}")
                     return
@@ -222,7 +218,7 @@ class SimpleLoRATrainer:
             logger.error(f"训练任务失败: {task_id}, 错误: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            with self._lock:
+            async with self._lock:
                 # 如果已被取消，不覆盖cancelled状态
                 if self.tasks[task_id]["status"] == "cancelled":
                     return
@@ -274,7 +270,7 @@ class SimpleLoRATrainer:
 
         raise FileNotFoundError(f"数据集目录中没有找到JSON文件: {dataset_path}")
 
-    def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
+    async def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         """查询单个训练任务的状态。
 
         Args:
@@ -283,15 +279,15 @@ class SimpleLoRATrainer:
         Returns:
             任务状态字典，包含status、progress等字段，不存在则返回None
         """
-        with self._lock:
+        async with self._lock:
             return self.tasks.get(task_id)
 
-    def get_all_tasks(self) -> List[Dict[str, Any]]:
-        with self._lock:
+    async def get_all_tasks(self) -> List[Dict[str, Any]]:
+        async with self._lock:
             return list(self.tasks.values())
 
-    def cancel_task(self, task_id: str) -> bool:
-        with self._lock:
+    async def cancel_task(self, task_id: str) -> bool:
+        async with self._lock:
             task = self.tasks.get(task_id)
             if task and task["status"] in ("pending", "training"):
                 task["status"] = "cancelled"

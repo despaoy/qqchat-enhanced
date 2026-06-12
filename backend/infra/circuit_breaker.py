@@ -212,7 +212,7 @@ class CircuitBreaker:
 
         if self.degradation_mode == DegradationMode.QUEUE:
             logger.debug("熔断器 [%s] 请求排队等待恢复", self.name)
-            future: asyncio.Future[Any] = asyncio.get_event_loop().create_future()
+            future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
             self._queue.append(future)
             try:
                 return await asyncio.wait_for(future, timeout=self.recovery_timeout * 2)

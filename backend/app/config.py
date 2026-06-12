@@ -308,12 +308,10 @@ except ImportError:
 
 
 # ============================================
-# 对话生成状态追踪（线程安全）
+# 对话生成状态追踪（异步安全）
 # ============================================
 
-import threading
-
-generation_state_lock = threading.Lock()
+generation_state_lock = asyncio.Lock()
 
 generation_state = {
     "is_generating": False,

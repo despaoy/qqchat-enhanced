@@ -137,7 +137,7 @@ async def generate_reply(request: MessageRequest):
         model_manager = get_model_manager()
 
         from app.module_manager import get_module_manager
-        module_mgr = get_module_manager()
+        module_mgr = await get_module_manager()
 
         if module_mgr.is_training_mode:
             api_providers = [ModelProvider.OPENAI_COMPAT, ModelProvider.OLLAMA, ModelProvider.VLLM]

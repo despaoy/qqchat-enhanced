@@ -109,7 +109,7 @@ start_vllm() {
     python -m vllm.entrypoints.openai.api_server \
         --model "${MODEL_PATH}" \
         --enable-lora \
-        --max-loras 4 \
+        --max-loras 8 \
         --max-lora-rank 64 \
         --gpu-memory-utilization 0.9 \
         --max-model-len 4096 \
@@ -118,6 +118,7 @@ start_vllm() {
         --host 0.0.0.0 \
         --port "${PORT}" \
         --lora-modules-dir "${LORA_PATH}" \
+        --enable-prefix-caching \
         --trust-remote-code \
         &
     VLLM_PID=$!

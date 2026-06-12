@@ -55,7 +55,7 @@ class ModuleStatusResponse(BaseModel):
 @router.get("/api/module/status")
 async def get_module_status():
     """获取当前模块状态"""
-    mgr = get_module_manager()
+    mgr = await get_module_manager()
     status = mgr.get_status()
 
     # 检查是否可以切换到推理模式
@@ -87,7 +87,7 @@ async def get_module_status():
 @router.post("/api/module/switch", response_model=SwitchModeResponse)
 async def switch_mode(request: SwitchModeRequest):
     """切换系统模式"""
-    mgr = get_module_manager()
+    mgr = await get_module_manager()
 
     if request.target_mode not in ("training", "inference"):
         raise HTTPException(status_code=400, detail=f"无效的模式: {request.target_mode}")
@@ -96,9 +96,9 @@ async def switch_mode(request: SwitchModeRequest):
         raise HTTPException(status_code=409, detail="模式切换正在进行中，请稍后")
 
     if request.target_mode == "training":
-        result = mgr.switch_to_training()
+        result = await mgr.switch_to_training()
     else:
-        result = mgr.switch_to_inference()
+        result = await mgr.switch_to_inference()
 
     if not result.success:
         # 不抛异常，返回结果让前端显示原因
@@ -169,5 +169,5 @@ async def force_garbage_collection():
 @router.get("/api/module/history")
 async def get_switch_history():
     """获取模式切换历史"""
-    mgr = get_module_manager()
+    mgr = await get_module_manager()
     return {"history": mgr.get_switch_history()}

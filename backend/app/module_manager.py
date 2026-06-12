@@ -22,7 +22,7 @@
 import os
 import time
 import logging
-import threading
+import asyncio
 import psutil
 from enum import Enum
 from dataclasses import dataclass, field
@@ -171,7 +171,7 @@ class ModuleManager:
 
     def __init__(self):
         self._mode = SystemMode.TRAINING  # 默认训练模式（不加载模型）
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()
         self._switching = False
         self._started_at = time.time()
         self._last_switch_time: Optional[float] = None
@@ -255,23 +255,23 @@ class ModuleManager:
             uptime_seconds=round(time.time() - self._started_at, 1),
         )
 
-    def switch_to_training(self) -> ModeSwitchResult:
+    async def switch_to_training(self) -> ModeSwitchResult:
         """切换到训练模式
 
         释放推理模型占用的GPU/系统内存，确保训练资源充足。
         """
-        return self._switch_mode(SystemMode.TRAINING)
+        return await self._switch_mode(SystemMode.TRAINING)
 
-    def switch_to_inference(self) -> ModeSwitchResult:
+    async def switch_to_inference(self) -> ModeSwitchResult:
         """切换到推理模式
 
         加载本地模型，检查内存是否充足。
         """
-        return self._switch_mode(SystemMode.INFERENCE)
+        return await self._switch_mode(SystemMode.INFERENCE)
 
-    def _switch_mode(self, target: SystemMode) -> ModeSwitchResult:
+    async def _switch_mode(self, target: SystemMode) -> ModeSwitchResult:
         """执行模式切换"""
-        with self._lock:
+        async with self._lock:
             if self._switching:
                 return ModeSwitchResult(
                     success=False,
@@ -315,7 +315,7 @@ class ModuleManager:
                 self._unload_inference_model()
             elif from_mode == SystemMode.TRAINING:
                 # 从训练模式切出 → 确保生成任务已完成或取消
-                self._ensure_training_idle()
+                await self._ensure_training_idle()
 
             # 3. 强制GC释放内存
             MemoryMonitor.force_gc()
@@ -337,7 +337,7 @@ class ModuleManager:
                     )
 
             # 5. 更新模式
-            with self._lock:
+            async with self._lock:
                 self._mode = target
                 self._last_switch_time = time.time()
 
@@ -437,11 +437,11 @@ class ModuleManager:
         except Exception as e:
             logger.warning(f"卸载推理模型时出错: {e}")
 
-    def _ensure_training_idle(self):
+    async def _ensure_training_idle(self):
         """确保训练/生成任务已停止"""
         try:
             from app.config import generation_state, generation_state_lock
-            with generation_state_lock:
+            async with generation_state_lock:
                 if generation_state.get("is_generating", False):
                     generation_state["cancel_requested"] = True
                     logger.info("已发送生成任务取消请求")
@@ -466,14 +466,14 @@ class ModuleManager:
 # ═══════════════════════════════════════════════════════════
 
 _module_manager: Optional[ModuleManager] = None
-_manager_lock = threading.Lock()
+_manager_lock = asyncio.Lock()
 
 
-def get_module_manager() -> ModuleManager:
-    """获取全局ModuleManager实例（线程安全单例）"""
+async def get_module_manager() -> ModuleManager:
+    """获取全局ModuleManager实例（异步安全单例）"""
     global _module_manager
     if _module_manager is None:
-        with _manager_lock:
+        async with _manager_lock:
             if _module_manager is None:
                 _module_manager = ModuleManager()
     return _module_manager
