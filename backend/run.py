@@ -26,6 +26,21 @@ for root, dirs, files in os.walk(str(_BACKEND_ROOT)):
 import uvicorn
 
 
+def _load_env():
+    """加载 .env 文件到环境变量"""
+    env_path = Path(__file__).parent / ".env"
+    if env_path.exists():
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, _, value = line.partition("=")
+                    key = key.strip()
+                    value = value.strip()
+                    if key and key not in os.environ:
+                        os.environ[key] = value
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="QQ智能助手后端服务")
@@ -49,4 +64,5 @@ def main():
 
 
 if __name__ == "__main__":
+    _load_env()
     main()

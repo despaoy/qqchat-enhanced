@@ -1,20 +1,5 @@
-import { NextResponse } from 'next/server';
+import { proxyGet } from '@/lib/proxy';
 
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000';
-
-export async function GET() {
-  try {
-    const response = await fetch(`${BACKEND_URL}/api/knowledge/stats`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch knowledge stats from backend');
-    }
-    const data = await response.json();
-    return NextResponse.json(data);
-  } catch (error) {
-    console.error('Error fetching knowledge stats:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch knowledge stats' },
-      { status: 500 }
-    );
-  }
+export async function GET(request: Request) {
+  return proxyGet(request, '/api/knowledge/stats');
 }

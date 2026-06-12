@@ -38,29 +38,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
   const [loading, setLoading] = useState(true);
 
-  // 异步验证 token 是否仍然有效
+  // 异步验证 token 是否仍然有效（Cookie 由浏览器自动携带）
   useEffect(() => {
-    const token = localStorage.getItem('qq_assistant_token');
-    if (token) {
-      fetch('/api/auth/me', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      }).then(res => {
-        if (!res.ok) {
-          localStorage.removeItem('qq_assistant_token');
-          localStorage.removeItem('qq_assistant_user');
-          setUser(null);
-        }
-      }).catch(() => {})
-        .finally(() => setLoading(false));
-    } else {
-      Promise.resolve().then(() => setLoading(false));
-    }
+    fetch('/api/auth/me', {
+      credentials: 'include', // 携带 httpOnly Cookie
+    }).then(res => {
+      if (!res.ok) {
+        localStorage.removeItem('qq_assistant_user');
+        setUser(null);
+      }
+    }).catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
   const login = useCallback(async (username: string, password: string) => {
     const response = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include', // 接收 httpOnly Cookie
       body: JSON.stringify({ username, password }),
     });
     if (!response.ok) {
@@ -68,7 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(err.detail || '登录失败');
     }
     const data = await response.json();
-    localStorage.setItem('qq_assistant_token', data.token);
+    // 同时存 localStorage 作为向后兼容和用户信息缓存
     localStorage.setItem('qq_assistant_user', JSON.stringify(data.user));
     setUser(data.user);
   }, []);
@@ -77,6 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const response = await fetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include', // 接收 httpOnly Cookie
       body: JSON.stringify({ username, password }),
     });
     if (!response.ok) {
@@ -84,20 +80,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(err.detail || '注册失败');
     }
     const data = await response.json();
-    localStorage.setItem('qq_assistant_token', data.token);
     localStorage.setItem('qq_assistant_user', JSON.stringify(data.user));
     setUser(data.user);
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.removeItem('qq_assistant_token');
+    // 调用后端清除 Cookie
+    fetch('/api/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+    }).catch(() => {});
     localStorage.removeItem('qq_assistant_user');
     setUser(null);
   }, []);
 
   const savePageData = useCallback(async (pageKey: string, data: Record<string, unknown>) => {
     if (!user) return;
-    // 同时保存到 localStorage 和后端
     localStorage.setItem(`qq_assistant_data_${pageKey}`, JSON.stringify(data));
     try {
       await api.saveUserData(pageKey, JSON.stringify(data));
@@ -107,9 +105,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   const loadPageData = useCallback(async (pageKey: string): Promise<Record<string, unknown> | null> => {
-    // 优先从 localStorage 读取（快速），同时尝试从后端同步
     const localData = localStorage.getItem(`qq_assistant_data_${pageKey}`);
-    let result = localData ? JSON.parse(localData) : null;
+    let result = localData ? (() => { try { return JSON.parse(localData); } catch { return null; } })() : null;
 
     if (user) {
       try {
@@ -117,7 +114,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (res.success && res.data) {
           const serverData = 'data_json' in res.data ? JSON.parse((res.data as { data_json: string }).data_json) : null;
           if (serverData) {
-            // 如果后端数据更新，使用后端数据
             result = serverData;
             localStorage.setItem(`qq_assistant_data_${pageKey}`, JSON.stringify(serverData));
           }

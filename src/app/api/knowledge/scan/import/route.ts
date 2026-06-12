@@ -1,26 +1,22 @@
-import { NextResponse } from 'next/server';
-
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000';
+import { proxyRequest } from '@/lib/proxy';
 
 export async function POST(request: Request) {
-  try {
-    const body = await request.json();
-    const { directory_name, kb_id } = body;
-    const params = new URLSearchParams();
-    params.append('directory_name', directory_name);
-    if (kb_id) params.append('kb_id', kb_id.toString());
+  const { searchParams } = new URL(request.url);
+  const directory_name = searchParams.get('directory_name');
+  const kb_id = searchParams.get('kb_id');
 
-    const response = await fetch(`${BACKEND_URL}/api/knowledge/scan/import?${params.toString()}`, {
-      method: 'POST',
+  if (!directory_name) {
+    return new Response(JSON.stringify({ error: 'directory_name is required' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
     });
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      return NextResponse.json(err, { status: response.status });
-    }
-    const data = await response.json();
-    return NextResponse.json(data);
-  } catch (error) {
-    console.error('Error importing scanned directory:', error);
-    return NextResponse.json({ error: 'Failed to import scanned directory' }, { status: 500 });
   }
+
+  const params = new URLSearchParams();
+  params.append('directory_name', directory_name);
+  if (kb_id) params.append('kb_id', kb_id);
+
+  return proxyRequest(request, `/api/knowledge/scan/import?${params.toString()}`, {
+    method: 'POST',
+  });
 }

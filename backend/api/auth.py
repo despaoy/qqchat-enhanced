@@ -1,10 +1,9 @@
 """用户认证API"""
-from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Response, Request
 
 from db.models import RegisterRequest, LoginRequest
-from db.database import db
+from db.adapter import db
 from app.config import create_access_token
 from app.dependencies import get_current_user
 
@@ -18,25 +17,33 @@ def _hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 
+def _set_auth_cookie(response: Response, token: str):
+    """设置 httpOnly Cookie 存储 JWT Token"""
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        secure=False,  # TODO: 生产环境改为 True（需HTTPS）
+        samesite="lax",
+        max_age=86400,  # 24小时，与JWT_EXPIRY_HOURS一致
+        path="/",
+    )
+
+
 @router.post("/api/auth/register")
-async def register(request: RegisterRequest):
+async def register(request: RegisterRequest, response: Response):
     """用户注册"""
-    conn = db._get_connection()
-    cursor = conn.cursor()
     try:
-        cursor.execute('SELECT id FROM users WHERE username = ?', (request.username,))
-        if cursor.fetchone():
+        existing = db.get_user_by_username(request.username)
+        if existing:
             raise HTTPException(status_code=409, detail="用户名已存在")
 
         password_hash = _hash_password(request.password)
-        now = datetime.now().isoformat()
-        cursor.execute(
-            'INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)',
-            (request.username, password_hash, now)
-        )
-        conn.commit()
-        user_id = cursor.lastrowid
+        user = db.add_user(request.username, password_hash)
+        user_id = user["id"]
+        now = user["created_at"]
         token = create_access_token(request.username, user_id)
+        _set_auth_cookie(response, token)
         return {
             "success": True,
             "token": token,
@@ -45,20 +52,14 @@ async def register(request: RegisterRequest):
     except HTTPException:
         raise
     except Exception as e:
-        conn.rollback()
         raise HTTPException(status_code=500, detail=f"注册失败: {str(e)}")
-    finally:
-        conn.close()
 
 
 @router.post("/api/auth/login")
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, response: Response):
     """用户登录"""
-    conn = db._get_connection()
-    cursor = conn.cursor()
     try:
-        cursor.execute('SELECT id, username, password_hash, created_at FROM users WHERE username = ?', (request.username,))
-        row = cursor.fetchone()
+        row = db.get_user_by_username(request.username)
         if not row:
             raise HTTPException(status_code=401, detail="用户名或密码错误")
 
@@ -68,6 +69,7 @@ async def login(request: LoginRequest):
             raise HTTPException(status_code=401, detail="用户名或密码错误")
 
         token = create_access_token(row['username'], row['id'])
+        _set_auth_cookie(response, token)
         return {
             "success": True,
             "token": token,
@@ -77,8 +79,15 @@ async def login(request: LoginRequest):
                 "created_at": row['created_at']
             }
         }
-    finally:
-        conn.close()
+    except HTTPException:
+        raise
+
+
+@router.post("/api/auth/logout")
+async def logout(response: Response):
+    """用户登出 - 清除 Cookie"""
+    response.delete_cookie(key="access_token", path="/")
+    return {"success": True}
 
 
 @router.get("/api/auth/me")

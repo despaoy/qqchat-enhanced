@@ -6,7 +6,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Request, HTTPException
 
-from db.database import db, LORA_DIR_MAP
+from db.adapter import db
+from db.database import LORA_DIR_MAP
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -63,13 +64,10 @@ async def scan_loras():
         if d.name in existing_map:
             # 更新已有记录
             try:
-                conn = db._get_connection()
-                cursor = conn.cursor()
-                cursor.execute('''
-                    UPDATE loras SET size = ?, trainedSteps = ?, totalSteps = ?
-                    WHERE name = ?
-                ''', (size_str, trained_steps, total_steps, d.name))
-                conn.commit()
+                db.execute_sql(
+                    'UPDATE loras SET size = :size, trainedSteps = :trained_steps, totalSteps = :total_steps WHERE name = :name',
+                    {"size": size_str, "trained_steps": trained_steps, "total_steps": total_steps, "name": d.name}
+                )
                 updated_count += 1
             except Exception as e:
                 logger.error(f"更新 LoRA 失败 {d.name}: {e}")
@@ -79,17 +77,17 @@ async def scan_loras():
         max_id = max((int(l["id"]) for l in existing_loras), default=0) + 1
 
         try:
-            conn = db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO loras (id, name, description, status, style, size, trainedSteps, totalSteps, createdAt)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                str(max_id), d.name, f"LoRA 适配器 - {d.name}", "inactive",
-                "", size_str, trained_steps, total_steps,
-                __import__('datetime').datetime.now().strftime("%Y-%m-%d")
-            ))
-            conn.commit()
+            db.add_lora({
+                "id": str(max_id),
+                "name": d.name,
+                "description": f"LoRA 适配器 - {d.name}",
+                "status": "inactive",
+                "style": "",
+                "size": size_str,
+                "trainedSteps": trained_steps,
+                "totalSteps": total_steps,
+                "createdAt": __import__('datetime').datetime.now().strftime("%Y-%m-%d"),
+            })
             new_count += 1
             logger.info(f"自动注册 LoRA: {d.name} (size={size_str})")
         except Exception as e:
@@ -123,21 +121,15 @@ async def update_lora_status(lora_id: str, request: Request):
 async def delete_lora(lora_id: str):
     """删除LoRA模型"""
     try:
-        conn = db._get_connection()
-        cursor = conn.cursor()
-
         # 检查LoRA是否存在
-        cursor.execute('SELECT * FROM loras WHERE id = ?', (lora_id,))
-        lora = cursor.fetchone()
+        loras = db.get_loras()
+        lora = next((l for l in loras if l["id"] == lora_id), None)
 
         if not lora:
-            conn.close()
             raise HTTPException(status_code=404, detail="LoRA模型不存在")
 
         # 删除LoRA
-        cursor.execute('DELETE FROM loras WHERE id = ?', (lora_id,))
-        conn.commit()
-        conn.close()
+        db.delete_lora(lora_id)
 
         logger.info(f"删除LoRA模型: {lora_id}")
         return {"success": True, "message": "LoRA模型已删除"}

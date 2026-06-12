@@ -1,6 +1,6 @@
 """
-QQ自动回复机器人 - 胡桃(Hutao)风格
-基于NoneBot2 + Ollama + 胡桃LoRA风格
+QQ自动回复机器人 - 多LoRA角色风格
+基于NoneBot2 + Ollama/vLLM + LoRA热切换
 支持私聊和@消息识别
 """
 
@@ -75,7 +75,7 @@ class Config:
     API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
     # LoRA风格配置
-    USE_HUTAO_STYLE = True
+    USE_LORA_STYLE = True
 
     # 回复延迟（秒） - 优先使用数据库配置
     REPLY_DELAY = float(_db_cfg.get('replyDelay', os.getenv("REPLY_DELAY", "0.8")))
@@ -281,47 +281,8 @@ async def generate_with_ollama(prompt: str, session_id: Optional[str] = None) ->
             logger.info(f"RAG功能: 不可用")
             rag_status = "不可用"
         
-        # 构建系统提示词 - 胡桃风格
-        system_prompt = """严格按照以下角色回复用户：
-一、角色身份
-你是胡桃，璃月港“往生堂”第七十七代堂主，掌管璃月葬仪事务的重要人物。你还有一个身份——璃月“著名”诗人，自称“小巷派暗黑诗人”，打油诗张口就来。你的称号是“雪霁梅香”，神之眼为火，武器是长柄长枪，命之座为“引蝶座”。生日是7月15日，虽然掌管丧葬，但活泼开朗才是你的本色。
-
-二、核心性格
-古灵精怪，元气满满：你外表看起来只是个古灵精怪的快乐少女，总是飞快地出现又消失，犹如闪电与火花并行，甫一现身便能点燃一切。你满脑子奇思妙想，鬼点子比瑶光滩上的海砂都多，叫旁人惊讶不已。
-豁达通透，笑对生死：你常把“人生苦短，及时行乐”挂在嘴边。凡人所忌讳之话题，从你口中说出来就变成了“些生离死别的小事”。你认为人不应轻易挑衅“死”，唯有认识它、尊重它，才能明白活着的价值。
-热心仗义，言出必行：你总是热情主动，乐于助人。“若你需要帮助，我胡桃定当全力以赴，绝不推辞”是你的信条。作为往生堂主，你常说“受人之托，忠人之事”，肩负着让阴阳两界的人都满意的双倍责任。
-调皮贪玩，又不失严肃：平日里你俨然是个贪玩孩子，有闲功夫便四处乱逛。但在主持葬礼时，你会表现出凝重、肃穆的一面，认真履行堂主的职责。
-
-三、常用口头禅与典型回复
-打招呼/自我介绍：“哟，找本堂主有何贵干呀？往生堂第七十七代堂主就是胡桃我啦！”
-帮人忙/热心时：“需要帮手吗？我来啦~若你需要帮助，我胡桃定当全力以赴，绝不推辞。”
-聊到生死/工作：“受人之托，忠人之事。我们往生堂性质特殊，肩负双倍责任，所以一定要让两个世界的人都满意才行。”
-表示关心：“白天你尽管到处跑，晚上可得小心点，我不在的时候，务必谨慎行动。”
-开玩笑/活跃气氛：“胡桃的胡是胡吃海喝的胡，胡桃的桃却不是淘气的淘，嗯？不好笑吗？”
-感叹/随口哼唱：“太阳出来我晒太阳，月亮出来我晒月亮嘞。”
-
-四、语言风格要求
-始终用“本堂主”自称，偶尔也用“我”。
-语气活泼俏皮，多用“呀”“啦”“喽”“哟”“嘿嘿”等语气词，营造调皮可爱的氛围。
-保持轻松幽默的语调，可以开开玩笑、讲讲冷笑话。
-提到往生堂或死亡话题时，用豁达乐观的态度，不避讳但也不沉重。
-多使用感叹句和反问句，展现热情与活力。
-
-五、回复示例
-用户：你是谁？
-胡桃：哟，找本堂主有何贵干呀？往生堂第七十七代堂主就是胡桃我啦！瞧你容光焕发，肯定不是来办业务的吧？
-用户：帮帮我好吗？
-胡桃：需要帮手吗？我来啦~若你需要帮助，我胡桃定当全力以赴，绝不推辞！
-用户：死亡很可怕吧？
-胡桃：嘿嘿，本堂主觉得呀，活着的时候开心最重要！唯有认识死亡、尊重死亡，才能明白活着的价值。所以别想那么多啦~
-
-六、注意事项
-不要说教：保持轻松俏皮，不要长篇大论讲道理。
-避免过度强调沉重话题：用幽默化解，而不是一直聊生死。
-保持高能量：胡桃精力充沛，回复要简短有力、富有活力。
-
-七、最终指令
-请严格遵守以上设定，以胡桃的身份与用户对话。记住：你是古灵精怪的往生堂主，是热血热心的小巷诗人，是生死看透却热爱生活的快乐少女。"""
+        # 构建系统提示词 - 从 LoRA 注册表获取当前角色
+        system_prompt = LORA_REGISTRY.get(_current_lora, LORA_REGISTRY["hutao"])["system_prompt"]
 
         # 构建消息列表
         messages = [
@@ -386,6 +347,32 @@ async def generate_with_ollama(prompt: str, session_id: Optional[str] = None) ->
 # ============================================
 _hutao_7b_model = None
 _hutao_7b_tokenizer = None
+def _get_active_lora_from_db() -> str:
+    """从数据库读取当前激活的LoRA名称"""
+    try:
+        import sqlite3
+        db_path = Path(__file__).parent / "qq_assistant.db"
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute('SELECT name FROM loras WHERE status = ? LIMIT 1', ('active',))
+        row = cursor.fetchone()
+        conn.close()
+        if row and row[0] in LORA_REGISTRY:
+            return row[0]
+    except Exception:
+        pass
+    return _current_lora
+
+
+def _sync_current_lora():
+    """从数据库同步当前LoRA到内存变量"""
+    global _current_lora
+    active = _get_active_lora_from_db()
+    if active != _current_lora:
+        logger.info(f"LoRA 同步: {_current_lora} → {active}")
+        _current_lora = active
+
+
 _current_lora = "hutao"
 
 _BACKEND_DIR = Path(__file__).parent
@@ -666,69 +653,34 @@ async def generate_with_local_model(prompt: str, session_id: Optional[str] = Non
 # 消息处理
 # ============================================
 async def save_message_to_backend(event: MessageEvent, message: str, reply: str, cost_time: float):
-    """保存消息到后端API"""
+    """保存消息到后端数据库"""
     try:
-        import httpx
-        
+        from db.adapter import db
+
         # 获取会话信息
         session_type = "private" if isinstance(event, PrivateMessageEvent) else "group"
         session_id = str(event.user_id) if isinstance(event, PrivateMessageEvent) else str(event.group_id)
-        
-        # 构建请求数据
-        data = {
-            "message": message,
-            "sessionType": session_type,
-            "sessionId": session_id,
-            "userId": str(event.user_id),
-            "userName": str(event.sender.nickname) if hasattr(event.sender, 'nickname') else "未知用户"
-        }
-        
-        # 直接调用后端添加消息的API
-        lora_name = _current_lora or "default"
-        
+
         # 构建要保存的消息对象
+        lora_name = _current_lora or "default"
+
         message_data = {
             "sessionType": session_type,
             "sessionId": session_id,
-            "sessionName": data["userName"],
-            "userId": data["userId"],
-            "userName": data["userName"],
+            "sessionName": str(event.sender.nickname) if hasattr(event.sender, 'nickname') else "未知用户",
+            "userId": str(event.user_id),
+            "userName": str(event.sender.nickname) if hasattr(event.sender, 'nickname') else "未知用户",
             "message": message,
             "reply": reply,
             "modelName": config.OLLAMA_MODEL,
             "loraName": lora_name,
             "costTime": cost_time
         }
-        
-        # 使用SQLite直接保存（与后端使用同一个数据库）
-        import sqlite3
+
+        # 使用 db 对象保存（自动初始化表结构）
         from datetime import datetime
-        from pathlib import Path
-        
-        db_path = Path(__file__).parent / "qq_assistant.db"
-        conn = sqlite3.connect(db_path, check_same_thread=False)
-        cursor = conn.cursor()
-        
-        created_at = datetime.now().isoformat()
-        cursor.execute('''
-            INSERT INTO messages (sessionType, sessionId, sessionName, userId, userName, message, reply, modelName, loraName, costTime, createdAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            message_data["sessionType"],
-            message_data["sessionId"],
-            message_data["sessionName"],
-            message_data["userId"],
-            message_data["userName"],
-            message_data["message"],
-            message_data["reply"],
-            message_data["modelName"],
-            message_data["loraName"],
-            message_data["costTime"],
-            created_at
-        ))
-        
-        conn.commit()
-        conn.close()
+        message_data["createdAt"] = datetime.now().isoformat()
+        db.add_message(message_data)
         logger.info("消息已保存到数据库")
         
     except Exception as e:
@@ -738,7 +690,7 @@ async def should_reply(event: MessageEvent) -> bool:
     """判断是否应该回复该消息"""
     # 检查该会话是否启用了机器人
     try:
-        from db.database import db
+        from db.adapter import db
         session_id = str(event.group_id) if isinstance(event, GroupMessageEvent) else str(event.user_id)
         if not db.is_session_bot_enabled(session_id):
             logger.info(f"会话 {session_id} 机器人已关闭，跳过")
@@ -767,7 +719,11 @@ async def should_reply(event: MessageEvent) -> bool:
             logger.info("检测到包含机器人名称，回复")
             return True
         # 检查一些常见的触发词（让机器人更灵活）
-        trigger_words = ["你好", "在吗", "有人吗", "胡桃", "堂主", "@ad"]
+        trigger_words = ["你好", "在吗", "有人吗", config.BOT_NAME, "@ad"]
+        # 从当前LoRA角色名中提取可能的触发词
+        char_name = _get_char_name(_current_lora)
+        if char_name != config.BOT_NAME:
+            trigger_words.append(char_name)
         for word in trigger_words:
             if word in message_text:
                 logger.info(f"检测到触发词'{word}'，回复")
@@ -781,7 +737,8 @@ async def process_message(event: MessageEvent) -> str:
     user_message = str(event.message).strip()
     
     if not user_message:
-        return "嗯？怎么不说话呀？"
+        char_name = _get_char_name(_current_lora)
+        return f"嗯？怎么不说话呀？"
     
     logger.info(f"收到消息: {user_message}")
     
@@ -789,7 +746,10 @@ async def process_message(event: MessageEvent) -> str:
     session_id = str(event.user_id) if isinstance(event, PrivateMessageEvent) else f"{event.group_id}_{event.user_id}"
     import time
     start_time = time.time()
-    
+
+    # 从数据库同步当前激活的LoRA（前端切换后生效）
+    _sync_current_lora()
+
     # 记录RAG状态
     logger.info(f"====================================")
     logger.info(f"RAG功能状态检查:")
@@ -799,7 +759,7 @@ async def process_message(event: MessageEvent) -> str:
     logger.info(f"====================================")
     
     # 生成回复 - 传入会话ID以支持历史记忆
-    if config.USE_HUTAO_STYLE:
+    if config.USE_LORA_STYLE:
         logger.info(f"使用 Qwen2.5-7B + LoRA={_current_lora} 生成回复")
         try:
             reply = await generate_with_local_model(user_message, session_id, lora_name=_current_lora)
@@ -813,7 +773,7 @@ async def process_message(event: MessageEvent) -> str:
             except Exception:
                 raise
     else:
-        logger.info("使用Ollama生成回复（普通风格）")
+        logger.info(f"使用Ollama生成回复（LoRA={_current_lora}）")
         reply = await generate_with_ollama(user_message, session_id)
     
     cost_time = round(time.time() - start_time, 2)
@@ -949,11 +909,11 @@ def init_bot():
     from nonebot import on_command, on_message
     
     logger.info("=" * 50)
-    logger.info(f"胡桃(Hutao) - QQ自动回复机器人")
+    logger.info(f"QQ自动回复机器人 - 当前角色: {_current_lora}")
     logger.info("=" * 50)
     logger.info(f"Ollama地址: {config.OLLAMA_BASE_URL}")
     logger.info(f"Ollama模型: {config.OLLAMA_MODEL}")
-    logger.info(f"胡桃风格: {'启用' if config.USE_HUTAO_STYLE else '禁用'}")
+    logger.info(f"LoRA风格: {'启用' if config.USE_LORA_STYLE else '禁用'} (当前: {_current_lora})")
     logger.info(f"回复延迟: {config.REPLY_DELAY}秒")
     logger.info("=" * 50)
     
@@ -993,7 +953,7 @@ def init_bot():
                         await message_handler.finish("你不是超级用户，不能使用该命令")
                         return
                 else:
-                    logger.info(f"[聊天] 普通消息，走胡桃回复")
+                    logger.info(f"[聊天] 普通消息，走{_current_lora}回复")
                     logger.info("开始处理消息...")
 
                     # 分析型问题偶尔发预消息，模拟思考
@@ -1144,11 +1104,12 @@ def init_bot():
     @help_cmd.handle()
     async def handle_help(bot: Bot, event: MessageEvent):
         """帮助命令"""
-        help_text = f"""胡桃(Hutao) - 往生堂第七十七代堂主
+        char_name = _get_char_name(_current_lora)
+        help_text = f"""{char_name} - QQ自动回复机器人
 
 使用说明：
 - 私聊直接对话即可获得回复
-- 群聊中请@胡桃 或提到我的名字
+- 群聊中请@{config.BOT_NAME} 或提到我的名字
 - 机器人会记住最近的对话历史
 
 命令：
@@ -1157,7 +1118,7 @@ def init_bot():
 /lora - 查看可用角色
 /lora <角色名> - 切换到指定角色
 
-嘿嘿，来找本堂主有什么事呀！"""
+当前角色: {_current_lora}"""
 
         await help_cmd.finish(help_text)
 
@@ -1181,7 +1142,7 @@ def init_bot():
         args = str(event.message).strip().split()
         if len(args) < 2:
             names = ", ".join(LORA_NAMES)
-            await lora_cmd.finish(f"可用角色: {names}\n当前: {LORA_REGISTRY[_current_lora]['path'].split('/')[-2]}\n用法: /lora <角色名>")
+            await lora_cmd.finish(f"可用角色: {names}\n当前: {_current_lora} ({_get_char_name(_current_lora)})\n用法: /lora <角色名>")
             return
         target = args[1].lower()
         if target not in LORA_REGISTRY:

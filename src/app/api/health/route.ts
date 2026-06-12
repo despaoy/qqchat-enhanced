@@ -1,20 +1,12 @@
-import { NextResponse } from 'next/server';
+import { proxyGet } from '@/lib/proxy';
 
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000';
-
-export async function GET() {
-  try {
-    const response = await fetch(`${BACKEND_URL}/health`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch health from backend');
-    }
-    const data = await response.json();
-    return NextResponse.json(data);
-  } catch (error) {
-    console.error('Error fetching health:', error);
-    return NextResponse.json(
-      { status: 'unhealthy', timestamp: new Date().toISOString() },
-      { status: 503 }
+export async function GET(request: Request) {
+  const response = await proxyGet(request, '/health');
+  if (!response.ok) {
+    return new Response(
+      JSON.stringify({ status: 'unhealthy', timestamp: new Date().toISOString() }),
+      { status: 503, headers: { 'Content-Type': 'application/json' } }
     );
   }
+  return response;
 }

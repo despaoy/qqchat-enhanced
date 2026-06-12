@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-from db.database import db
+from db.adapter import db
 from db.models import DatasetUploadRequest, TrainingStartRequest, DialogueGenerateRequest
 from app.config import INPUT_VALIDATOR_AVAILABLE, TRAINING_SCHEMA, generation_state, generation_state_lock, _search_character_info
 from app.module_manager import get_module_manager
@@ -786,26 +786,23 @@ class SaveDialoguesRequest(BaseModel):
 async def list_saved_dialogues():
     """列出所有已保存的对话"""
     try:
-        conn = db._get_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
+        rows = db.execute_sql('''
             SELECT id, name, character_desc, style, dialogue_count,
                    turn_stats, scene_stats, created_at, updated_at
             FROM saved_dialogues ORDER BY updated_at DESC
         ''')
-        rows = cursor.fetchall()
         items = []
         for row in rows:
             items.append({
-                "id": row[0],
-                "name": row[1],
-                "character_desc": row[2],
-                "style": row[3],
-                "dialogue_count": row[4],
-                "turn_stats": json.loads(row[5]) if row[5] else None,
-                "scene_stats": json.loads(row[6]) if row[6] else None,
-                "created_at": row[7],
-                "updated_at": row[8],
+                "id": row["id"],
+                "name": row["name"],
+                "character_desc": row["character_desc"],
+                "style": row["style"],
+                "dialogue_count": row["dialogue_count"],
+                "turn_stats": json.loads(row["turn_stats"]) if row["turn_stats"] else None,
+                "scene_stats": json.loads(row["scene_stats"]) if row["scene_stats"] else None,
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
             })
         return {"success": True, "items": items}
     except Exception as e:
@@ -817,25 +814,23 @@ async def list_saved_dialogues():
 async def save_dialogues(request: SaveDialoguesRequest):
     """保存对话数据"""
     try:
-        conn = db._get_connection()
-        cursor = conn.cursor()
         now = time.strftime("%Y-%m-%d %H:%M:%S")
-        cursor.execute('''
+        result = db.execute_sql_insert('''
             INSERT INTO saved_dialogues
             (name, character_desc, style, dialogue_count, dialogues_json, turn_stats, scene_stats, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            request.name,
-            request.character_desc,
-            request.style,
-            len(request.dialogues),
-            json.dumps(request.dialogues, ensure_ascii=False),
-            json.dumps(request.turn_stats) if request.turn_stats else None,
-            json.dumps(request.scene_stats) if request.scene_stats else None,
-            now, now,
-        ))
-        conn.commit()
-        return {"success": True, "id": cursor.lastrowid, "message": "保存成功"}
+            VALUES (:name, :character_desc, :style, :dialogue_count, :dialogues_json, :turn_stats, :scene_stats, :created_at, :updated_at)
+        ''', {
+            "name": request.name,
+            "character_desc": request.character_desc,
+            "style": request.style,
+            "dialogue_count": len(request.dialogues),
+            "dialogues_json": json.dumps(request.dialogues, ensure_ascii=False),
+            "turn_stats": json.dumps(request.turn_stats) if request.turn_stats else None,
+            "scene_stats": json.dumps(request.scene_stats) if request.scene_stats else None,
+            "created_at": now,
+            "updated_at": now,
+        })
+        return {"success": True, "id": result["lastrowid"], "message": "保存成功"}
     except Exception as e:
         logger.error(f"保存对话失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -845,28 +840,26 @@ async def save_dialogues(request: SaveDialoguesRequest):
 async def get_saved_dialogue(item_id: int):
     """获取单个已保存对话"""
     try:
-        conn = db._get_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
+        rows = db.execute_sql('''
             SELECT id, name, character_desc, style, dialogue_count,
                    dialogues_json, turn_stats, scene_stats, created_at, updated_at
-            FROM saved_dialogues WHERE id = ?
-        ''', (item_id,))
-        row = cursor.fetchone()
-        if not row:
+            FROM saved_dialogues WHERE id = :item_id
+        ''', {"item_id": item_id})
+        if not rows:
             raise HTTPException(status_code=404, detail="对话不存在")
+        row = rows[0]
         return {
             "success": True,
-            "id": row[0],
-            "name": row[1],
-            "character_desc": row[2],
-            "style": row[3],
-            "dialogue_count": row[4],
-            "dialogues": json.loads(row[5]),
-            "turn_stats": json.loads(row[6]) if row[6] else None,
-            "scene_stats": json.loads(row[7]) if row[7] else None,
-            "created_at": row[8],
-            "updated_at": row[9],
+            "id": row["id"],
+            "name": row["name"],
+            "character_desc": row["character_desc"],
+            "style": row["style"],
+            "dialogue_count": row["dialogue_count"],
+            "dialogues": json.loads(row["dialogues_json"]),
+            "turn_stats": json.loads(row["turn_stats"]) if row["turn_stats"] else None,
+            "scene_stats": json.loads(row["scene_stats"]) if row["scene_stats"] else None,
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
         }
     except HTTPException:
         raise
@@ -879,11 +872,8 @@ async def get_saved_dialogue(item_id: int):
 async def delete_saved_dialogue(item_id: int):
     """删除已保存对话"""
     try:
-        conn = db._get_connection()
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM saved_dialogues WHERE id = ?', (item_id,))
-        conn.commit()
-        if cursor.rowcount == 0:
+        rowcount = db.execute_sql('DELETE FROM saved_dialogues WHERE id = :item_id', {"item_id": item_id})
+        if rowcount == 0:
             raise HTTPException(status_code=404, detail="对话不存在")
         return {"success": True, "message": "删除成功"}
     except HTTPException:
@@ -897,25 +887,26 @@ async def delete_saved_dialogue(item_id: int):
 async def delete_dialogue_from_saved(item_id: int, dialogue_index: int):
     """从已保存对话中删除单条对话"""
     try:
-        conn = db._get_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT dialogues_json FROM saved_dialogues WHERE id = ?', (item_id,))
-        row = cursor.fetchone()
-        if not row:
+        rows = db.execute_sql('SELECT dialogues_json FROM saved_dialogues WHERE id = :item_id', {"item_id": item_id})
+        if not rows:
             raise HTTPException(status_code=404, detail="对话不存在")
 
-        dialogues = json.loads(row[0])
+        dialogues = json.loads(rows[0]["dialogues_json"])
         if dialogue_index < 0 or dialogue_index >= len(dialogues):
             raise HTTPException(status_code=400, detail="索引越界")
 
         dialogues.pop(dialogue_index)
         now = time.strftime("%Y-%m-%d %H:%M:%S")
-        cursor.execute('''
+        db.execute_sql('''
             UPDATE saved_dialogues
-            SET dialogues_json = ?, dialogue_count = ?, updated_at = ?
-            WHERE id = ?
-        ''', (json.dumps(dialogues, ensure_ascii=False), len(dialogues), now, item_id))
-        conn.commit()
+            SET dialogues_json = :dialogues_json, dialogue_count = :dialogue_count, updated_at = :updated_at
+            WHERE id = :item_id
+        ''', {
+            "dialogues_json": json.dumps(dialogues, ensure_ascii=False),
+            "dialogue_count": len(dialogues),
+            "updated_at": now,
+            "item_id": item_id,
+        })
         return {"success": True, "message": "删除成功", "remaining_count": len(dialogues)}
     except HTTPException:
         raise
@@ -928,15 +919,12 @@ async def delete_dialogue_from_saved(item_id: int, dialogue_index: int):
 async def create_dataset_from_saved(item_id: int, dataset_name: Optional[str] = None):
     """从已保存对话创建训练数据集"""
     try:
-        conn = db._get_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT name, dialogues_json FROM saved_dialogues WHERE id = ?', (item_id,))
-        row = cursor.fetchone()
-        if not row:
+        rows = db.execute_sql('SELECT name, dialogues_json FROM saved_dialogues WHERE id = :item_id', {"item_id": item_id})
+        if not rows:
             raise HTTPException(status_code=404, detail="对话不存在")
 
-        saved_name = row[0]
-        dialogues = json.loads(row[1])
+        saved_name = rows[0]["name"]
+        dialogues = json.loads(rows[0]["dialogues_json"])
         # 清理文件名中的非法字符（Windows不允许 / \ : * ? " < > |）
         raw_name = dataset_name or f"{saved_name}_dataset"
         ds_name = re.sub(r'[/\\:*?"<>|]', '_', raw_name)

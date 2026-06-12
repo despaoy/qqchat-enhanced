@@ -6,8 +6,9 @@
 import os
 import asyncio
 import logging
+import secrets
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 
@@ -17,7 +18,43 @@ from fastapi import HTTPException
 
 import jwt
 
-JWT_SECRET = os.getenv("JWT_SECRET", "qq-assistant-jwt-secret-change-in-production")
+__logger = logging.getLogger(__name__)
+
+
+def _ensure_jwt_secret() -> str:
+    """确保 JWT 密钥安全：优先从环境变量读取，否则自动生成并持久化到 .env"""
+    secret = os.getenv("JWT_SECRET", "")
+    if secret and secret != "qq-assistant-jwt-secret-change-in-production" and len(secret) >= 32:
+        return secret
+    # 自动生成安全密钥
+    new_secret = secrets.token_urlsafe(48)
+    env_path = Path(__file__).parent.parent / ".env"
+    try:
+        lines = []
+        if env_path.exists():
+            with open(env_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        # 更新或添加 JWT_SECRET
+        found = False
+        for i, line in enumerate(lines):
+            if line.strip().startswith("JWT_SECRET="):
+                lines[i] = f"JWT_SECRET={new_secret}\n"
+                found = True
+                break
+        if not found:
+            lines.append(f"JWT_SECRET={new_secret}\n")
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+        os.environ["JWT_SECRET"] = new_secret
+        __logger.warning("⚠️ JWT_SECRET 已自动生成安全密钥并保存到 .env，请妥善保管")
+    except Exception as e:
+        __logger.error(f"自动生成 JWT_SECRET 失败: {e}")
+        # 降级：仅在内存中使用生成的密钥（重启后失效）
+        os.environ["JWT_SECRET"] = new_secret
+    return new_secret
+
+
+JWT_SECRET = _ensure_jwt_secret()
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = 24
 
@@ -27,8 +64,9 @@ def create_access_token(username: str, user_id: int) -> str:
     payload = {
         "sub": username,
         "user_id": user_id,
-        "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRY_HOURS),
-        "iat": datetime.utcnow(),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
+        "iat": datetime.now(timezone.utc),
+        "jti": secrets.token_urlsafe(16),  # 唯一ID，支持吊销
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
@@ -58,7 +96,7 @@ llm_max_queue = 100  # 最大排队数
 # 角色信息网络搜索工具
 # ============================================
 
-logger = logging.getLogger(__name__)
+# _logger 已在文件顶部定义为 __logger
 
 
 def _search_character_info(character_desc: str, max_results: int = 3) -> str:
@@ -138,9 +176,9 @@ def _search_character_info(character_desc: str, max_results: int = 3) -> str:
                 pass
 
     if result:
-        logger.info(f"角色信息搜索成功: {len(result)} 字符")
+        _logger.info(f"角色信息搜索成功: {len(result)} 字符")
     else:
-        logger.info("角色信息搜索无结果（网络受限），将基于用户描述生成")
+        _logger.info("角色信息搜索无结果（网络受限），将基于用户描述生成")
 
     return result
 

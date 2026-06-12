@@ -1450,6 +1450,131 @@ class ApiClient {
   async forceGC(): Promise<{ success: boolean; memory_freed_gb: number; before: { used_gb: number; percent: number }; after: { used_gb: number; percent: number } }> {
     return this.request('/module/gc', { method: 'POST' });
   }
+
+  /** 删除样本 */
+  async deleteIntentSample(label: string, index: number): Promise<{ success: boolean }> {
+    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/samples?label=${encodeURIComponent(label)}&index=${index}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (!response.ok) throw new Error('删除样本失败');
+    return response.json();
+  }
+
+  /** 获取训练样本 */
+  async getIntentSamples(): Promise<{ success: boolean; samples: Record<string, string[]>; stats: Record<string, number> }> {
+    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/samples`, {
+      credentials: 'include',
+    });
+    if (!response.ok) throw new Error('获取样本失败');
+    return response.json();
+  }
+
+  /** 保存全部样本（批量覆盖） */
+  async saveIntentSamples(samples: Record<string, string[]>): Promise<{ success: boolean; stats: Record<string, number> }> {
+    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/samples`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ samples }),
+      credentials: 'include',
+    });
+    if (!response.ok) throw new Error('保存样本失败');
+    return response.json();
+  }
+
+  /** 编辑样本 */
+  async updateIntentSample(label: string, index: number, text: string): Promise<{ success: boolean }> {
+    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/samples`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label, index, text }),
+      credentials: 'include',
+    });
+    if (!response.ok) throw new Error('编辑样本失败');
+    return response.json();
+  }
+
+  /** 添加样本 */
+  async addIntentSample(label: string, text: string): Promise<{ success: boolean }> {
+    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/samples`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label, text }),
+      credentials: 'include',
+    });
+    if (!response.ok) throw new Error('添加样本失败');
+    return response.json();
+  }
+
+  /** 生成训练样本（LLM基于知识库文档） */
+  async generateIntentSamples(params: { kb_ids: number[]; samples_per_kb?: number; negative_count?: number; lora_name?: string }): Promise<{ success: boolean; message?: string; error?: string }> {
+    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+      credentials: 'include',
+    });
+    if (!response.ok) throw new Error('启动样本生成失败');
+    return response.json();
+  }
+
+  /** 查询样本生成进度 */
+  async getGenerationStatus(): Promise<{ success: boolean; status: { running: boolean; progress: number; stage: string; message: string } }> {
+    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/generate/status`, {
+      credentials: 'include',
+    });
+    if (!response.ok) throw new Error('获取生成状态失败');
+    return response.json();
+  }
+
+  /** 启动意图分类器训练 */
+  async trainIntentClassifier(params?: { kb_ids?: number[] }): Promise<{ success: boolean; message?: string; error?: string }> {
+    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params || {}),
+      credentials: 'include',
+    });
+    if (!response.ok) throw new Error('启动训练失败');
+    return response.json();
+  }
+
+  /** 查询训练状态 */
+  async getIntentTrainingStatus(): Promise<{ success: boolean; status: { running: boolean; progress: number; stage: string; message: string; logs?: string[]; result?: Record<string, unknown> } }> {
+    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/status`, {
+      credentials: 'include',
+    });
+    if (!response.ok) throw new Error('获取训练状态失败');
+    return response.json();
+  }
+
+  /** 取消训练/生成 */
+  async cancelIntentTraining(): Promise<{ success: boolean; message: string }> {
+    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/cancel`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+    if (!response.ok) throw new Error('取消失败');
+    return response.json();
+  }
+
+  /** 获取意图分类模型信息 */
+  async getIntentModelInfo(): Promise<{ success: boolean; model: { exists: boolean; model_type?: string; label_names?: string[]; training_samples?: number; accuracy?: number; trained_at?: string; samples_per_class?: Record<string, number> } }> {
+    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/model`, {
+      credentials: 'include',
+    });
+    if (!response.ok) throw new Error('获取模型信息失败');
+    return response.json();
+  }
+
+  /** 获取活跃知识库 */
+  async getActiveKnowledgeBases(): Promise<{ success: boolean; active_kbs: { kbName: string; isActive: number }[] }> {
+    const response = await fetch(`${API_BASE_URL}/knowledge/train-intent/active-kbs`, {
+      credentials: 'include',
+    });
+    if (!response.ok) throw new Error('获取活跃知识库失败');
+    return response.json();
+  }
 }
 
 // 导出单例实例

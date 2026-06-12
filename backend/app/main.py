@@ -5,12 +5,26 @@
 """
 import sys
 from pathlib import Path
+import os
 import logging
 
 # 确保 backend 根目录在 Python 路径中，支持跨包导入
 _BACKEND_ROOT = Path(__file__).parent.parent
 if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
+
+# 加载 .env 文件到环境变量（确保 worker 进程也能读取配置）
+_env_path = _BACKEND_ROOT / ".env"
+if _env_path.exists():
+    with open(_env_path, "r", encoding="utf-8") as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _key, _, _value = _line.partition("=")
+                _key = _key.strip()
+                _value = _value.strip()
+                if _key and _key not in os.environ:
+                    os.environ[_key] = _value
 
 import asyncio
 from contextlib import asynccontextmanager
@@ -28,7 +42,7 @@ from app.config import (
     FAILOVER_AVAILABLE, ACCESS_CONTROL_AVAILABLE,
     load_balancer_mgr, circuit_breaker_registry,
 )
-from db.database import db
+from db.adapter import db
 
 logger = logging.getLogger("main")
 
@@ -57,6 +71,23 @@ async def lifespan(app: FastAPI):
 
     logger.info("🚀 QQ智能助手后端服务启动中（增强版）...")
 
+    # 初始化数据库
+    try:
+        db.init()
+        logger.info("✅ 数据库初始化完成")
+    except Exception as e:
+        logger.error(f"数据库初始化失败: {e}")
+
+    # 初始化 Redis 缓存（可选，失败不影响服务）
+    try:
+        from cache.redis_client import get_redis, health_check
+        if health_check():
+            logger.info("✅ Redis 缓存连接正常")
+        else:
+            logger.warning("⚠️ Redis 缓存连接失败，将使用数据库直连模式")
+    except Exception as e:
+        logger.warning(f"Redis 缓存初始化跳过: {e}")
+
     if RESOURCE_POOL_AVAILABLE:
         try:
             from infra.resource_pool import ConnectionPool, HttpClientPool
@@ -72,7 +103,8 @@ async def lifespan(app: FastAPI):
             from infra.backup_manager import BackupManager
             db_path = str(_BACKEND_ROOT / "qq_assistant.db")
             backup_mgr = BackupManager(db_path)
-            backup_mgr.start_scheduled_backup()
+            import asyncio
+            asyncio.create_task(backup_mgr.start_scheduled_backup())
             logger.info("✅ 备份管理器初始化完成")
         except Exception as e:
             logger.warning(f"备份管理器初始化失败: {e}")
@@ -137,7 +169,7 @@ app.add_middleware(
 # ── 安全中间件（可通过环境变量控制开关） ──
 import os
 
-_SECURITY_ENABLED = os.getenv("SECURITY_MIDDLEWARE_ENABLED", "false").lower() == "true"
+_SECURITY_ENABLED = os.getenv("SECURITY_MIDDLEWARE_ENABLED", "true").lower() == "true"
 
 if _SECURITY_ENABLED:
     try:
@@ -195,9 +227,13 @@ async def health_check():
 @app.get("/ready")
 async def readiness_check():
     try:
-        conn = db._get_connection()
-        conn.execute("SELECT 1")
-        conn.close()
+        from db.adapter import is_pg_mode
+        if is_pg_mode():
+            db.get_config()
+        else:
+            conn = db.get_connection()
+            conn.execute("SELECT 1")
+            conn.close()
         return {"status": "ready"}
     except Exception:
         from fastapi import HTTPException

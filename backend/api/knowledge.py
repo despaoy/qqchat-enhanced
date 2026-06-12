@@ -1,4 +1,5 @@
 """知识库API - 知识库/文件夹/文档管理 + ZIP上传 + 文件夹扫描 + 搜索"""
+import asyncio
 import logging
 import io
 import zipfile
@@ -7,7 +8,7 @@ from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 
-from db.database import db
+from db.adapter import db
 from db.models import (
     KnowledgeBaseCreate, KnowledgeBaseUpdate,
     KnowledgeFolderCreate,
@@ -699,10 +700,7 @@ async def update_knowledge_document(doc_id: int, request: KnowledgeDocumentUpdat
 
         # 如果内容更新了，重新分块
         if "content" in update_data:
-            conn = db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute('DELETE FROM knowledge_chunks WHERE documentId = ?', (doc_id,))
-            conn.commit()
+            db.execute_sql('DELETE FROM knowledge_chunks WHERE documentId = :doc_id', {"doc_id": doc_id})
 
             # 获取路径信息用于注入
             kb_name = ""
@@ -909,4 +907,179 @@ async def get_vector_stats():
         return {"success": True, "stats": stats}
     except Exception as e:
         logger.error(f"获取向量数据库统计失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# 意图分类器训练
+# ============================================
+
+@router.post("/api/knowledge/train-intent/generate")
+async def generate_intent_samples(request: dict = None):
+    """生成训练样本（LLM基于知识库文档生成，不训练）"""
+    try:
+        from knowledge.intent_trainer import generate_samples, get_generation_status
+
+        status = get_generation_status()
+        if status["running"]:
+            return {"success": False, "error": "样本生成正在进行中"}
+
+        params = request or {}
+        kb_ids = params.get("kb_ids", [])
+        samples_per_kb = params.get("samples_per_kb", 100)
+        negative_count = params.get("negative_count", 200)
+        lora_name = params.get("lora_name")
+
+        asyncio.create_task(generate_samples(kb_ids, samples_per_kb, negative_count, lora_name))
+        return {"success": True, "message": "样本生成已启动"}
+    except Exception as e:
+        logger.error(f"启动样本生成失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/knowledge/train-intent/generate/status")
+async def get_generation_status():
+    """查询样本生成进度"""
+    try:
+        from knowledge.intent_trainer import get_generation_status as get_status
+        return {"success": True, "status": get_status()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/knowledge/train-intent/samples")
+async def get_intent_samples():
+    """获取当前所有训练样本"""
+    try:
+        from knowledge.intent_trainer import get_samples
+        return {"success": True, **get_samples()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/api/knowledge/train-intent/samples")
+async def update_intent_sample(request: dict):
+    """编辑单条样本"""
+    try:
+        from knowledge.intent_trainer import update_sample
+        result = update_sample(request.get("label"), request.get("index"), request.get("text"))
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/api/knowledge/train-intent/samples")
+async def delete_intent_sample(label: str, index: int):
+    """删除单条样本"""
+    try:
+        from knowledge.intent_trainer import delete_sample
+        result = delete_sample(label, index)
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/api/knowledge/train-intent/samples")
+async def batch_save_intent_samples(request: dict):
+    """批量保存样本（覆盖写入）"""
+    try:
+        from knowledge.intent_trainer import save_samples
+        result = save_samples(request.get("samples", {}))
+        return {"success": True, "stats": result.get("stats", {})}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/knowledge/train-intent/samples")
+async def add_intent_sample(request: dict):
+    """添加单条样本"""
+    try:
+        from knowledge.intent_trainer import add_sample
+        result = add_sample(request.get("label"), request.get("text"))
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/knowledge/train-intent")
+async def train_intent_classifier(request: dict = None):
+    """使用已审查的样本训练多分类模型"""
+    try:
+        from knowledge.intent_trainer import train_intent_classifier as do_train, get_training_status
+
+        status = get_training_status()
+        if status["running"]:
+            return {"success": False, "error": "训练正在进行中"}
+
+        params = request or {}
+        kb_ids = params.get("kb_ids")
+
+        asyncio.create_task(do_train(kb_ids=kb_ids))
+        return {"success": True, "message": "训练已启动"}
+    except Exception as e:
+        logger.error(f"启动意图训练失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/knowledge/train-intent/status")
+async def get_intent_training_status():
+    """查询训练进度"""
+    try:
+        from knowledge.intent_trainer import get_training_status
+        return {"success": True, "status": get_training_status()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/knowledge/train-intent/cancel")
+async def cancel_intent_training():
+    """取消训练/生成"""
+    try:
+        from knowledge.intent_trainer import cancel_training
+        result = cancel_training()
+        return {"success": result, "message": "已发送取消请求" if result else "没有正在进行的任务"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/knowledge/train-intent/model")
+async def get_intent_model_info():
+    """获取当前模型信息"""
+    try:
+        from knowledge.intent_trainer import get_model_info
+        return {"success": True, "model": get_model_info()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/knowledge/train-intent/active-kbs")
+async def get_active_knowledge_bases():
+    """获取参与检索的知识库"""
+    try:
+        from knowledge.intent_trainer import get_active_knowledge_bases as get_kbs
+        return {"success": True, "active_kbs": get_kbs()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/knowledge/train-intent/active-kbs")
+async def set_active_knowledge_bases(request: dict):
+    """设置参与检索的知识库"""
+    try:
+        from knowledge.intent_trainer import set_active_knowledge_bases as set_kbs
+        result = set_kbs(request.get("kb_ids", []))
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        return {"success": True, "active_kbs": result.get("active_kbs", [])}
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

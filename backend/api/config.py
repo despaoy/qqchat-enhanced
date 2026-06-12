@@ -3,11 +3,12 @@ import logging
 
 from fastapi import APIRouter, Request, HTTPException
 
-from db.database import db
+from db.adapter import db
 from app.config import (
     INPUT_VALIDATOR_AVAILABLE,
     CONFIG_SCHEMA,
 )
+from cache.config_cache import get_cached_config, set_cached_config, invalidate_config_cache
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -19,10 +20,14 @@ router = APIRouter()
 
 @router.get("/api/config")
 async def get_config():
-    """获取系统配置"""
-    return {
-        "config": db.config
-    }
+    """获取系统配置（Redis 缓存优先，TTL 60s）"""
+    cached = get_cached_config()
+    if cached is not None:
+        return {"config": cached, "cached": True}
+
+    config = db.config
+    set_cached_config(config)
+    return {"config": config}
 
 
 @router.put("/api/config")
@@ -33,12 +38,13 @@ async def update_config(request: Request):
     if INPUT_VALIDATOR_AVAILABLE:
         from infra.input_validator import InputValidator
         for key, value in new_config.items():
-            # 验证每个键值对
             entry = {"key": str(key), "value": str(value)}
             is_valid, errors = InputValidator.validate(entry, CONFIG_SCHEMA)
             if not is_valid:
                 raise HTTPException(status_code=422, detail={"message": f"配置项 '{key}' 验证失败", "errors": errors})
     db.update_config(new_config)
+    # 使缓存失效
+    invalidate_config_cache()
     # 同步OpenAI兼容提供商配置
     compat_keys = {'openaiCompatBaseUrl', 'openaiCompatApiKey', 'openaiCompatModel'}
     if compat_keys & set(new_config.keys()):
@@ -107,9 +113,8 @@ async def set_model_provider(request: Request):
         success = model_manager.set_provider(provider_map[provider_name])
 
         if success:
-            # 同步更新数据库中的modelProvider配置
             db.update_config({"modelProvider": provider_name})
-            # 如果切换到openai_compat，同步API配置
+            invalidate_config_cache()
             if provider_name == "openai_compat":
                 compat_provider = model_manager.get_current_provider()
                 cfg = db.config

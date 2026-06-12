@@ -1,27 +1,5 @@
-import { NextResponse } from 'next/server';
-
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000';
+import { proxyPost } from '@/lib/proxy';
 
 export async function POST(request: Request) {
-  try {
-    const body = await request.json();
-    const response = await fetch(`${BACKEND_URL}/api/knowledge/search`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      throw new Error('Failed to search knowledge');
-    }
-    const data = await response.json();
-    return NextResponse.json(data);
-  } catch (error) {
-    console.error('Error searching knowledge:', error);
-    return NextResponse.json(
-      { error: 'Failed to search knowledge' },
-      { status: 500 }
-    );
-  }
+  return proxyPost(request, '/api/knowledge/search');
 }

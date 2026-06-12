@@ -679,18 +679,19 @@ class VLLMClient:
     # ------------------------------------------------------------------
 
     def _resolve_model_name(self, lora_name: Optional[str]) -> str:
-        """解析模型名称，附加 LoRA 后缀
+        """解析模型名称，返回 LoRA 或基础模型 ID
 
-        vLLM 使用 model_name:lora_name 格式指定 LoRA
+        vLLM 启动时通过 --lora-modules 注册的 LoRA 拥有独立模型 ID，
+        直接使用该 ID 即可，无需 base:lora 格式。
 
         Args:
             lora_name: LoRA 适配器名称
 
         Returns:
-            完整的模型名称
+            模型名称（LoRA 时直接返回 lora_name，否则返回基础模型）
         """
         if lora_name:
-            return f"{self._model}:{lora_name}"
+            return lora_name
         return self._model
 
     def _compute_backoff(self, attempt: int) -> float:

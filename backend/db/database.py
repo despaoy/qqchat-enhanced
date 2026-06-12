@@ -58,6 +58,10 @@ class SQLiteDB:
             conn.execute('PRAGMA foreign_keys=ON')
             self._local.conn = conn
         return self._local.conn
+
+    def get_connection(self):
+        """获取数据库连接（公开接口）"""
+        return self._get_connection()
     
     def close_connection(self):
         """关闭当前线程的数据库连接"""
@@ -908,18 +912,28 @@ class SQLiteDB:
             return dict(row)
         return None
     
+    # knowledge_documents 表允许更新的列名白名单
+    KNOWLEDGE_DOC_UPDATABLE_COLUMNS = {
+        "title", "content", "summary", "folderId", "kbId",
+        "chunkCount", "charCount", "status", "tags", "source",
+        "updatedAt",
+    }
+
     def update_knowledge_document(self, doc_id: int, document: Dict):
-        """更新知识库文档 - 只更新提供的字段"""
+        """更新知识库文档 - 只更新提供的字段（白名单校验）"""
         conn = self._get_connection()
         cursor = conn.cursor()
         now = datetime.now().isoformat()
-        
-        # 构建动态SET子句，只更新提供的字段
+
+        # 构建动态SET子句，只更新提供的字段（白名单校验防止SQL注入）
         set_clauses = ["updatedAt = ?"]
         values = [now]
-        
+
         for key, value in document.items():
             if key in ("id", "createdAt"):
+                continue
+            if key not in self.KNOWLEDGE_DOC_UPDATABLE_COLUMNS:
+                logger.warning(f"update_knowledge_document: 忽略非法列名 '{key}'")
                 continue
             if value is not None:
                 set_clauses.append(f"{key} = ?")
@@ -1152,6 +1166,142 @@ class SQLiteDB:
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute('DELETE FROM claw_tools WHERE name = ?', (name,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    # ============================================
+    # 通用 SQL 执行（兼容 PostgreSQL 模式）
+    # ============================================
+    def execute_sql(self, query: str, params: Optional[dict] = None):
+        """执行原始 SQL 语句，返回结果。
+
+        对于 SELECT 语句，返回行列表（每行为 dict）。
+        对于 INSERT/UPDATE/DELETE，返回受影响行数。
+        params 必须是 dict 格式的命名参数，如 {"username": "test"}。
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(query, params or {})
+            if query.strip().upper().startswith("SELECT"):
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+            else:
+                conn.commit()
+                return cursor.rowcount
+        except Exception:
+            conn.rollback()
+            raise
+
+    def execute_sql_insert(self, query: str, params: Optional[dict] = None) -> dict:
+        """执行 INSERT SQL 并返回插入的行信息（包含自动生成的 ID）"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(query, params or {})
+            conn.commit()
+            lastrowid = cursor.lastrowid
+            return {"lastrowid": lastrowid, "rowcount": cursor.rowcount}
+        except Exception:
+            conn.rollback()
+            raise
+
+    # ============================================
+    # 用户管理（高层方法）
+    # ============================================
+    def get_user_by_username(self, username: str):
+        """通过用户名查找用户"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, username, password_hash, created_at FROM users WHERE username = ?', (username,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def add_user(self, username: str, password_hash: str):
+        """添加用户，返回用户信息 dict"""
+        now = datetime.now().isoformat()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            'INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)',
+            (username, password_hash, now)
+        )
+        conn.commit()
+        user_id = cursor.lastrowid
+        return {"id": user_id, "username": username, "created_at": now}
+
+    # ============================================
+    # 用户数据持久化（高层方法）
+    # ============================================
+    def get_user_data(self, user_id: int, page_key: Optional[str] = None):
+        """获取用户表单数据"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        if page_key:
+            cursor.execute(
+                'SELECT page_key, data_json, updated_at FROM user_data WHERE user_id = ? AND page_key = ?',
+                (user_id, page_key)
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return {"page_key": row['page_key'], "data_json": row['data_json'], "updated_at": row['updated_at']}
+        else:
+            cursor.execute('SELECT page_key, data_json, updated_at FROM user_data WHERE user_id = ?', (user_id,))
+            rows = cursor.fetchall()
+            data = {
+                row['page_key']: {
+                    "data_json": row['data_json'],
+                    "updated_at": row['updated_at']
+                }
+                for row in rows
+            }
+            return data
+
+    def save_user_data(self, user_id: int, page_key: str, data_json: str) -> bool:
+        """保存用户表单数据（upsert）"""
+        now = datetime.now().isoformat()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO user_data (user_id, page_key, data_json, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, page_key) DO UPDATE SET
+                data_json = excluded.data_json,
+                updated_at = excluded.updated_at
+        ''', (user_id, page_key, data_json, now))
+        conn.commit()
+        return True
+
+    # ============================================
+    # LoRA 管理（高层方法）
+    # ============================================
+    def add_lora(self, lora: Dict):
+        """添加 LoRA 模型"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO loras (id, name, description, status, style, size, trainedSteps, totalSteps, createdAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            lora.get("id"),
+            lora.get("name", ""),
+            lora.get("description", ""),
+            lora.get("status", "inactive"),
+            lora.get("style", ""),
+            lora.get("size", ""),
+            lora.get("trainedSteps", 0),
+            lora.get("totalSteps", 0),
+            lora.get("createdAt", datetime.now().strftime("%Y-%m-%d")),
+        ))
+        conn.commit()
+        return lora
+
+    def delete_lora(self, lora_id: str) -> bool:
+        """删除 LoRA 模型"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM loras WHERE id = ?', (lora_id,))
         conn.commit()
         return cursor.rowcount > 0
 

@@ -7,7 +7,8 @@ import logging
 from fastapi import APIRouter, HTTPException
 from db.models import MessageRequest, GenerateResponse
 
-from db.database import db, LORA_PATH_MAP
+from db.adapter import db
+from db.database import LORA_PATH_MAP
 from app.config import (
     llm_semaphore, circuit_breaker_registry, load_balancer_mgr,
     response_cache, rate_limiter, failover_mgr,
@@ -20,18 +21,30 @@ if INPUT_VALIDATOR_AVAILABLE:
 
 logger = logging.getLogger(__name__)
 
-# ── vLLM 客户端（高并发推理） ──
-_VLLM_ENABLED = os.getenv("VLLM_ENABLED", "false").lower() == "true"
+# ── vLLM 客户端（延迟初始化） ──
 _vllm_client = None
+_vllm_initialized = False
 
-if _VLLM_ENABLED:
-    try:
-        from inference.vllm_client import VLLMClient
-        _vllm_client = VLLMClient()
-        logger.info("✅ vLLM 客户端初始化成功")
-    except Exception as e:
-        logger.warning(f"vLLM 客户端初始化失败: {e}")
-        _VLLM_ENABLED = False
+
+def _ensure_vllm():
+    """延迟初始化 vLLM 客户端，确保 .env 已加载"""
+    global _vllm_client, _vllm_initialized
+    if _vllm_initialized:
+        return _vllm_client is not None
+    _vllm_initialized = True
+    vllm_enabled = (
+        os.getenv("VLLM_ENABLED", "").lower() == "true"
+        or bool(os.getenv("VLLM_BASE_URLS", "").strip())
+    )
+    if vllm_enabled:
+        try:
+            from inference.vllm_client import VLLMClient
+            _vllm_client = VLLMClient()
+            logger.info("✅ vLLM 客户端初始化成功")
+            return True
+        except Exception as e:
+            logger.warning(f"vLLM 客户端初始化失败: {e}")
+    return False
 
 # 确保熔断器已注册（仅首次）
 if CIRCUIT_BREAKER_AVAILABLE and circuit_breaker_registry:
@@ -82,12 +95,20 @@ async def generate_reply(request: MessageRequest):
         active_lora = next((l for l in db.loras if l["status"] == "active"), None)
         lora_name = active_lora["name"] if active_lora else "default"
 
+    # 将数据库中的LoRA名称映射到vLLM注册的名称
+    # 数据库: hutao_lora_7b / minamo_lora  →  vLLM: hutao / minamo
+    _LORA_NAME_MAP = {
+        "hutao_lora_7b": "hutao",
+        "minamo_lora": "minamo",
+    }
+    vllm_lora_name = _LORA_NAME_MAP.get(lora_name, lora_name)
+
     start_time = time.time()
 
     # ── 优先使用 vLLM 高并发推理 ──
-    if _VLLM_ENABLED and _vllm_client:
+    if _ensure_vllm() and _vllm_client:
         try:
-            reply = await _generate_with_vllm(request, lora_name)
+            reply = await _generate_with_vllm(request, vllm_lora_name)
             cost_time = round(time.time() - start_time, 2)
 
             await _save_message(request, reply, "vllm", lora_name, cost_time)
@@ -295,7 +316,7 @@ async def _save_message(request: MessageRequest, reply: str, model_name: str, lo
 @router.get("/api/vllm/status")
 async def vllm_status():
     """查询 vLLM 实例状态"""
-    if not _VLLM_ENABLED or not _vllm_client:
+    if not _ensure_vllm() or not _vllm_client:
         return {"enabled": False, "instances": []}
     return {
         "enabled": True,

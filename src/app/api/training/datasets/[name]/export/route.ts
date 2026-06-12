@@ -1,28 +1,23 @@
-import { NextResponse } from 'next/server';
-
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000';
+import { proxyGet } from '@/lib/proxy';
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ name: string }> }
 ) {
-  try {
-    const { name } = await params;
-    const response = await fetch(`${BACKEND_URL}/api/training/datasets/${encodeURIComponent(name)}/export`);
-    if (!response.ok) {
-      return NextResponse.json({ error: '导出数据集失败' }, { status: response.status });
-    }
-    const blob = await response.blob();
-    // RFC 5987 编码文件名，支持中文
-    const encodedName = encodeURIComponent(name);
-    return new NextResponse(blob, {
-      headers: {
-        'Content-Type': 'application/zip',
-        'Content-Disposition': `attachment; filename*=UTF-8''${encodedName}.zip`,
-      },
+  const { name } = await params;
+  const response = await proxyGet(request, `/api/training/datasets/${encodeURIComponent(name)}/export`);
+  if (!response.ok) {
+    return new Response(JSON.stringify({ error: '导出数据集失败' }), {
+      status: response.status,
+      headers: { 'Content-Type': 'application/json' },
     });
-  } catch (error) {
-    console.error('Error exporting dataset:', error);
-    return NextResponse.json({ error: '导出数据集失败' }, { status: 500 });
   }
+  const blob = await response.blob();
+  const encodedName = encodeURIComponent(name);
+  return new Response(blob, {
+    headers: {
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodedName}.zip`,
+    },
+  });
 }

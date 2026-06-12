@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from datetime import datetime
 
 from db.models import StatsResponse
-from db.database import db
+from db.adapter import db
 from app.config import service_start_time
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])

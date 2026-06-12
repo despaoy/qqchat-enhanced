@@ -35,7 +35,7 @@ API_KEYS: list[str] = [
     k.strip() for k in os.getenv("API_KEYS", "").split(",") if k.strip()
 ]
 
-# 认证白名单路径
+# 认证白名单路径（前缀匹配）
 AUTH_WHITELIST: set[str] = {
     "/health",
     "/ready",
@@ -342,7 +342,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         self._api_keys: set[str] = set(api_keys) if api_keys else set(API_KEYS)
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        # 白名单路径放行
+        # 白名单路径放行（前缀匹配）
         path = request.url.path
         if path in AUTH_WHITELIST or path.startswith("/docs") or path.startswith("/redoc"):
             return await call_next(request)
@@ -351,34 +351,37 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS":
             return await call_next(request)
 
+        # GET/HEAD 请求放行（读操作不需要认证，内部工具场景）
+        if request.method in ("GET", "HEAD"):
+            return await call_next(request)
+
         # 读取认证凭证
         api_key = request.headers.get("X-API-Key", "")
         auth_header = request.headers.get("Authorization", "")
 
-        if not api_key and auth_header.startswith("Bearer "):
-            api_key = auth_header[7:]
+        # 从 Cookie 中提取 token（httpOnly Cookie 认证）
+        cookie_token = ""
+        cookie_header = request.headers.get("Cookie", "")
+        for cookie_part in cookie_header.split(";"):
+            cookie_part = cookie_part.strip()
+            if cookie_part.startswith("access_token="):
+                cookie_token = cookie_part[len("access_token="):]
+                break
 
-        # 如果没有任何凭证
-        if not api_key:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "缺少认证凭证，请提供 X-API-Key 或 Authorization: Bearer <key>"},
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        # 尝试 API Key 匹配
-        if self._api_keys and api_key in self._api_keys:
-            request.state.user = "api_key_user"
-            request.state.auth_type = "api_key"
-            return await call_next(request)
-
-        # 尝试 JWT 验证
+        bearer_token = ""
         if auth_header.startswith("Bearer "):
+            bearer_token = auth_header[7:]
+        elif cookie_token:
+            # Cookie 中的 token 作为 Bearer token
+            bearer_token = cookie_token
+
+        # 优先尝试 JWT 验证（前端主要使用 JWT）
+        if bearer_token:
             try:
                 import jwt as pyjwt
                 from app.config import JWT_SECRET, JWT_ALGORITHM
 
-                payload = pyjwt.decode(api_key, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+                payload = pyjwt.decode(bearer_token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
                 request.state.user = payload.get("sub", "unknown")
                 request.state.auth_type = "jwt"
                 request.state.jwt_payload = payload
@@ -388,9 +391,16 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             except Exception as e:
                 logger.debug(f"JWT 验证失败: {e}")
 
+        # 尝试 API Key 匹配
+        if api_key and self._api_keys and api_key in self._api_keys:
+            request.state.user = "api_key_user"
+            request.state.auth_type = "api_key"
+            return await call_next(request)
+
+        # 没有任何有效凭证
         return JSONResponse(
             status_code=401,
-            content={"detail": "认证失败，API Key 或 JWT Token 无效"},
+            content={"detail": "缺少认证凭证，请提供 X-API-Key 或 Authorization: Bearer <key>"},
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -492,7 +502,7 @@ class InputValidationMiddleware(BaseHTTPMiddleware):
     """输入验证中间件。
 
     检查请求体大小、Prompt 长度，并进行 Prompt 注入检测。
-    检测到可疑输入时记录日志但不阻断，在响应头添加标记。
+    检测到可疑输入时直接阻断请求，返回 422。
     """
 
     def __init__(
@@ -522,38 +532,40 @@ class InputValidationMiddleware(BaseHTTPMiddleware):
 
         # 解析 JSON 并检查 Prompt 相关字段
         suspicious = False
+        prompt_too_long = False
         try:
             body_json = json.loads(body)
             suspicious = self._check_prompt_fields(body_json)
+            prompt_too_long = self._check_prompt_length(body_json)
         except (json.JSONDecodeError, UnicodeDecodeError):
             pass  # 非 JSON 请求体跳过 Prompt 检查
 
-        # 如果检测到可疑输入，在请求状态中标记
+        # Prompt 长度超限：阻断
+        if prompt_too_long:
+            logger.warning(f"Prompt 长度超限: path={request.url.path}, ip={_get_client_ip(request)}")
+            return JSONResponse(
+                status_code=422,
+                content={"detail": f"Prompt 长度超过限制（最大 {self._prompt_max_length} 字符）"},
+            )
+
+        # Prompt 注入检测：直接阻断
         if suspicious:
-            request.state.suspicious_input = True
-            logger.warning(f"检测到可疑 Prompt 输入: path={request.url.path}, ip={_get_client_ip(request)}")
+            logger.warning(f"检测到可疑 Prompt 注入攻击: path={request.url.path}, ip={_get_client_ip(request)}")
+            return JSONResponse(
+                status_code=422,
+                content={"detail": "输入内容包含可疑的 Prompt 注入模式，请求已被拦截"},
+            )
 
-        response = await call_next(request)
-
-        # 在响应头中添加可疑标记
-        if suspicious:
-            response.headers["X-Suspicious-Input"] = "true"
-
-        return response
+        return await call_next(request)
 
     def _check_prompt_fields(self, data: dict[str, Any] | list[Any]) -> bool:
-        """递归检查数据中的 Prompt 字段。"""
+        """递归检查数据中的 Prompt 注入模式。"""
         if isinstance(data, dict):
             for key, value in data.items():
                 key_lower = key.lower()
-                # 检查 Prompt 长度
                 if isinstance(value, str) and any(
                     kw in key_lower for kw in ("prompt", "message", "content", "query", "text")
                 ):
-                    if len(value) > self._prompt_max_length:
-                        logger.warning(
-                            f"Prompt 长度超限: field={key}, length={len(value)}, max={self._prompt_max_length}"
-                        )
                     # Prompt 注入检测
                     if _detect_prompt_injection(value):
                         return True
@@ -565,6 +577,26 @@ class InputValidationMiddleware(BaseHTTPMiddleware):
             for item in data:
                 if isinstance(item, (dict, list)):
                     if self._check_prompt_fields(item):
+                        return True
+        return False
+
+    def _check_prompt_length(self, data: dict[str, Any] | list[Any]) -> bool:
+        """递归检查 Prompt 字段长度是否超限。"""
+        if isinstance(data, dict):
+            for key, value in data.items():
+                key_lower = key.lower()
+                if isinstance(value, str) and any(
+                    kw in key_lower for kw in ("prompt", "message", "content", "query", "text")
+                ):
+                    if len(value) > self._prompt_max_length:
+                        return True
+                if isinstance(value, (dict, list)):
+                    if self._check_prompt_length(value):
+                        return True
+        elif isinstance(data, list):
+            for item in data:
+                if isinstance(item, (dict, list)):
+                    if self._check_prompt_length(item):
                         return True
         return False
 
