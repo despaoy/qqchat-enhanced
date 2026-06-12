@@ -29,6 +29,46 @@ from bot.tools import execute_tool, get_tools, TOOLS
 load_dotenv(Path(__file__).parent / ".env")
 
 # ============================================
+# 消息去重（幂等设计）
+# ============================================
+_processed_messages: Dict[str, float] = {}  # {message_id: timestamp}
+_DEDUP_TTL = 3600  # 1小时TTL
+_DEDUP_MAX_SIZE = 10000  # 内存去重集合最大容量
+
+async def _is_duplicate_message(message_id: str) -> bool:
+    """检查消息是否已处理（幂等去重）
+
+    优先使用Redis，回退到内存Set
+    """
+    # 尝试Redis去重
+    try:
+        from cache.redis_client import get_redis
+        redis = await get_redis()
+        if redis:
+            key = f"dedup:msg:{message_id}"
+            # SETNX + EXPIRE 原子操作
+            was_set = await redis.set(key, "1", nx=True, ex=_DEDUP_TTL)
+            return was_set is None or was_set is False  # None/False = key已存在=重复
+    except Exception:
+        pass
+
+    # 回退到内存去重
+    import time
+    now = time.time()
+
+    # 清理过期条目
+    if len(_processed_messages) > _DEDUP_MAX_SIZE:
+        expired = [k for k, v in _processed_messages.items() if now - v > _DEDUP_TTL]
+        for k in expired:
+            del _processed_messages[k]
+
+    if message_id in _processed_messages:
+        return True
+
+    _processed_messages[message_id] = now
+    return False
+
+# ============================================
 # 配置
 # ============================================
 
@@ -934,7 +974,13 @@ def init_bot():
         """处理所有消息"""
         logger.info("消息处理器被触发")
         logger.info(f"事件类型: {type(event).__name__}")
-        
+
+        # 幂等去重：跳过已处理的消息
+        msg_id = str(getattr(event, 'message_id', ''))
+        if msg_id and await _is_duplicate_message(msg_id):
+            logger.debug(f"跳过重复消息: {msg_id}")
+            return
+
         try:
             if not await should_reply(event):
                 logger.info("不满足回复条件，跳过")

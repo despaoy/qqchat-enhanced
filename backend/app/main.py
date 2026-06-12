@@ -111,9 +111,20 @@ async def lifespan(app: FastAPI):
 
     if FAILOVER_AVAILABLE:
         try:
-            from infra.failover import FailoverManager
-            failover_mgr = FailoverManager()
-            logger.info("✅ 故障转移管理器初始化完成")
+            from infra.failover import FailoverManager, ProviderConfig, FailoverStrategy
+            failover_mgr = FailoverManager(strategy=FailoverStrategy.AUTO_FAILOVER)
+
+            # 注册 vLLM 推理 provider
+            vllm_url = os.getenv("VLLM_BASE_URL", "http://localhost:8001")
+            failover_mgr.add_provider(ProviderConfig(
+                name="vllm_primary",
+                priority=1,
+                health_check_url=f"{vllm_url}/health",
+            ))
+
+            # 启动健康检查循环
+            await failover_mgr.start()
+            logger.info("✅ 故障转移管理器初始化完成（vLLM provider 已注册）")
         except Exception as e:
             logger.warning(f"故障转移管理器初始化失败: {e}")
 
@@ -136,6 +147,8 @@ async def lifespan(app: FastAPI):
         await http_client_pool.close()
     if backup_mgr:
         backup_mgr.stop_scheduled_backup()
+    if failover_mgr:
+        await failover_mgr.stop()
     if async_task_queue:
         await async_task_queue.shutdown()
     if llm_optimizer:

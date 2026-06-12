@@ -351,8 +351,9 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS":
             return await call_next(request)
 
-        # GET/HEAD 请求放行（读操作不需要认证，内部工具场景）
-        if request.method in ("GET", "HEAD"):
+        # 公开只读端点放行（无需认证）
+        PUBLIC_GET_PATHS = {"/api/stats", "/api/stats/activity", "/api/stats/services", "/health", "/ready"}
+        if request.method in ("GET", "HEAD") and (path in PUBLIC_GET_PATHS or path.startswith("/docs") or path.startswith("/redoc")):
             return await call_next(request)
 
         # 读取认证凭证

@@ -9,6 +9,8 @@
 import os
 import logging
 
+from interfaces import DatabaseInterface
+
 logger = logging.getLogger(__name__)
 
 _USE_PG = os.getenv("USE_POSTGRESQL", "false").lower() == "true"
@@ -24,6 +26,9 @@ if _USE_PG:
         _USE_PG = False
 else:
     from db.database import db
+
+# 接口契约验证：确保 db 实例实现 DatabaseInterface 接口
+assert isinstance(db, DatabaseInterface), f"Database adapter must implement DatabaseInterface, got {type(db)}"
 
 
 def get_db():

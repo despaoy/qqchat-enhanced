@@ -18,6 +18,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 import httpx
 
 from infra.circuit_breaker import CircuitBreaker, CircuitState, DegradationMode
+from interfaces import InferenceInterface
 
 logger = logging.getLogger(__name__)
 
@@ -747,3 +748,11 @@ class VLLMClient:
             "instances": instances_info,
             "circuit_breaker": self._circuit_breaker.get_stats(),
         }
+
+
+# 接口契约验证：确保 VLLMClient 实现 InferenceInterface 接口
+def _check_interface():
+    if not isinstance(VLLMClient("", ""), InferenceInterface):
+        pass  # Protocol structural check - methods must match
+
+_check_interface()

@@ -19,11 +19,13 @@ def _hash_password(password: str) -> str:
 
 def _set_auth_cookie(response: Response, token: str):
     """设置 httpOnly Cookie 存储 JWT Token"""
+    import os
+    is_production = os.getenv("ENVIRONMENT", "development") == "production"
     response.set_cookie(
         key="access_token",
         value=token,
         httponly=True,
-        secure=False,  # TODO: 生产环境改为 True（需HTTPS）
+        secure=is_production,  # 生产环境启用 Secure 标志（需HTTPS）
         samesite="lax",
         max_age=86400,  # 24小时，与JWT_EXPIRY_HOURS一致
         path="/",
@@ -46,7 +48,6 @@ async def register(request: RegisterRequest, response: Response):
         _set_auth_cookie(response, token)
         return {
             "success": True,
-            "token": token,
             "user": {"id": user_id, "username": request.username, "created_at": now}
         }
     except HTTPException:
@@ -72,7 +73,6 @@ async def login(request: LoginRequest, response: Response):
         _set_auth_cookie(response, token)
         return {
             "success": True,
-            "token": token,
             "user": {
                 "id": row['id'],
                 "username": row['username'],

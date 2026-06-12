@@ -24,6 +24,8 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple
 
+from interfaces import CacheInterface
+
 logger = logging.getLogger(__name__)
 
 
@@ -330,3 +332,7 @@ async def get_semantic_cache() -> SemanticCache:
     if _semantic_cache is None:
         _semantic_cache = SemanticCache()
     return _semantic_cache
+
+
+# 接口契约验证：确保 SemanticCache 实现 CacheInterface 接口
+assert isinstance(SemanticCache(), CacheInterface), f"SemanticCache must implement CacheInterface"

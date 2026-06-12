@@ -12,6 +12,8 @@ from contextlib import asynccontextmanager
 from enum import Enum
 from typing import Any, Callable, Coroutine, Optional, Union
 
+from interfaces import CircuitBreakerInterface
+
 logger = logging.getLogger(__name__)
 
 
@@ -455,3 +457,6 @@ class CircuitBreakerRegistry:
 
 # 全局注册表实例
 global_registry = CircuitBreakerRegistry()
+
+# 接口契约验证：确保 CircuitBreaker 实现 CircuitBreakerInterface 接口
+assert isinstance(CircuitBreaker(), CircuitBreakerInterface), f"CircuitBreaker must implement CircuitBreakerInterface"

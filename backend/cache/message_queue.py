@@ -20,6 +20,8 @@ from typing import Optional, Dict, Callable, Awaitable, Any, List
 
 import redis.asyncio as aioredis
 
+from interfaces import MessageQueueInterface
+
 logger = logging.getLogger(__name__)
 
 # Stream naming: mq:priority:{0-10}
@@ -415,3 +417,7 @@ class RedisMessageQueue:
                 pass
             self._client = None
             logger.info("Redis消息队列连接已关闭")
+
+
+# 接口契约验证：确保 RedisMessageQueue 实现 MessageQueueInterface 接口
+assert isinstance(RedisMessageQueue(), MessageQueueInterface), f"RedisMessageQueue must implement MessageQueueInterface"
