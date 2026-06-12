@@ -103,19 +103,31 @@ async def generate_reply(request: MessageRequest):
     }
     vllm_lora_name = _LORA_NAME_MAP.get(lora_name, lora_name)
 
+    # 检查vLLM是否实际支持该LoRA，避免404触发熔断
+    vllm_effective_lora = vllm_lora_name if lora_name != "default" else None
+    if vllm_effective_lora and _ensure_vllm() and _vllm_client:
+        try:
+            available_loras = await _vllm_client.list_loras()
+            if available_loras is not None and vllm_effective_lora not in available_loras:
+                logger.info(f"vLLM 无 LoRA '{vllm_effective_lora}'，使用基础模型 (可用: {available_loras})")
+                vllm_effective_lora = None
+        except Exception:
+            # 查询失败时保守地尝试使用
+            pass
+
     start_time = time.time()
 
     # ── 优先使用 vLLM 高并发推理 ──
     if _ensure_vllm() and _vllm_client:
         try:
-            reply = await _generate_with_vllm(request, vllm_lora_name)
+            reply = await _generate_with_vllm(request, vllm_effective_lora)
             cost_time = round(time.time() - start_time, 2)
 
             await _save_message(request, reply, "vllm", lora_name, cost_time)
 
             result = GenerateResponse(
                 reply=reply,
-                model=f"vllm/{os.getenv('VLLM_MODEL', 'Qwen2.5-7B-Instruct')}",
+                model=f"vllm/{os.getenv('VLLM_MODEL', 'Qwen/Qwen2.5-7B-Instruct')}",
                 costTime=cost_time
             )
 

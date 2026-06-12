@@ -22,7 +22,7 @@ class MessageRequest(BaseModel):
 
 class GenerateResponse(BaseModel):
     reply: str
-    model: str = "Qwen2.5-7B"
+    model: str = "Qwen/Qwen2.5-7B-Instruct"
     costTime: float
 
 

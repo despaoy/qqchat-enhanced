@@ -16,6 +16,13 @@ _BACKEND_ROOT = Path(__file__).parent
 if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
 
+# 加载 .env 环境变量（在导入其他模块之前）
+try:
+    from dotenv import load_dotenv
+    load_dotenv(_BACKEND_ROOT / ".env", override=True)
+except ImportError:
+    pass
+
 # 删除可能存在的旧 pycache，确保使用新模块结构
 import shutil
 for root, dirs, files in os.walk(str(_BACKEND_ROOT)):

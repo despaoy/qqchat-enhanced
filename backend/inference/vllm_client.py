@@ -274,12 +274,12 @@ class VLLMClient:
         # 实例操作锁（异步安全）
         self._instance_lock = asyncio.Lock()
 
-        # 熔断器：保护 vLLM 调用，5次连续失败后熔断，30秒后半开
+        # 熔断器：保护 vLLM 调用，20次连续失败后熔断，60秒后半开
         self._circuit_breaker = CircuitBreaker(
             name="vllm",
-            failure_threshold=5,
-            recovery_timeout=30.0,
-            half_open_max_calls=2,
+            failure_threshold=20,
+            recovery_timeout=60.0,
+            half_open_max_calls=5,
             degradation_mode=DegradationMode.DEFAULT,
         )
         self._circuit_breaker.set_default("[系统提示] 推理服务暂时不可用，请稍后再试")
@@ -690,6 +690,29 @@ class VLLMClient:
     # ------------------------------------------------------------------
     # 辅助方法
     # ------------------------------------------------------------------
+
+    async def list_loras(self) -> Optional[List[str]]:
+        """查询vLLM中可用的LoRA适配器列表
+
+        Returns:
+            LoRA名称列表，查询失败返回None
+        """
+        try:
+            client = await self._ensure_client()
+            url = f"{self._instances[0].base_url}/v1/models" if self._instances else None
+            if not url:
+                return None
+            resp = await client.get(url, headers=self._build_headers())
+            if resp.status_code == 200:
+                data = resp.json()
+                models = data.get("data", [])
+                # 返回非基础模型的LoRA名称
+                base_model = self._model
+                return [m["id"] for m in models if m["id"] != base_model]
+            return None
+        except Exception as e:
+            logger.debug(f"查询vLLM LoRA列表失败: {e}")
+            return None
 
     def _resolve_model_name(self, lora_name: Optional[str]) -> str:
         """解析模型名称，返回 LoRA 或基础模型 ID

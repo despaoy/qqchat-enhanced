@@ -47,10 +47,10 @@ AUTH_WHITELIST: set[str] = {
 }
 
 # 限流配置
-RATE_LIMIT_RPM: int = int(os.getenv("RATE_LIMIT_RPM", "60"))
-RATE_LIMIT_TPM: int = int(os.getenv("RATE_LIMIT_TPM", "100000"))
-GENERATE_RPM: int = int(os.getenv("GENERATE_RPM", "20"))
-GENERATE_TPM: int = int(os.getenv("GENERATE_TPM", "100000"))
+RATE_LIMIT_RPM: int = int(os.getenv("RATE_LIMIT_RPM", "300"))
+RATE_LIMIT_TPM: int = int(os.getenv("RATE_LIMIT_TPM", "500000"))
+GENERATE_RPM: int = int(os.getenv("GENERATE_RPM", "60"))
+GENERATE_TPM: int = int(os.getenv("GENERATE_TPM", "500000"))
 
 # 输入验证
 MAX_BODY_SIZE: int = int(os.getenv("MAX_BODY_SIZE", str(1024 * 1024)))  # 默认 1MB
