@@ -3,7 +3,8 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
+from app.dependencies import get_current_user
 
 from app.config import (
     LOAD_BALANCER_AVAILABLE,
@@ -33,8 +34,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _validate_path(path_str: str, allowed_base: str = None) -> str:
+    """Validate path doesn't contain traversal sequences and is within allowed base."""
+    if not path_str:
+        raise ValueError("Path cannot be empty")
+    # Block path traversal
+    if '..' in path_str or '\x00' in path_str:
+        raise ValueError("Path contains invalid sequences")
+    resolved = Path(path_str).resolve()
+    if allowed_base:
+        base = Path(allowed_base).resolve()
+        if not str(resolved).startswith(str(base)):
+            raise ValueError(f"Path must be within {allowed_base}")
+    return str(resolved)
+
+
 @router.get("/api/enhanced/status")
-async def get_enhanced_status():
+async def get_enhanced_status(current_user: dict = Depends(get_current_user)):
     """获取增强功能状态"""
     status = {
         "loadBalancer": LOAD_BALANCER_AVAILABLE,
@@ -52,7 +68,7 @@ async def get_enhanced_status():
 
 
 @router.get("/api/enhanced/stats")
-async def get_enhanced_stats():
+async def get_enhanced_stats(current_user: dict = Depends(get_current_user)):
     """获取增强功能统计信息"""
     stats = {}
 
@@ -89,7 +105,7 @@ async def get_enhanced_stats():
 # --- 负载均衡API ---
 
 @router.get("/api/enhanced/load-balancer/stats")
-async def get_load_balancer_stats():
+async def get_load_balancer_stats(current_user: dict = Depends(get_current_user)):
     if not load_balancer_mgr:
         raise HTTPException(status_code=503, detail="负载均衡器不可用")
     return {"success": True, "stats": load_balancer_mgr.get_stats()}
@@ -98,14 +114,14 @@ async def get_load_balancer_stats():
 # --- 熔断器API ---
 
 @router.get("/api/enhanced/circuit-breaker/stats")
-async def get_circuit_breaker_stats():
+async def get_circuit_breaker_stats(current_user: dict = Depends(get_current_user)):
     if not circuit_breaker_registry:
         raise HTTPException(status_code=503, detail="熔断器不可用")
     return {"success": True, "stats": circuit_breaker_registry.get_all_stats()}
 
 
 @router.post("/api/enhanced/circuit-breaker/{name}/reset")
-async def reset_circuit_breaker(name: str):
+async def reset_circuit_breaker(name: str, current_user: dict = Depends(get_current_user)):
     if not circuit_breaker_registry:
         raise HTTPException(status_code=503, detail="熔断器不可用")
     cb = circuit_breaker_registry.get(name)
@@ -118,14 +134,14 @@ async def reset_circuit_breaker(name: str):
 # --- 备份管理API ---
 
 @router.get("/api/enhanced/backups")
-async def list_backups():
+async def list_backups(current_user: dict = Depends(get_current_user)):
     if not backup_mgr:
         raise HTTPException(status_code=503, detail="备份管理器不可用")
     return {"success": True, "backups": backup_mgr.list_backups()}
 
 
 @router.post("/api/enhanced/backups/create")
-async def create_backup(backup_type: str = "full"):
+async def create_backup(backup_type: str = "full", current_user: dict = Depends(get_current_user)):
     if not backup_mgr:
         raise HTTPException(status_code=503, detail="备份管理器不可用")
     try:
@@ -139,12 +155,18 @@ async def create_backup(backup_type: str = "full"):
 
 
 @router.post("/api/enhanced/backups/{backup_name}/restore")
-async def restore_backup(backup_name: str):
+async def restore_backup(backup_name: str, current_user: dict = Depends(get_current_user)):
     if not backup_mgr:
         raise HTTPException(status_code=503, detail="备份管理器不可用")
     try:
         backup_dir = Path(__file__).parent.parent / "backups"
+        # Validate backup_name to prevent path traversal
+        if '..' in backup_name or '/' in backup_name or '\\' in backup_name or '\x00' in backup_name:
+            raise HTTPException(status_code=400, detail="无效的备份名称")
         backup_path = backup_dir / backup_name
+        # Ensure resolved path is within backup directory
+        if not str(backup_path.resolve()).startswith(str(backup_dir.resolve())):
+            raise HTTPException(status_code=400, detail="无效的备份路径")
         if not backup_path.exists():
             raise HTTPException(status_code=404, detail="备份文件不存在")
         backup_mgr.restore(str(backup_path))
@@ -158,7 +180,7 @@ async def restore_backup(backup_name: str):
 # --- 故障转移API ---
 
 @router.get("/api/enhanced/failover/status")
-async def get_failover_status():
+async def get_failover_status(current_user: dict = Depends(get_current_user)):
     if not failover_mgr:
         raise HTTPException(status_code=503, detail="故障转移管理器不可用")
     return {"success": True, "status": failover_mgr.get_failover_status()}
@@ -167,14 +189,14 @@ async def get_failover_status():
 # --- 缓存管理API ---
 
 @router.get("/api/enhanced/cache/stats")
-async def get_cache_stats():
+async def get_cache_stats(current_user: dict = Depends(get_current_user)):
     if not response_cache:
         raise HTTPException(status_code=503, detail="响应缓存不可用")
     return {"success": True, "stats": response_cache.get_stats()}
 
 
 @router.post("/api/enhanced/cache/invalidate")
-async def invalidate_cache(pattern: Optional[str] = None):
+async def invalidate_cache(pattern: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     if not response_cache:
         raise HTTPException(status_code=503, detail="响应缓存不可用")
     response_cache.invalidate(pattern)
@@ -184,14 +206,14 @@ async def invalidate_cache(pattern: Optional[str] = None):
 # --- 访问控制API ---
 
 @router.get("/api/enhanced/access-control/keys")
-async def list_api_keys():
+async def list_api_keys(current_user: dict = Depends(get_current_user)):
     if not access_control_mgr:
         raise HTTPException(status_code=503, detail="访问控制不可用")
     return {"success": True, "keys": access_control_mgr.list_api_keys()}
 
 
 @router.post("/api/enhanced/access-control/keys")
-async def create_api_key(request: Request):
+async def create_api_key(request: Request, current_user: dict = Depends(get_current_user)):
     if not access_control_mgr:
         raise HTTPException(status_code=503, detail="访问控制不可用")
     body = await request.json()
@@ -202,7 +224,7 @@ async def create_api_key(request: Request):
 
 
 @router.delete("/api/enhanced/access-control/keys/{key_id}")
-async def revoke_api_key(key_id: str):
+async def revoke_api_key(key_id: str, current_user: dict = Depends(get_current_user)):
     if not access_control_mgr:
         raise HTTPException(status_code=503, detail="访问控制不可用")
     access_control_mgr.revoke_api_key(key_id)
@@ -212,7 +234,7 @@ async def revoke_api_key(key_id: str):
 # --- 限流器API ---
 
 @router.get("/api/enhanced/rate-limiter/stats")
-async def get_rate_limiter_stats():
+async def get_rate_limiter_stats(current_user: dict = Depends(get_current_user)):
     if not rate_limiter:
         raise HTTPException(status_code=503, detail="限流器不可用")
     return {"success": True, "stats": rate_limiter.get_stats()}
@@ -221,7 +243,7 @@ async def get_rate_limiter_stats():
 # --- 异步任务队列API ---
 
 @router.get("/api/enhanced/task-queue/stats")
-async def get_task_queue_stats():
+async def get_task_queue_stats(current_user: dict = Depends(get_current_user)):
     if not async_task_queue:
         raise HTTPException(status_code=503, detail="异步任务队列不可用")
     return {"success": True, "stats": async_task_queue.get_queue_stats()}
@@ -230,7 +252,7 @@ async def get_task_queue_stats():
 # --- 加密管理API ---
 
 @router.get("/api/enhanced/encryption/status")
-async def get_encryption_status():
+async def get_encryption_status(current_user: dict = Depends(get_current_user)):
     if not encryption_mgr:
         raise HTTPException(status_code=503, detail="加密管理器不可用")
     return {"success": True, "available": True}

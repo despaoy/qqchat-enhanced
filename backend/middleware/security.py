@@ -12,7 +12,7 @@ import os
 import re
 import threading
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime, timedelta
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -150,24 +150,26 @@ class SlidingWindowLimiter:
 
     def __init__(self) -> None:
         # key -> 请求时间戳列表
-        self._request_windows: dict[str, list[float]] = defaultdict(list)
+        self._request_windows: dict[str, deque[float]] = defaultdict(deque)
         # key -> token 使用时间戳和数量列表 [(timestamp, token_count)]
-        self._token_windows: dict[str, list[tuple[float, int]]] = defaultdict(list)
+        self._token_windows: dict[str, deque[tuple[float, int]]] = defaultdict(deque)
         self._lock = threading.Lock()
 
-    def _cleanup_window(self, timestamps: list[float], window_sec: float) -> None:
+    def _cleanup_window(self, timestamps: deque[float], window_sec: float) -> None:
         """清理窗口外的过期时间戳。"""
         cutoff = time.time() - window_sec
         while timestamps and timestamps[0] < cutoff:
-            timestamps.pop(0)
+            timestamps.popleft()
+        # Remove empty keys to prevent memory leak
+        # (caller should handle key removal since it knows the key)
 
     def _cleanup_token_window(
-        self, records: list[tuple[float, int]], window_sec: float
+        self, records: deque[tuple[float, int]], window_sec: float
     ) -> None:
         """清理 Token 窗口外的过期记录。"""
         cutoff = time.time() - window_sec
         while records and records[0][0] < cutoff:
-            records.pop(0)
+            records.popleft()
 
     def check_rpm(self, key: str, limit: int, window_sec: float = 60.0) -> tuple[bool, int, float]:
         """检查 RPM 限制。
@@ -184,6 +186,10 @@ class SlidingWindowLimiter:
             now = time.time()
             timestamps = self._request_windows[key]
             self._cleanup_window(timestamps, window_sec)
+            # Remove empty keys to prevent memory leak
+            if not timestamps:
+                self._request_windows.pop(key, None)
+                self._token_windows.pop(key, None)
             current_count = len(timestamps)
 
             if current_count >= limit:
@@ -211,6 +217,10 @@ class SlidingWindowLimiter:
             now = time.time()
             records = self._token_windows[key]
             self._cleanup_token_window(records, window_sec)
+            # Remove empty keys to prevent memory leak
+            if not records:
+                self._token_windows.pop(key, None)
+                self._request_windows.pop(key, None)
             current_tokens = sum(count for _, count in records)
 
             if current_tokens + token_count > limit:
@@ -229,6 +239,7 @@ class SlidingWindowLimiter:
                 "rpm_windows": {},
                 "tpm_windows": {},
             }
+            empty_rpm_keys = []
             for key, timestamps in self._request_windows.items():
                 self._cleanup_window(timestamps, 60.0)
                 if timestamps:
@@ -236,6 +247,9 @@ class SlidingWindowLimiter:
                         "count": len(timestamps),
                         "oldest": datetime.fromtimestamp(timestamps[0]).isoformat(),
                     }
+                else:
+                    empty_rpm_keys.append(key)
+            empty_tpm_keys = []
             for key, records in self._token_windows.items():
                 self._cleanup_token_window(records, 60.0)
                 if records:
@@ -244,6 +258,13 @@ class SlidingWindowLimiter:
                         "total_tokens": total,
                         "record_count": len(records),
                     }
+                else:
+                    empty_tpm_keys.append(key)
+            # Remove empty keys to prevent memory leak
+            for key in empty_rpm_keys:
+                self._request_windows.pop(key, None)
+            for key in empty_tpm_keys:
+                self._token_windows.pop(key, None)
             return stats
 
 

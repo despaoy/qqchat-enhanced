@@ -125,11 +125,7 @@ class CircuitBreaker:
 
     @property
     def state(self) -> CircuitState:
-        """获取当前熔断器状态，自动检查是否应从OPEN转为HALF_OPEN。"""
-        if self._state == CircuitState.OPEN and self._last_failure_time is not None:
-            elapsed = time.monotonic() - self._last_failure_time
-            if elapsed >= self.recovery_timeout:
-                self._transition_to_half_open()
+        """Current circuit state (read-only, no side effects)"""
         return self._state
 
     def _transition_to_open(self) -> None:
@@ -249,11 +245,14 @@ class CircuitBreaker:
             CircuitOpenError: 熔断器打开且无降级策略时抛出。
         """
         async with self._lock:
-            current_state = self.state
-
+            current_state = self._state
             if current_state == CircuitState.OPEN:
-                logger.warning("熔断器 [%s] 处于 OPEN 状态，执行降级", self.name)
-                return await self._handle_degradation(*args, **kwargs)
+                if self._last_failure_time is not None and time.monotonic() - self._last_failure_time >= self.recovery_timeout:
+                    self._transition_to_half_open()
+                    current_state = CircuitState.HALF_OPEN
+                else:
+                    logger.warning("熔断器 [%s] 处于 OPEN 状态，执行降级", self.name)
+                    return await self._handle_degradation(*args, **kwargs)
 
             if current_state == CircuitState.HALF_OPEN:
                 if self._half_open_calls >= self.half_open_max_calls:
@@ -271,6 +270,8 @@ class CircuitBreaker:
                 self._cache = result  # 更新缓存
                 if current_state == CircuitState.HALF_OPEN:
                     self._transition_to_closed()
+                elif current_state == CircuitState.CLOSED:
+                    self._failure_count = 0
             return result
         except Exception as e:
             async with self._lock:
@@ -310,13 +311,16 @@ class CircuitBreaker:
                 result = await some_service()
         """
         async with self._lock:
-            current_state = self.state
-
+            current_state = self._state
             if current_state == CircuitState.OPEN:
-                logger.warning("熔断器 [%s] 处于 OPEN 状态", self.name)
-                raise CircuitOpenError(
-                    f"熔断器 [{self.name}] 处于 OPEN 状态，请求被拒绝"
-                )
+                if self._last_failure_time is not None and time.monotonic() - self._last_failure_time >= self.recovery_timeout:
+                    self._transition_to_half_open()
+                    current_state = CircuitState.HALF_OPEN
+                else:
+                    logger.warning("熔断器 [%s] 处于 OPEN 状态", self.name)
+                    raise CircuitOpenError(
+                        f"熔断器 [{self.name}] 处于 OPEN 状态，请求被拒绝"
+                    )
 
             if current_state == CircuitState.HALF_OPEN:
                 if self._half_open_calls >= self.half_open_max_calls:
@@ -331,6 +335,8 @@ class CircuitBreaker:
                 self._stats.record_success()
                 if current_state == CircuitState.HALF_OPEN:
                     self._transition_to_closed()
+                elif current_state == CircuitState.CLOSED:
+                    self._failure_count = 0
         except Exception as e:
             async with self._lock:
                 self._stats.record_failure()

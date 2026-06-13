@@ -59,12 +59,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ username, password }),
     });
     if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.detail || '登录失败');
+      let errorMessage = '登录失败';
+      try {
+        const err = await response.json();
+        errorMessage = err.detail || errorMessage;
+      } catch {
+        errorMessage = response.statusText || errorMessage;
+      }
+      throw new Error(errorMessage);
     }
     const data = await response.json();
-    // 同时存 localStorage 作为向后兼容和用户信息缓存
-    localStorage.setItem('qq_assistant_user', JSON.stringify(data.user));
+    // Only store non-sensitive user info (never store token)
+    const userData = { id: data.user.id, username: data.user.username };
+    localStorage.setItem('qq_assistant_user', JSON.stringify(userData));
     setUser(data.user);
   }, []);
 
@@ -76,11 +83,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ username, password }),
     });
     if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.detail || '注册失败');
+      let errorMessage = '注册失败';
+      try {
+        const err = await response.json();
+        errorMessage = err.detail || errorMessage;
+      } catch {
+        errorMessage = response.statusText || errorMessage;
+      }
+      throw new Error(errorMessage);
     }
     const data = await response.json();
-    localStorage.setItem('qq_assistant_user', JSON.stringify(data.user));
+    // Only store non-sensitive user info (never store token)
+    const userData = { id: data.user.id, username: data.user.username };
+    localStorage.setItem('qq_assistant_user', JSON.stringify(userData));
     setUser(data.user);
   }, []);
 

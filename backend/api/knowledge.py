@@ -6,7 +6,8 @@ import zipfile
 import re
 from pathlib import Path, PurePosixPath
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
+from app.dependencies import get_current_user
 
 from db.adapter import db
 from db.models import (
@@ -26,14 +27,14 @@ router = APIRouter()
 # ============================================
 
 @router.get("/api/knowledge/bases")
-async def list_knowledge_bases():
+async def list_knowledge_bases(current_user: dict = Depends(get_current_user)):
     """获取所有知识库"""
     bases = db.get_knowledge_bases()
     return {"success": True, "bases": bases}
 
 
 @router.post("/api/knowledge/bases")
-async def create_knowledge_base(request: KnowledgeBaseCreate):
+async def create_knowledge_base(request: KnowledgeBaseCreate, current_user: dict = Depends(get_current_user)):
     """创建知识库"""
     result = db.create_knowledge_base(request.name, request.description)
     if result is None:
@@ -42,7 +43,7 @@ async def create_knowledge_base(request: KnowledgeBaseCreate):
 
 
 @router.put("/api/knowledge/bases/{kb_id}")
-async def update_knowledge_base(kb_id: int, request: KnowledgeBaseUpdate):
+async def update_knowledge_base(kb_id: int, request: KnowledgeBaseUpdate, current_user: dict = Depends(get_current_user)):
     """更新知识库"""
     existing = db.get_knowledge_base(kb_id)
     if not existing:
@@ -57,7 +58,7 @@ async def update_knowledge_base(kb_id: int, request: KnowledgeBaseUpdate):
 
 
 @router.delete("/api/knowledge/bases/{kb_id}")
-async def delete_knowledge_base(kb_id: int):
+async def delete_knowledge_base(kb_id: int, current_user: dict = Depends(get_current_user)):
     """删除知识库（级联删除文件夹和文档）"""
     existing = db.get_knowledge_base(kb_id)
     if not existing:
@@ -71,7 +72,7 @@ async def delete_knowledge_base(kb_id: int):
 # ============================================
 
 @router.get("/api/knowledge/bases/{kb_id}/folders")
-async def list_knowledge_folders(kb_id: int):
+async def list_knowledge_folders(kb_id: int, current_user: dict = Depends(get_current_user)):
     """获取知识库下的文件夹"""
     existing = db.get_knowledge_base(kb_id)
     if not existing:
@@ -81,7 +82,7 @@ async def list_knowledge_folders(kb_id: int):
 
 
 @router.post("/api/knowledge/bases/{kb_id}/folders")
-async def create_knowledge_folder(kb_id: int, request: KnowledgeFolderCreate):
+async def create_knowledge_folder(kb_id: int, request: KnowledgeFolderCreate, current_user: dict = Depends(get_current_user)):
     """创建文件夹"""
     existing = db.get_knowledge_base(kb_id)
     if not existing:
@@ -93,7 +94,7 @@ async def create_knowledge_folder(kb_id: int, request: KnowledgeFolderCreate):
 
 
 @router.delete("/api/knowledge/folders/{folder_id}")
-async def delete_knowledge_folder(folder_id: int):
+async def delete_knowledge_folder(folder_id: int, current_user: dict = Depends(get_current_user)):
     """删除文件夹"""
     existing = db.get_knowledge_folder(folder_id)
     if not existing:
@@ -107,7 +108,7 @@ async def delete_knowledge_folder(folder_id: int):
 # ============================================
 
 @router.post("/api/knowledge/bases/{kb_id}/upload-zip")
-async def upload_zip(kb_id: int, file: UploadFile = File(...)):
+async def upload_zip(kb_id: int, file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     """上传ZIP文件，自动按目录结构创建文件夹和文档
 
     ZIP结构要求：
@@ -124,6 +125,9 @@ async def upload_zip(kb_id: int, file: UploadFile = File(...)):
 
     try:
         content = await file.read()
+        MAX_ZIP_SIZE = 100 * 1024 * 1024  # 100MB
+        if len(content) > MAX_ZIP_SIZE:
+            raise HTTPException(status_code=413, detail=f"文件大小超过限制 ({MAX_ZIP_SIZE // 1024 // 1024}MB)")
         zf = zipfile.ZipFile(io.BytesIO(content))
     except zipfile.BadZipFile:
         raise HTTPException(status_code=400, detail="无效的ZIP文件")
@@ -299,7 +303,7 @@ def _scan_directory(directory: Path) -> dict:
 
 
 @router.get("/api/knowledge/scan")
-async def scan_knowledge_dirs():
+async def scan_knowledge_dirs(current_user: dict = Depends(get_current_user)):
     """扫描 knowledge_bases 目录，返回所有可用的知识库文件夹结构
     
     扫描 backend/knowledge_bases/ 下的所有子目录，
@@ -319,7 +323,7 @@ async def scan_knowledge_dirs():
 
 
 @router.post("/api/knowledge/scan/import")
-async def import_scanned_directory(directory_name: str, kb_id: int = None):
+async def import_scanned_directory(directory_name: str, kb_id: int = None, current_user: dict = Depends(get_current_user)):
     """将扫描到的目录导入到知识库
     
     读取 knowledge_bases/<directory_name> 下的所有文件，
@@ -541,7 +545,7 @@ async def import_scanned_directory(directory_name: str, kb_id: int = None):
 # ============================================
 
 @router.get("/api/knowledge/documents")
-async def get_knowledge_documents(limit: int = 100, offset: int = 0, category: str = None, knowledge_base_id: int = None, folder_id: int = None):
+async def get_knowledge_documents(limit: int = 100, offset: int = 0, category: str = None, knowledge_base_id: int = None, folder_id: int = None, current_user: dict = Depends(get_current_user)):
     """获取知识库文档列表，支持按分类/知识库/文件夹筛选"""
     documents = db.get_knowledge_documents(
         limit=limit, offset=offset,
@@ -558,7 +562,7 @@ async def get_knowledge_documents(limit: int = 100, offset: int = 0, category: s
 
 
 @router.get("/api/knowledge/documents/{doc_id}")
-async def get_knowledge_document(doc_id: int):
+async def get_knowledge_document(doc_id: int, current_user: dict = Depends(get_current_user)):
     """获取单个知识库文档"""
     document = db.get_knowledge_document(doc_id)
     if not document:
@@ -572,7 +576,7 @@ async def get_knowledge_document(doc_id: int):
 
 
 @router.post("/api/knowledge/documents")
-async def create_knowledge_document(request: KnowledgeDocumentCreate):
+async def create_knowledge_document(request: KnowledgeDocumentCreate, current_user: dict = Depends(get_current_user)):
     """创建知识库文档"""
     try:
         # 输入验证
@@ -668,7 +672,7 @@ async def create_knowledge_document(request: KnowledgeDocumentCreate):
 
 
 @router.put("/api/knowledge/documents/{doc_id}")
-async def update_knowledge_document(doc_id: int, request: KnowledgeDocumentUpdate):
+async def update_knowledge_document(doc_id: int, request: KnowledgeDocumentUpdate, current_user: dict = Depends(get_current_user)):
     """更新知识库文档"""
     try:
         existing_doc = db.get_knowledge_document(doc_id)
@@ -776,7 +780,7 @@ async def update_knowledge_document(doc_id: int, request: KnowledgeDocumentUpdat
 
 
 @router.delete("/api/knowledge/documents/{doc_id}")
-async def delete_knowledge_document(doc_id: int):
+async def delete_knowledge_document(doc_id: int, current_user: dict = Depends(get_current_user)):
     """删除知识库文档"""
     try:
         existing_doc = db.get_knowledge_document(doc_id)
@@ -888,14 +892,14 @@ async def search_knowledge(request: KnowledgeSearchRequest):
 
 
 @router.get("/api/knowledge/stats")
-async def get_knowledge_stats():
+async def get_knowledge_stats(current_user: dict = Depends(get_current_user)):
     """获取知识库统计数据"""
     stats = db.get_knowledge_stats()
     return {"success": True, "stats": stats}
 
 
 @router.get("/api/vector/stats")
-async def get_vector_stats():
+async def get_vector_stats(current_user: dict = Depends(get_current_user)):
     """获取向量数据库统计数据"""
     if not VECTOR_DB_AVAILABLE:
         raise HTTPException(status_code=503, detail="向量数据库不可用")
@@ -915,7 +919,7 @@ async def get_vector_stats():
 # ============================================
 
 @router.post("/api/knowledge/train-intent/generate")
-async def generate_intent_samples(request: dict = None):
+async def generate_intent_samples(request: dict = None, current_user: dict = Depends(get_current_user)):
     """生成训练样本（LLM基于知识库文档生成，不训练）"""
     try:
         from knowledge.intent_trainer import generate_samples, get_generation_status
@@ -938,7 +942,7 @@ async def generate_intent_samples(request: dict = None):
 
 
 @router.get("/api/knowledge/train-intent/generate/status")
-async def get_generation_status():
+async def get_generation_status(current_user: dict = Depends(get_current_user)):
     """查询样本生成进度"""
     try:
         from knowledge.intent_trainer import get_generation_status as get_status
@@ -948,7 +952,7 @@ async def get_generation_status():
 
 
 @router.get("/api/knowledge/train-intent/samples")
-async def get_intent_samples():
+async def get_intent_samples(current_user: dict = Depends(get_current_user)):
     """获取当前所有训练样本"""
     try:
         from knowledge.intent_trainer import get_samples
@@ -958,7 +962,7 @@ async def get_intent_samples():
 
 
 @router.put("/api/knowledge/train-intent/samples")
-async def update_intent_sample(request: dict):
+async def update_intent_sample(request: dict, current_user: dict = Depends(get_current_user)):
     """编辑单条样本"""
     try:
         from knowledge.intent_trainer import update_sample
@@ -973,7 +977,7 @@ async def update_intent_sample(request: dict):
 
 
 @router.delete("/api/knowledge/train-intent/samples")
-async def delete_intent_sample(label: str, index: int):
+async def delete_intent_sample(label: str, index: int, current_user: dict = Depends(get_current_user)):
     """删除单条样本"""
     try:
         from knowledge.intent_trainer import delete_sample
@@ -988,7 +992,7 @@ async def delete_intent_sample(label: str, index: int):
 
 
 @router.patch("/api/knowledge/train-intent/samples")
-async def batch_save_intent_samples(request: dict):
+async def batch_save_intent_samples(request: dict, current_user: dict = Depends(get_current_user)):
     """批量保存样本（覆盖写入）"""
     try:
         from knowledge.intent_trainer import save_samples
@@ -999,7 +1003,7 @@ async def batch_save_intent_samples(request: dict):
 
 
 @router.post("/api/knowledge/train-intent/samples")
-async def add_intent_sample(request: dict):
+async def add_intent_sample(request: dict, current_user: dict = Depends(get_current_user)):
     """添加单条样本"""
     try:
         from knowledge.intent_trainer import add_sample
@@ -1010,7 +1014,7 @@ async def add_intent_sample(request: dict):
 
 
 @router.post("/api/knowledge/train-intent")
-async def train_intent_classifier(request: dict = None):
+async def train_intent_classifier(request: dict = None, current_user: dict = Depends(get_current_user)):
     """使用已审查的样本训练多分类模型"""
     try:
         from knowledge.intent_trainer import train_intent_classifier as do_train, get_training_status
@@ -1030,7 +1034,7 @@ async def train_intent_classifier(request: dict = None):
 
 
 @router.get("/api/knowledge/train-intent/status")
-async def get_intent_training_status():
+async def get_intent_training_status(current_user: dict = Depends(get_current_user)):
     """查询训练进度"""
     try:
         from knowledge.intent_trainer import get_training_status
@@ -1040,7 +1044,7 @@ async def get_intent_training_status():
 
 
 @router.post("/api/knowledge/train-intent/cancel")
-async def cancel_intent_training():
+async def cancel_intent_training(current_user: dict = Depends(get_current_user)):
     """取消训练/生成"""
     try:
         from knowledge.intent_trainer import cancel_training
@@ -1051,7 +1055,7 @@ async def cancel_intent_training():
 
 
 @router.get("/api/knowledge/train-intent/model")
-async def get_intent_model_info():
+async def get_intent_model_info(current_user: dict = Depends(get_current_user)):
     """获取当前模型信息"""
     try:
         from knowledge.intent_trainer import get_model_info
@@ -1061,7 +1065,7 @@ async def get_intent_model_info():
 
 
 @router.get("/api/knowledge/train-intent/active-kbs")
-async def get_active_knowledge_bases():
+async def get_active_knowledge_bases(current_user: dict = Depends(get_current_user)):
     """获取参与检索的知识库"""
     try:
         from knowledge.intent_trainer import get_active_knowledge_bases as get_kbs
@@ -1071,7 +1075,7 @@ async def get_active_knowledge_bases():
 
 
 @router.post("/api/knowledge/train-intent/active-kbs")
-async def set_active_knowledge_bases(request: dict):
+async def set_active_knowledge_bases(request: dict, current_user: dict = Depends(get_current_user)):
     """设置参与检索的知识库"""
     try:
         from knowledge.intent_trainer import set_active_knowledge_bases as set_kbs

@@ -21,41 +21,46 @@ logger = logging.getLogger(__name__)
 _cached_db_config = {}
 _cached_db_config_time: float = 0.0
 _db_config_ttl: float = 5.0
+_db_config_lock = threading.Lock()
 
 
 def _get_db_config():
     """从数据库读取模型配置参数（带缓存）"""
     global _cached_db_config, _cached_db_config_time
-    now = time.time()
-    if _cached_db_config and (now - _cached_db_config_time) < _db_config_ttl:
-        return _cached_db_config.copy()
-    try:
-        import sqlite3
-        db_path = Path(__file__).parent.parent / "qq_assistant.db"
-        conn = sqlite3.connect(str(db_path), check_same_thread=False)
-        cursor = conn.cursor()
-        cursor.execute('SELECT key, value FROM config')
-        rows = cursor.fetchall()
-        conn.close()
-        result = {}
-        for key, value in rows:
-            try:
-                if '.' in value:
-                    result[key] = float(value)
-                else:
-                    result[key] = int(value)
-            except (ValueError, TypeError):
-                if value.lower() == 'true':
-                    result[key] = True
-                elif value.lower() == 'false':
-                    result[key] = False
-                else:
-                    result[key] = value
-        _cached_db_config = result
-        _cached_db_config_time = now
-        return result.copy()
-    except Exception:
-        return {}
+    with _db_config_lock:
+        now = time.time()
+        if _cached_db_config and (now - _cached_db_config_time) < _db_config_ttl:
+            return _cached_db_config.copy()
+        conn = None
+        try:
+            import sqlite3
+            db_path = Path(__file__).parent.parent / "qq_assistant.db"
+            conn = sqlite3.connect(str(db_path), check_same_thread=False)
+            cursor = conn.cursor()
+            cursor.execute('SELECT key, value FROM config')
+            rows = cursor.fetchall()
+            result = {}
+            for key, value in rows:
+                try:
+                    if '.' in value:
+                        result[key] = float(value)
+                    else:
+                        result[key] = int(value)
+                except (ValueError, TypeError):
+                    if value.lower() == 'true':
+                        result[key] = True
+                    elif value.lower() == 'false':
+                        result[key] = False
+                    else:
+                        result[key] = value
+            _cached_db_config = result
+            _cached_db_config_time = now
+            return result.copy()
+        except Exception:
+            return {}
+        finally:
+            if conn:
+                conn.close()
 
 
 _db_cfg = _get_db_config()
@@ -141,6 +146,12 @@ class BaseProvider:
                  rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
         raise NotImplementedError
 
+    async def async_generate(self, prompt: str, session_history: List[Dict] = None,
+                             rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        """异步生成，默认通过线程池运行同步方法，子类可覆写以提供原生异步实现"""
+        import asyncio
+        return await asyncio.to_thread(self.generate, prompt, session_history, rag_docs, max_tokens_override)
+
     def get_status(self) -> Dict[str, Any]:
         return {
             "loaded": self._loaded,
@@ -180,8 +191,9 @@ class OpenAICompatProvider(BaseProvider):
             self.model = _db_cfg["openaiCompatModel"]
             self._model_name = self.model
 
-    def generate(self, prompt: str, session_history: List[Dict] = None,
-                 rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+    def _generate_sync(self, prompt: str, session_history: List[Dict] = None,
+                       rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        """同步生成实现"""
         # 每次生成前刷新配置，确保使用最新的API Key
         self._refresh_db_config()
 
@@ -230,6 +242,16 @@ class OpenAICompatProvider(BaseProvider):
             logger.error(f"OpenAI兼容API调用失败: {e}")
             raise
 
+    def generate(self, prompt: str, session_history: List[Dict] = None,
+                 rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        return self._generate_sync(prompt, session_history, rag_docs, max_tokens_override)
+
+    async def async_generate(self, prompt: str, session_history: List[Dict] = None,
+                             rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        """异步生成，通过线程池避免阻塞事件循环"""
+        import asyncio
+        return await asyncio.to_thread(self._generate_sync, prompt, session_history, rag_docs, max_tokens_override)
+
 
 class MockProvider(BaseProvider):
     """模拟提供商，用于测试"""
@@ -265,8 +287,9 @@ class OllamaProvider(BaseProvider):
         self._client = httpx.Client(timeout=120.0,
             limits=httpx.Limits(max_keepalive_connections=5, max_connections=10))
 
-    def generate(self, prompt: str, session_history: List[Dict] = None,
-                 rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+    def _generate_sync(self, prompt: str, session_history: List[Dict] = None,
+                       rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        """同步生成实现"""
         start = time.time()
         messages = []
 
@@ -305,6 +328,16 @@ class OllamaProvider(BaseProvider):
             logger.error(f"Ollama调用失败: {e}")
             raise
 
+    def generate(self, prompt: str, session_history: List[Dict] = None,
+                 rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        return self._generate_sync(prompt, session_history, rag_docs, max_tokens_override)
+
+    async def async_generate(self, prompt: str, session_history: List[Dict] = None,
+                             rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        """异步生成，通过线程池避免阻塞事件循环"""
+        import asyncio
+        return await asyncio.to_thread(self._generate_sync, prompt, session_history, rag_docs, max_tokens_override)
+
 
 class LlamaCppProvider(BaseProvider):
     """llama.cpp 提供商"""
@@ -318,8 +351,9 @@ class LlamaCppProvider(BaseProvider):
         self._client = httpx.Client(timeout=120.0,
             limits=httpx.Limits(max_keepalive_connections=5, max_connections=10))
 
-    def generate(self, prompt: str, session_history: List[Dict] = None,
-                 rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+    def _generate_sync(self, prompt: str, session_history: List[Dict] = None,
+                       rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        """同步生成实现"""
         start = time.time()
         full_prompt = prompt
         if session_history:
@@ -356,6 +390,16 @@ class LlamaCppProvider(BaseProvider):
         except Exception as e:
             logger.error(f"llama.cpp调用失败: {e}")
             raise
+
+    def generate(self, prompt: str, session_history: List[Dict] = None,
+                 rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        return self._generate_sync(prompt, session_history, rag_docs, max_tokens_override)
+
+    async def async_generate(self, prompt: str, session_history: List[Dict] = None,
+                             rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        """异步生成，通过线程池避免阻塞事件循环"""
+        import asyncio
+        return await asyncio.to_thread(self._generate_sync, prompt, session_history, rag_docs, max_tokens_override)
 
 
 class TransformersPeftProvider(BaseProvider):
@@ -469,23 +513,24 @@ class TransformersPeftProvider(BaseProvider):
         )
 
     def set_lora_adapter(self, lora_path: Optional[str]):
-        if lora_path and Path(lora_path).exists():
-            self._lora_path = lora_path
-            if self._model is not None:
-                import torch
-                from transformers import AutoModelForCausalLM, BitsAndBytesConfig
-                from peft import PeftModel
+        with self._load_lock:
+            if lora_path and Path(lora_path).exists():
+                self._lora_path = lora_path
+                if self._model is not None:
+                    import torch
+                    from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+                    from peft import PeftModel
 
-                logger.info(f"热切换LoRA适配器: {lora_path}")
-                base_model = self._model.base_model.model if hasattr(self._model, 'base_model') else self._model
-                del self._model
-                torch.cuda.empty_cache()
-                self._model = PeftModel.from_pretrained(base_model, lora_path)
-                self._model.eval()
-            logger.info(f"LoRA适配器已设置: {lora_path}")
-        else:
-            self._lora_path = None
-            logger.info("LoRA适配器已清除")
+                    logger.info(f"热切换LoRA适配器: {lora_path}")
+                    base_model = self._model.base_model.model if hasattr(self._model, 'base_model') else self._model
+                    del self._model
+                    torch.cuda.empty_cache()
+                    self._model = PeftModel.from_pretrained(base_model, lora_path)
+                    self._model.eval()
+                logger.info(f"LoRA适配器已设置: {lora_path}")
+            else:
+                self._lora_path = None
+                logger.info("LoRA适配器已清除")
 
     def generate(self, prompt: str, session_history: List[Dict] = None,
                  rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
@@ -553,6 +598,8 @@ class VLLMProvider(BaseProvider):
         self.timeout = float(os.getenv("VLLM_TIMEOUT", "120.0"))
         self._model_name = self.model
         self._loaded = True
+        import httpx
+        self._async_client = httpx.AsyncClient(timeout=httpx.Timeout(self.timeout, connect=10.0))
         self._refresh_db_config()
 
     def _refresh_db_config(self):
@@ -578,7 +625,7 @@ class VLLMProvider(BaseProvider):
 
     async def generate_async(self, prompt: str, session_history: List[Dict] = None,
                              rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
-        """异步生成 - 使用 httpx.AsyncClient 不阻塞事件循环"""
+        """异步生成 - 使用持久 AsyncClient 不阻塞事件循环"""
         import asyncio
         import httpx
 
@@ -614,26 +661,25 @@ class VLLMProvider(BaseProvider):
         last_error = None
         for attempt in range(3):
             try:
-                async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout, connect=10.0)) as client:
-                    resp = await client.post(
-                        f"{self.base_url}/chat/completions",
-                        json=payload,
-                        headers={"Authorization": "Bearer EMPTY"}
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        reply = data["choices"][0]["message"]["content"].strip()
-                        cost = round(time.time() - start, 2)
-                        return reply, cost
-                    elif resp.status_code >= 500:
-                        last_error = RuntimeError(f"vLLM返回错误: {resp.status_code} - {resp.text[:200]}")
-                        if attempt < 2:
-                            await asyncio.sleep(1.0 * (attempt + 1))
-                            continue
-                        raise last_error
-                    else:
-                        error_text = resp.text[:200]
-                        raise RuntimeError(f"vLLM返回错误: {resp.status_code} - {error_text}")
+                resp = await self._async_client.post(
+                    f"{self.base_url}/chat/completions",
+                    json=payload,
+                    headers={"Authorization": "Bearer EMPTY"}
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    reply = data["choices"][0]["message"]["content"].strip()
+                    cost = round(time.time() - start, 2)
+                    return reply, cost
+                elif resp.status_code >= 500:
+                    last_error = RuntimeError(f"vLLM返回错误: {resp.status_code} - {resp.text[:200]}")
+                    if attempt < 2:
+                        await asyncio.sleep(1.0 * (attempt + 1))
+                        continue
+                    raise last_error
+                else:
+                    error_text = resp.text[:200]
+                    raise RuntimeError(f"vLLM返回错误: {resp.status_code} - {error_text}")
             except httpx.TimeoutException as e:
                 last_error = RuntimeError(f"vLLM请求超时 (attempt {attempt + 1}/3): {e}")
                 if attempt < 2:
@@ -724,6 +770,12 @@ class ModelManager:
                  rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
         provider = self.get_current_provider()
         return provider.generate(prompt, session_history, rag_docs, max_tokens_override)
+
+    async def async_generate(self, prompt: str, session_history: List[Dict] = None,
+                             rag_docs: List[Dict] = None, max_tokens_override: int = None) -> Tuple[str, float]:
+        """异步生成，使用提供商的异步方法避免阻塞事件循环"""
+        provider = self.get_current_provider()
+        return await provider.async_generate(prompt, session_history, rag_docs, max_tokens_override)
 
     def set_lora_adapter(self, lora_path: Optional[str]):
         provider = self.get_current_provider()

@@ -2,7 +2,8 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from app.dependencies import get_current_user
 from pydantic import BaseModel
 
 from db.adapter import db
@@ -17,28 +18,38 @@ async def get_messages(
     sessionType: Optional[str] = None,
     lora: Optional[str] = None,
     limit: int = 100,
-    offset: int = 0
+    offset: int = 0,
+    current_user: dict = Depends(get_current_user)
 ):
     """获取消息记录"""
     total_all = db.get_message_count()
-    messages = db.get_messages(limit=limit, offset=offset)
+
+    # 先获取所有消息，再过滤，最后分页（确保过滤条件不影响分页正确性）
+    all_messages = db.get_messages(limit=100000, offset=0)
 
     # 过滤
+    filtered = all_messages
     if search:
-        messages = [m for m in messages if
+        filtered = [m for m in filtered if
             search.lower() in m.get("message", "").lower() or
             search.lower() in m.get("reply", "").lower() or
             search.lower() in m.get("userName", "").lower()]
 
     if sessionType and sessionType != "all":
-        messages = [m for m in messages if m.get("sessionType") == sessionType]
+        filtered = [m for m in filtered if m.get("sessionType") == sessionType]
 
     if lora and lora != "all":
-        messages = [m for m in messages if m.get("loraName") == lora]
+        filtered = [m for m in filtered if m.get("loraName") == lora]
+
+    # 统计过滤后的总数
+    total = len(filtered)
+
+    # 在过滤后的结果上应用分页
+    messages = filtered[offset:offset + limit]
 
     return {
         "messages": messages,
-        "total": len(messages),
+        "total": total,
         "total_all": total_all
     }
 

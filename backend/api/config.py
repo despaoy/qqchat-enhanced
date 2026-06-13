@@ -1,7 +1,8 @@
 """配置与模型状态API"""
 import logging
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
+from app.dependencies import get_current_user
 
 from db.adapter import db
 from app.config import (
@@ -31,7 +32,7 @@ async def get_config():
 
 
 @router.put("/api/config")
-async def update_config(request: Request):
+async def update_config(request: Request, current_user: dict = Depends(get_current_user)):
     """更新系统配置"""
     new_config = await request.json()
     # 输入验证 - 逐字段验证键值对
@@ -89,7 +90,7 @@ async def get_model_status():
 
 
 @router.put("/api/model/provider")
-async def set_model_provider(request: Request):
+async def set_model_provider(request: Request, current_user: dict = Depends(get_current_user)):
     """设置模型提供商"""
     try:
         from inference.model_manager import get_model_manager, ModelProvider

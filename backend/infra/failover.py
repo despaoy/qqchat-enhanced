@@ -263,12 +263,20 @@ class HealthChecker:
         return health
 
     async def check_all(self) -> dict[str, ProviderHealth]:
-        """检查所有已注册Provider的健康状态。"""
-        tasks = {name: self.check_one(name) for name in self._configs}
-        results = {}
-        for name, task in tasks.items():
-            # 使用 asyncio.create_task 并行检查
-            results[name] = await task
+        """检查所有已注册Provider的健康状态（并行执行）。"""
+        if not self._configs:
+            return {}
+        names = list(self._configs.keys())
+        coros = [self.check_one(name) for name in names]
+        completed = await asyncio.gather(*coros, return_exceptions=True)
+        results: dict[str, ProviderHealth] = {}
+        for name, result in zip(names, completed):
+            if isinstance(result, Exception):
+                logger.error("并行健康检查异常 [%s]: %s", name, result)
+                health = self._health_table.get(name)
+                results[name] = health if health else ProviderHealth(name=name)
+            else:
+                results[name] = result
         return results
 
     def get_health(self, name: str) -> Optional[ProviderHealth]:

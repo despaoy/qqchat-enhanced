@@ -374,7 +374,7 @@ class VLLMClient:
             RuntimeError: 所有实例不可用或所有重试失败
         """
         if stream:
-            return self._generate_stream(
+            return self._generate_stream_with_circuit(
                 messages, lora_name, temperature, max_tokens, top_p
             )
         return await self._circuit_breaker.call(
@@ -484,6 +484,28 @@ class VLLMClient:
                     )
 
         raise last_error or RuntimeError("vLLM 请求失败: 未知错误")
+
+    async def _generate_stream_with_circuit(
+        self,
+        messages: List[Dict[str, str]],
+        lora_name: Optional[str],
+        temperature: float,
+        max_tokens: int,
+        top_p: float,
+    ) -> AsyncGenerator[str, None]:
+        """流式生成，带熔断器保护"""
+        if self._circuit_breaker.state == CircuitState.OPEN:
+            yield self._circuit_breaker.default_value
+            return
+        try:
+            async for chunk in self._generate_stream(
+                messages, lora_name, temperature, max_tokens, top_p
+            ):
+                yield chunk
+            self._circuit_breaker.record_success()
+        except Exception as e:
+            self._circuit_breaker.record_failure(str(e))
+            raise
 
     async def _generate_stream(
         self,

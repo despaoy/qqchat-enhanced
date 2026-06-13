@@ -4,7 +4,8 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
+from app.dependencies import get_current_user
 
 from db.adapter import db
 from db.database import LORA_DIR_MAP
@@ -14,7 +15,7 @@ router = APIRouter()
 
 
 @router.get("/api/loras")
-async def get_loras(status: Optional[str] = None):
+async def get_loras(status: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     """获取LoRA模型列表"""
     return {
         "loras": db.get_loras(status)
@@ -22,7 +23,7 @@ async def get_loras(status: Optional[str] = None):
 
 
 @router.post("/api/loras/scan")
-async def scan_loras():
+async def scan_loras(current_user: dict = Depends(get_current_user)):
     """扫描 loras/ 目录，自动发现并注册新的 LoRA 适配器，更新已有记录元信息"""
     lora_base = Path(__file__).parent.parent / "loras"
     if not lora_base.exists():
@@ -105,7 +106,7 @@ async def scan_loras():
 
 
 @router.put("/api/loras/{lora_id}/status")
-async def update_lora_status(lora_id: str, request: Request):
+async def update_lora_status(lora_id: str, request: Request, current_user: dict = Depends(get_current_user)):
     """更新LoRA模型状态"""
     body = await request.json()
     status = body.get("status", "inactive")
@@ -118,7 +119,7 @@ async def update_lora_status(lora_id: str, request: Request):
 
 
 @router.delete("/api/loras/{lora_id}")
-async def delete_lora(lora_id: str):
+async def delete_lora(lora_id: str, current_user: dict = Depends(get_current_user)):
     """删除LoRA模型"""
     try:
         # 检查LoRA是否存在

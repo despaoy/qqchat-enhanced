@@ -18,6 +18,21 @@ from collections import Counter
 logger = logging.getLogger(__name__)
 
 
+def _validate_path(path_str: str, allowed_base: str = None) -> str:
+    """Validate path doesn't contain traversal sequences and is within allowed base."""
+    if not path_str:
+        raise ValueError("Path cannot be empty")
+    # Block path traversal
+    if '..' in path_str or '\x00' in path_str:
+        raise ValueError("Path contains invalid sequences")
+    resolved = Path(path_str).resolve()
+    if allowed_base:
+        base = Path(allowed_base).resolve()
+        if not str(resolved).startswith(str(base)):
+            raise ValueError(f"Path must be within {allowed_base}")
+    return str(resolved)
+
+
 @dataclass
 class CharacterStyleConfig:
     """角色风格配置数据类，定义角色的语言特征和对话行为偏好。
@@ -457,18 +472,33 @@ def scan_datasets_folder(folder_path: str = None) -> list:
 
 def import_dataset_from_folder(source_path: str, dataset_name: str = None) -> dict:
     """将数据集文件夹导入到 data_dir。
-    
+
     直接复制或链接整个文件夹到 preprocessor 的 data_dir 下。
-    
+
     Args:
         source_path: 源数据集文件夹路径
         dataset_name: 数据集名称，默认使用源文件夹名
-        
+
     Returns:
         {success, name, path, stats}
     """
     import shutil
-    
+
+    # Validate source_path to prevent path traversal
+    backend_dir = str(Path(__file__).parent.parent.resolve())
+    allowed_dirs = [backend_dir]
+    # Allow autodl-tmp directory if it exists
+    autodl_tmp = "/root/autodl-tmp"
+    if Path(autodl_tmp).exists():
+        allowed_dirs.append(str(Path(autodl_tmp).resolve()))
+    try:
+        validated_path = _validate_path(source_path)
+        resolved = Path(validated_path)
+        if not any(str(resolved).startswith(d) for d in allowed_dirs):
+            raise ValueError("源路径不在允许的目录范围内")
+    except ValueError as e:
+        raise ValueError(f"源路径验证失败: {e}")
+
     src = Path(source_path)
     if not src.exists() or not src.is_dir():
         raise FileNotFoundError(f"数据集文件夹不存在: {source_path}")

@@ -16,7 +16,7 @@ import logging
 import time
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional, Set
-from threading import Lock
+from threading import RLock
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
@@ -197,7 +197,7 @@ class VectorDatabase:
         self.config = index_config or IndexConfig()
         self.index: Optional[faiss.Index] = None
         self.metadata: List[Dict[str, Any]] = []
-        self._lock = Lock()
+        self._lock = RLock()
         self._id_to_index: Dict[int, int] = {}
         self._model = None
         self._device = None
@@ -422,22 +422,42 @@ class VectorDatabase:
     def _migrate_to_ivf(self):
         if len(self.metadata) == 0:
             return
-        documents = self.metadata.copy()
-        self.index = None
-        self.metadata = []
-        self._id_to_index = {}
-        self._create_index("ivf")
-        self._re_add_all_documents(documents)
+        old_index = self.index
+        old_metadata = self.metadata
+        old_id_to_index = self._id_to_index
+        try:
+            documents = self.metadata.copy()
+            self.index = None
+            self.metadata = []
+            self._id_to_index = {}
+            self._create_index("ivf")
+            self._re_add_all_documents(documents)
+        except Exception:
+            self.index = old_index
+            self.metadata = old_metadata
+            self._id_to_index = old_id_to_index
+            logger.error("IVF索引迁移失败，已恢复旧索引")
+            raise
 
     def _migrate_to_hnsw(self):
         if len(self.metadata) == 0:
             return
-        documents = self.metadata.copy()
-        self.index = None
-        self.metadata = []
-        self._id_to_index = {}
-        self._create_index("hnsw")
-        self._re_add_all_documents(documents)
+        old_index = self.index
+        old_metadata = self.metadata
+        old_id_to_index = self._id_to_index
+        try:
+            documents = self.metadata.copy()
+            self.index = None
+            self.metadata = []
+            self._id_to_index = {}
+            self._create_index("hnsw")
+            self._re_add_all_documents(documents)
+        except Exception:
+            self.index = old_index
+            self.metadata = old_metadata
+            self._id_to_index = old_id_to_index
+            logger.error("HNSW索引迁移失败，已恢复旧索引")
+            raise
 
     def _re_add_all_documents(self, documents: List[Dict[str, Any]]):
         texts = [f"{doc.get('title', '')} {doc.get('content', '')}" for doc in documents]
@@ -475,56 +495,57 @@ class VectorDatabase:
         if not documents:
             return
 
-        self._ensure_index()
-        self._load_model()
+        with self._lock:
+            self._ensure_index()
+            self._load_model()
 
-        texts = []
-        for doc in documents:
-            full_text = f"{doc.get('title', '')} {doc.get('content', '')}"
-            texts.append(full_text)
+            texts = []
+            for doc in documents:
+                full_text = f"{doc.get('title', '')} {doc.get('content', '')}"
+                texts.append(full_text)
 
-        logger.info(f"正在生成 {len(texts)} 个向量...")
-        embeddings = self._get_embeddings_batch(texts)
+            logger.info(f"正在生成 {len(texts)} 个向量...")
+            embeddings = self._get_embeddings_batch(texts)
 
-        ids = []
-        start_id = len(self.metadata)
-        for i, doc in enumerate(documents):
-            doc_id = doc.get("id")
-            faiss_id = None
-            if doc_id is not None:
-                faiss_id = self._to_faiss_id(doc_id)
-            if faiss_id is None:
-                faiss_id = start_id + i
-            ids.append(faiss_id)
+            ids = []
+            start_id = len(self.metadata)
+            for i, doc in enumerate(documents):
+                doc_id = doc.get("id")
+                faiss_id = None
+                if doc_id is not None:
+                    faiss_id = self._to_faiss_id(doc_id)
+                if faiss_id is None:
+                    faiss_id = start_id + i
+                ids.append(faiss_id)
 
-        ids = np.array(ids, dtype=np.int64)
+            ids = np.array(ids, dtype=np.int64)
 
-        if hasattr(self.index, 'is_trained') and not self.index.is_trained:
-            logger.info("训练IVF索引...")
-            train_size = min(len(embeddings), max(256, self.config.nlist * 39))
-            self.index.train(embeddings[:train_size])
+            if hasattr(self.index, 'is_trained') and not self.index.is_trained:
+                logger.info("训练IVF索引...")
+                train_size = min(len(embeddings), max(256, self.config.nlist * 39))
+                self.index.train(embeddings[:train_size])
 
-        self.index.add_with_ids(embeddings, ids)
+            self.index.add_with_ids(embeddings, ids)
 
-        start_idx = len(self.metadata)
-        self.metadata.extend(documents)
-        for i, faiss_id in enumerate(ids):
-            self._id_to_index[int(faiss_id)] = start_idx + i
+            start_idx = len(self.metadata)
+            self.metadata.extend(documents)
+            for i, faiss_id in enumerate(ids):
+                self._id_to_index[int(faiss_id)] = start_idx + i
 
-        self.bm25.add_documents(documents)
+            self.bm25.add_documents(documents)
 
-        self._add_count += len(documents)
-        self._dirty = True
+            self._add_count += len(documents)
+            self._dirty = True
 
-        if self.config.save_on_every_n_adds <= 0 or self._add_count >= self.config.save_on_every_n_adds:
-            self._save_index()
-            self._add_count = 0
-        else:
-            logger.info(f"延迟保存：已添加 {self._add_count} 个文档（阈值: {self.config.save_on_every_n_adds}）")
+            if self.config.save_on_every_n_adds <= 0 or self._add_count >= self.config.save_on_every_n_adds:
+                self._save_index()
+                self._add_count = 0
+            else:
+                logger.info(f"延迟保存：已添加 {self._add_count} 个文档（阈值: {self.config.save_on_every_n_adds}）")
 
-        self._maybe_migrate_index(len(self.metadata))
+            self._maybe_migrate_index(len(self.metadata))
 
-        logger.info(f"成功添加 {len(documents)} 个文档到向量数据库（总计: {len(self.metadata)}）")
+            logger.info(f"成功添加 {len(documents)} 个文档到向量数据库（总计: {len(self.metadata)}）")
 
     def flush(self):
         if self._dirty:
@@ -552,30 +573,31 @@ class VectorDatabase:
         if len(self.metadata) == 0:
             return []
 
-        query_embedding = self._get_embedding(query)
-        query_embedding = np.array([query_embedding]).astype('float32')
+        with self._lock:
+            query_embedding = self._get_embedding(query)
+            query_embedding = np.array([query_embedding]).astype('float32')
 
-        search_k = top_k
-        if filters:
-            search_k = min(top_k * 5, len(self.metadata))
+            search_k = top_k
+            if filters:
+                search_k = min(top_k * 5, len(self.metadata))
 
-        scores, faiss_ids = self.index.search(query_embedding, search_k)
+            scores, faiss_ids = self.index.search(query_embedding, search_k)
 
-        results = []
-        for score, faiss_id in zip(scores[0], faiss_ids[0]):
-            if score < threshold:
-                continue
-            meta_idx = self._id_to_index.get(int(faiss_id))
-            if meta_idx is None or meta_idx < 0 or meta_idx >= len(self.metadata):
-                continue
-            result = {**self.metadata[meta_idx], "score": float(score)}
-            if filters and not self._match_filters(result, filters):
-                continue
-            results.append(result)
-            if len(results) >= top_k:
-                break
+            results = []
+            for score, faiss_id in zip(scores[0], faiss_ids[0]):
+                if score < threshold:
+                    continue
+                meta_idx = self._id_to_index.get(int(faiss_id))
+                if meta_idx is None or meta_idx < 0 or meta_idx >= len(self.metadata):
+                    continue
+                result = {**self.metadata[meta_idx], "score": float(score)}
+                if filters and not self._match_filters(result, filters):
+                    continue
+                results.append(result)
+                if len(results) >= top_k:
+                    break
 
-        return results
+            return results
 
     def _match_filters(self, doc: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         for key, value in filters.items():
@@ -597,7 +619,7 @@ class VectorDatabase:
                     return False
         return True
 
-    def _find_metadata_index(self, doc: Dict[str, Any]) -> int:
+    def _find_metadata_index(self, doc: Dict[str, Any]) -> Optional[int]:
         doc_id = doc.get("id")
         if doc_id is not None:
             faiss_id = self._to_faiss_id(doc_id)
@@ -608,7 +630,13 @@ class VectorDatabase:
         for i, meta in enumerate(self.metadata):
             if meta.get("content") == doc_content and meta.get("title") == doc_title:
                 return i
-        return id(doc)
+        # Use content hash as stable fallback key
+        content_hash = hashlib.md5(str(doc_content).encode()).hexdigest()[:8]
+        for i, meta in enumerate(self.metadata):
+            meta_hash = hashlib.md5(str(meta.get("content", "")).encode()).hexdigest()[:8]
+            if meta_hash == content_hash:
+                return i
+        return None
 
     def hybrid_search(
         self,
@@ -634,54 +662,59 @@ class VectorDatabase:
             按融合分数降序排列的搜索结果，每项包含vector_score、bm25_score、fused_score
         """
         recall_k = min(top_k * 3, len(self.metadata))
-        vector_results = self.search(query, top_k=recall_k, threshold=threshold, filters=filters)
+        with self._lock:
+            vector_results = self.search(query, top_k=recall_k, threshold=threshold, filters=filters)
 
-        if not vector_results and not self.bm25._built:
-            return []
+            if not vector_results and not self.bm25._built:
+                return []
 
-        bm25_results = []
-        if self.bm25._built:
-            bm25_hits = self.bm25.search(query, top_k=recall_k, threshold=0.0)
-            for doc_idx, score in bm25_hits:
-                if doc_idx < len(self.metadata):
-                    result = {**self.metadata[doc_idx], "bm25_score": score}
-                    if filters and not self._match_filters(result, filters):
-                        continue
-                    bm25_results.append(result)
+            bm25_results = []
+            if self.bm25._built:
+                bm25_hits = self.bm25.search(query, top_k=recall_k, threshold=0.0)
+                for doc_idx, score in bm25_hits:
+                    if doc_idx < len(self.metadata):
+                        result = {**self.metadata[doc_idx], "bm25_score": score}
+                        if filters and not self._match_filters(result, filters):
+                            continue
+                        bm25_results.append(result)
 
-        if not vector_results and not bm25_results:
-            return []
+            if not vector_results and not bm25_results:
+                return []
 
-        doc_scores: Dict[int, Dict[str, float]] = {}
+            doc_scores: Dict[int, Dict[str, float]] = {}
 
-        for doc in vector_results:
-            key = self._find_metadata_index(doc)
-            doc_scores[key] = {"vector_score": doc.get("score", 0), "bm25_score": 0.0, "doc": doc}
+            for doc in vector_results:
+                key = self._find_metadata_index(doc)
+                if key is None:
+                    continue
+                doc_scores[key] = {"vector_score": doc.get("score", 0), "bm25_score": 0.0, "doc": doc}
 
-        for doc in bm25_results:
-            key = self._find_metadata_index(doc)
-            if key in doc_scores:
-                doc_scores[key]["bm25_score"] = doc.get("bm25_score", 0)
-            else:
-                doc_scores[key] = {"vector_score": 0.0, "bm25_score": doc.get("bm25_score", 0), "doc": doc}
+            for doc in bm25_results:
+                key = self._find_metadata_index(doc)
+                if key is None:
+                    continue
+                if key in doc_scores:
+                    doc_scores[key]["bm25_score"] = doc.get("bm25_score", 0)
+                else:
+                    doc_scores[key] = {"vector_score": 0.0, "bm25_score": doc.get("bm25_score", 0), "doc": doc}
 
-        max_bm25 = max((s["bm25_score"] for s in doc_scores.values()), default=1.0) or 1.0
-        max_vector = max((s["vector_score"] for s in doc_scores.values()), default=1.0) or 1.0
+            max_bm25 = max((s["bm25_score"] for s in doc_scores.values()), default=1.0) or 1.0
+            max_vector = max((s["vector_score"] for s in doc_scores.values()), default=1.0) or 1.0
 
-        fused_results = []
-        for key, scores in doc_scores.items():
-            norm_vector = scores["vector_score"] / max_vector if max_vector > 0 else 0
-            norm_bm25 = scores["bm25_score"] / max_bm25 if max_bm25 > 0 else 0
-            fused_score = (1 - keyword_weight) * norm_vector + keyword_weight * norm_bm25
+            fused_results = []
+            for key, scores in doc_scores.items():
+                norm_vector = scores["vector_score"] / max_vector if max_vector > 0 else 0
+                norm_bm25 = scores["bm25_score"] / max_bm25 if max_bm25 > 0 else 0
+                fused_score = (1 - keyword_weight) * norm_vector + keyword_weight * norm_bm25
 
-            doc = scores["doc"]
-            doc["vector_score"] = scores["vector_score"]
-            doc["bm25_score"] = scores["bm25_score"]
-            doc["fused_score"] = fused_score
-            fused_results.append(doc)
+                doc = scores["doc"]
+                doc["vector_score"] = scores["vector_score"]
+                doc["bm25_score"] = scores["bm25_score"]
+                doc["fused_score"] = fused_score
+                fused_results.append(doc)
 
-        fused_results.sort(key=lambda x: x["fused_score"], reverse=True)
-        return fused_results[:top_k]
+            fused_results.sort(key=lambda x: x["fused_score"], reverse=True)
+            return fused_results[:top_k]
 
     def batch_search(
         self,
@@ -697,68 +730,70 @@ class VectorDatabase:
         self._load_model()
         query_embeddings = self._get_embeddings_batch(queries)
 
-        results = []
-        for i, query_emb in enumerate(query_embeddings):
-            query_emb = np.array([query_emb]).astype('float32')
-            scores, faiss_ids = self.index.search(query_emb, top_k)
+        with self._lock:
+            results = []
+            for i, query_emb in enumerate(query_embeddings):
+                query_emb = np.array([query_emb]).astype('float32')
+                scores, faiss_ids = self.index.search(query_emb, top_k)
 
-            query_results = []
-            for score, faiss_id in zip(scores[0], faiss_ids[0]):
-                if score < threshold:
-                    continue
-                meta_idx = self._id_to_index.get(int(faiss_id))
-                if meta_idx is None or meta_idx < 0 or meta_idx >= len(self.metadata):
-                    continue
-                result = {**self.metadata[meta_idx], "score": float(score)}
-                if filters and not self._match_filters(result, filters):
-                    continue
-                query_results.append(result)
+                query_results = []
+                for score, faiss_id in zip(scores[0], faiss_ids[0]):
+                    if score < threshold:
+                        continue
+                    meta_idx = self._id_to_index.get(int(faiss_id))
+                    if meta_idx is None or meta_idx < 0 or meta_idx >= len(self.metadata):
+                        continue
+                    result = {**self.metadata[meta_idx], "score": float(score)}
+                    if filters and not self._match_filters(result, filters):
+                        continue
+                    query_results.append(result)
 
-            results.append(query_results)
+                results.append(query_results)
 
-        return results
+            return results
 
     def delete_documents(self, doc_ids: List[Any]) -> int:
         if not doc_ids:
             return 0
 
-        faiss_ids_to_remove = []
-        indices_to_remove = set()
+        with self._lock:
+            faiss_ids_to_remove = []
+            indices_to_remove = set()
 
-        for doc_id in doc_ids:
-            faiss_id = self._to_faiss_id(doc_id)
-            if faiss_id is not None and faiss_id in self._id_to_index:
-                meta_idx = self._id_to_index[faiss_id]
-                indices_to_remove.add(meta_idx)
-                faiss_ids_to_remove.append(faiss_id)
+            for doc_id in doc_ids:
+                faiss_id = self._to_faiss_id(doc_id)
+                if faiss_id is not None and faiss_id in self._id_to_index:
+                    meta_idx = self._id_to_index[faiss_id]
+                    indices_to_remove.add(meta_idx)
+                    faiss_ids_to_remove.append(faiss_id)
 
-        if not indices_to_remove:
-            return 0
+            if not indices_to_remove:
+                return 0
 
-        try:
-            faiss_ids_array = np.array(faiss_ids_to_remove, dtype=np.int64)
-            if hasattr(self.index, 'remove_ids'):
-                n_removed = self.index.remove_ids(faiss_ids_array)
-                logger.info(f"从FAISS索引中删除 {n_removed} 个向量")
-            else:
-                logger.warning("当前索引不支持remove_ids，需要重建索引")
-                self._rebuild_index_excluding(indices_to_remove)
+            try:
+                faiss_ids_array = np.array(faiss_ids_to_remove, dtype=np.int64)
+                if hasattr(self.index, 'remove_ids'):
+                    n_removed = self.index.remove_ids(faiss_ids_array)
+                    logger.info(f"从FAISS索引中删除 {n_removed} 个向量")
+                else:
+                    logger.warning("当前索引不支持remove_ids，需要重建索引")
+                    self._rebuild_index_excluding(indices_to_remove)
+                    return len(indices_to_remove)
+
+                sorted_indices = sorted(indices_to_remove, reverse=True)
+                for idx in sorted_indices:
+                    if idx < len(self.metadata):
+                        self.metadata.pop(idx)
+
+                self._rebuild_id_mapping()
+                self._rebuild_bm25()
+                self._save_index()
+
                 return len(indices_to_remove)
 
-            sorted_indices = sorted(indices_to_remove, reverse=True)
-            for idx in sorted_indices:
-                if idx < len(self.metadata):
-                    self.metadata.pop(idx)
-
-            self._rebuild_id_mapping()
-            self._rebuild_bm25()
-            self._save_index()
-
-            return len(indices_to_remove)
-
-        except Exception as e:
-            logger.error(f"删除文档失败: {e}")
-            return 0
+            except Exception as e:
+                logger.error(f"删除文档失败: {e}")
+                return 0
 
     def _rebuild_index_excluding(self, exclude_indices: Set[int]):
         documents = [meta for i, meta in enumerate(self.metadata) if i not in exclude_indices]
@@ -780,35 +815,37 @@ class VectorDatabase:
         """
         if len(self.metadata) == 0:
             return
-        documents = self.metadata.copy()
-        self.index = None
-        self.metadata = []
-        self._id_to_index = {}
-        self._create_index()
+        with self._lock:
+            documents = self.metadata.copy()
+            self.index = None
+            self.metadata = []
+            self._id_to_index = {}
+            self._create_index()
         self.add_documents(documents)
 
     def get_stats(self) -> Dict[str, Any]:
-        index_type = "unknown"
-        if self.index:
-            if isinstance(self.index, faiss.IndexIDMap):
-                inner = self.index.index
-                if isinstance(inner, faiss.IndexFlatIP):
-                    index_type = "flat"
-                elif isinstance(inner, faiss.IndexIVFFlat):
-                    index_type = "ivf"
-                elif isinstance(inner, faiss.IndexHNSWFlat):
-                    index_type = "hnsw"
+        with self._lock:
+            index_type = "unknown"
+            if self.index:
+                if isinstance(self.index, faiss.IndexIDMap):
+                    inner = self.index.index
+                    if isinstance(inner, faiss.IndexFlatIP):
+                        index_type = "flat"
+                    elif isinstance(inner, faiss.IndexIVFFlat):
+                        index_type = "ivf"
+                    elif isinstance(inner, faiss.IndexHNSWFlat):
+                        index_type = "hnsw"
 
-        return {
-            "total_documents": len(self.metadata),
-            "index_size": self.index.ntotal if self.index else 0,
-            "index_type": index_type,
-            "embedding_dim": self.EMBEDDING_DIM,
-            "use_gpu": self._use_gpu,
-            "bm25_built": self.bm25._built,
-            "bm25_vocab_size": len(self.bm25.doc_freqs),
-            "dirty": self._dirty,
-        }
+            return {
+                "total_documents": len(self.metadata),
+                "index_size": self.index.ntotal if self.index else 0,
+                "index_type": index_type,
+                "embedding_dim": self.EMBEDDING_DIM,
+                "use_gpu": self._use_gpu,
+                "bm25_built": self.bm25._built,
+                "bm25_vocab_size": len(self.bm25.doc_freqs),
+                "dirty": self._dirty,
+            }
 
     def clear_cache(self):
         logger.info("向量缓存已清除")

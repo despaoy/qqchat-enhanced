@@ -33,15 +33,15 @@ class TaskItem:
     sort_key: int = field(init=False)
     priority: int = field(default=0)
     task_id: str = field(default="")
-    coroutine: Optional[Coroutine] = field(default=None, repr=False)
-    fn: Optional[Callable] = field(default=None, repr=False)
-    args: tuple = field(default=(), repr=False)
-    kwargs: dict = field(default_factory=dict, repr=False)
+    coroutine: Optional[Coroutine] = field(default=None, repr=False, compare=False)
+    fn: Optional[Callable] = field(default=None, repr=False, compare=False)
+    args: tuple = field(default=(), repr=False, compare=False)
+    kwargs: dict = field(default_factory=dict, repr=False, compare=False)
     is_cpu_bound: bool = field(default=False)
     timeout: Optional[float] = field(default=None)
-    on_complete: Optional[Callable[[str, Any], None]] = field(default=None, repr=False)
+    on_complete: Optional[Callable[[str, Any], None]] = field(default=None, repr=False, compare=False)
     status: TaskStatus = field(default=TaskStatus.PENDING)
-    result: Any = field(default=None, repr=False)
+    result: Any = field(default=None, repr=False, compare=False)
     error: Optional[str] = field(default=None)
     created_at: float = field(default_factory=time.monotonic)
     started_at: Optional[float] = field(default=None)
@@ -109,6 +109,11 @@ class AsyncTaskQueue:
             max_queue_size,
         )
 
+    def _cleanup_result(self, task_id: str):
+        """清理过期的任务结果和任务记录，防止内存泄漏。"""
+        self._results.pop(task_id, None)
+        self._tasks.pop(task_id, None)
+
     async def start(self) -> None:
         """启动队列的工作循环。"""
         if self._started:
@@ -162,6 +167,12 @@ class AsyncTaskQueue:
                 self._results[task_item.task_id] = result
                 self._total_completed += 1
                 logger.debug("任务完成: %s", task_item.task_id)
+
+                # Schedule cleanup after 5 minutes to prevent memory leak
+                try:
+                    asyncio.get_event_loop().call_later(300, self._cleanup_result, task_item.task_id)
+                except RuntimeError:
+                    pass
 
                 if task_item.on_complete is not None:
                     try:

@@ -8,6 +8,7 @@ import logging
 import os
 import json
 import asyncio
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -124,6 +125,7 @@ class SimpleLoRATrainer:
         self.loras_dir = self.base_dir / "loras"
         self.loras_dir.mkdir(exist_ok=True)
         self.tasks: Dict[str, Dict[str, Any]] = {}
+        self._cancel_events: Dict[str, threading.Event] = {}
         self._lock = asyncio.Lock()
 
     async def start_training(self, lora_name: str, dataset_path: Path, config: Dict[str, Any]) -> str:
@@ -159,6 +161,7 @@ class SimpleLoRATrainer:
 
         async with self._lock:
             self.tasks[task_id] = task
+            self._cancel_events[task_id] = threading.Event()
 
         asyncio.create_task(self._run_training(task_id, lora_name, dataset_path, config))
 
@@ -166,6 +169,8 @@ class SimpleLoRATrainer:
         return task_id
 
     async def _run_training(self, task_id: str, lora_name: str, dataset_path: Path, config: Dict[str, Any]):
+        cancel_event = self._cancel_events.get(task_id)
+
         async with self._lock:
             self.tasks[task_id]["status"] = "training"
             self.tasks[task_id]["started_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -180,10 +185,13 @@ class SimpleLoRATrainer:
                 raise ValueError(f"训练配置错误: {'; '.join(errors)}")
 
             # 检查是否在配置阶段已被取消
-            async with self._lock:
-                if self.tasks[task_id]["status"] == "cancelled":
-                    logger.info(f"训练任务在配置阶段被取消: {task_id}")
-                    return
+            if cancel_event and cancel_event.is_set():
+                async with self._lock:
+                    if self.tasks[task_id]["status"] != "cancelled":
+                        self.tasks[task_id]["status"] = "cancelled"
+                        self.tasks[task_id]["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                logger.info(f"训练任务在配置阶段被取消: {task_id}")
+                return
 
             config_path = Path(train_config.output_dir) / "training_config_auto.json"
             config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -192,16 +200,32 @@ class SimpleLoRATrainer:
             trainer = LoRATrainer(train_config)
 
             async with self._lock:
-                if self.tasks[task_id]["status"] == "cancelled":
+                if cancel_event and cancel_event.is_set():
+                    if self.tasks[task_id]["status"] != "cancelled":
+                        self.tasks[task_id]["status"] = "cancelled"
+                        self.tasks[task_id]["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                     logger.info(f"训练任务在启动前被取消: {task_id}")
                     return
                 self.tasks[task_id]["progress"] = 0.1
                 self.tasks[task_id]["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
 
-            # 在线程中执行阻塞的训练操作
-            output_path = await asyncio.to_thread(trainer.train)
+            # 在线程中执行阻塞的训练操作，传入取消事件供训练循环检查
+            def _train_with_cancel_check():
+                if cancel_event and hasattr(trainer, 'cancel_event'):
+                    trainer.cancel_event = cancel_event
+                return trainer.train()
 
-            # 训练完成后再次检查是否被取消
+            output_path = await asyncio.to_thread(_train_with_cancel_check)
+
+            # 检查取消事件
+            if cancel_event and cancel_event.is_set():
+                async with self._lock:
+                    if self.tasks[task_id]["status"] != "cancelled":
+                        self.tasks[task_id]["status"] = "cancelled"
+                        self.tasks[task_id]["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                logger.info(f"训练任务完成后发现已被取消: {task_id}")
+                return
+
             async with self._lock:
                 if self.tasks[task_id]["status"] == "cancelled":
                     logger.info(f"训练任务完成后发现已被取消: {task_id}")
@@ -284,7 +308,25 @@ class SimpleLoRATrainer:
 
     async def get_all_tasks(self) -> List[Dict[str, Any]]:
         async with self._lock:
+            self._cleanup_old_tasks()
             return list(self.tasks.values())
+
+    def _cleanup_old_tasks(self, max_completed: int = 50):
+        """清理过多的已完成/失败/取消任务，防止tasks字典无限增长。
+
+        保留最新的 max_completed 个已完成任务，删除更早的。
+        注意：调用方需持有 self._lock。
+        """
+        completed = [
+            tid for tid, t in self.tasks.items()
+            if t.get("status") in ("completed", "failed", "cancelled")
+        ]
+        if len(completed) > max_completed:
+            # 按创建时间排序，删除最旧的
+            completed.sort(key=lambda tid: self.tasks[tid].get("created_at", ""))
+            for tid in completed[max_completed:]:
+                del self.tasks[tid]
+                self._cancel_events.pop(tid, None)
 
     async def cancel_task(self, task_id: str) -> bool:
         async with self._lock:
@@ -293,6 +335,10 @@ class SimpleLoRATrainer:
                 task["status"] = "cancelled"
                 task["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                 task["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                # 设置取消事件，通知训练线程停止
+                cancel_event = self._cancel_events.get(task_id)
+                if cancel_event:
+                    cancel_event.set()
                 return True
         return False
 

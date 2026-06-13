@@ -1,7 +1,8 @@
 """模型管理API"""
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from app.dependencies import get_current_user
 
 from db.models import ModelDownloadRequest
 
@@ -10,7 +11,7 @@ router = APIRouter()
 
 
 @router.get("/api/models")
-async def list_models():
+async def list_models(current_user: dict = Depends(get_current_user)):
     """列出所有可用的模型"""
     try:
         from inference.model_manager import get_model_manager
@@ -28,7 +29,7 @@ async def list_models():
 
 
 @router.get("/api/models/check/{model_name}")
-async def check_model(model_name: str):
+async def check_model(model_name: str, current_user: dict = Depends(get_current_user)):
     """检查模型是否已下载"""
     try:
         from inference.model_manager import get_model_manager
@@ -47,7 +48,7 @@ async def check_model(model_name: str):
 
 
 @router.post("/api/models/download")
-async def download_model(request: ModelDownloadRequest):
+async def download_model(request: ModelDownloadRequest, current_user: dict = Depends(get_current_user)):
     """下载模型"""
     try:
         from inference.model_manager import get_model_manager
@@ -65,7 +66,7 @@ async def download_model(request: ModelDownloadRequest):
 
 
 @router.delete("/api/models/{model_name}")
-async def delete_model(model_name: str):
+async def delete_model(model_name: str, current_user: dict = Depends(get_current_user)):
     """删除模型"""
     try:
         from inference.model_manager import get_model_manager
@@ -86,7 +87,7 @@ async def delete_model(model_name: str):
 
 
 @router.post("/api/models/check-7b")
-async def check_and_download_7b_model():
+async def check_and_download_7b_model(current_user: dict = Depends(get_current_user)):
     """检查并自动下载7B模型（如果不存在）"""
     try:
         from inference.model_manager import get_model_manager

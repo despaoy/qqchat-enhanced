@@ -91,6 +91,11 @@ class TokenBucket:
             return True
         return False
 
+    def can_consume(self, tokens: int = 1) -> bool:
+        """检查是否有足够令牌可消费（不实际消耗）"""
+        self.refill()
+        return self.tokens >= tokens
+
     @property
     def wait_time(self) -> float:
         """等待一个令牌所需的时间（秒）"""
@@ -611,7 +616,8 @@ class RateLimiter:
     async def acquire(self, key: str, tokens: int = 1, role: Optional[UserRole] = None) -> bool:
         """尝试获取令牌（非阻塞）
 
-        同时检查用户桶和全局限流桶。
+        同时检查用户桶和全局限流桶。先检查两个桶的可用性，
+        都可用时才实际消耗令牌，避免用户桶不足时全局桶已被消耗的问题。
 
         Args:
             key: 用户/API Key标识
@@ -624,17 +630,20 @@ class RateLimiter:
         async with self._lock:
             bucket = self._get_or_create_bucket(key, role)
 
-            # 先检查全局限流
-            if not self._global_bucket.consume(tokens):
+            # 先检查两个桶的可用性
+            if not self._global_bucket.can_consume(tokens):
                 self._rejected_count += 1
                 logger.warning("全局限流触发，当前QPS超限: key=%s", key)
                 return False
 
-            # 再检查用户限流
-            if not bucket.consume(tokens):
+            if not bucket.can_consume(tokens):
                 self._rejected_count += 1
                 logger.warning("用户限流触发: key=%s, 等待时间=%.2fs", key, bucket.wait_time)
                 return False
+
+            # 两个桶都可用，才实际消耗令牌
+            self._global_bucket.consume(tokens)
+            bucket.consume(tokens)
 
             return True
 

@@ -64,7 +64,7 @@ _RATE_LIMIT_WINDOW = 60
 _MAX_AUDIT_LOG_ENTRIES = 10000
 
 # 数据库路径
-_DB_PATH = Path(__file__).parent / "qq_assistant.db"
+_DB_PATH = Path(__file__).parent.parent / "qq_assistant.db"
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +413,7 @@ class AccessControlManager:
         """
         self._db_path = str(db_path)
         self._rate_limiter = RateLimiter(limit=rate_limit)
+        self._custom_rate_limiters: dict[str, RateLimiter] = {}
         self._audit_logger = AuditLogger(db_path)
         self._init_tables()
         logger.info("AccessControlManager 初始化完成")
@@ -448,17 +449,40 @@ class AccessControlManager:
 
     @staticmethod
     def _hash_api_key(api_key: str) -> str:
-        """计算API Key的SHA-256哈希值。
+        """计算API Key的哈希值，使用pbkdf2_hmac加盐哈希。
 
-        使用SHA-256对API Key进行哈希，存储哈希值而非原始Key。
+        使用随机盐 + PBKDF2-HMAC-SHA256 进行安全哈希，存储哈希值而非原始Key。
 
         Args:
             api_key: 原始API Key
 
         Returns:
-            十六进制格式的哈希值
+            格式为 "pbkdf2:{salt_hex}:{key_hex}" 的哈希值
         """
-        return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+        salt = os.urandom(16)
+        key = hashlib.pbkdf2_hmac('sha256', api_key.encode('utf-8'), salt, 100000)
+        return f"pbkdf2:{salt.hex()}:{key.hex()}"
+
+    @staticmethod
+    def _verify_api_key(api_key: str, stored_hash: str) -> bool:
+        """验证API Key是否与存储的哈希匹配。
+
+        支持新的pbkdf2格式和旧的SHA-256格式（向后兼容）。
+
+        Args:
+            api_key: 待验证的原始API Key
+            stored_hash: 数据库中存储的哈希值
+
+        Returns:
+            是否匹配
+        """
+        if stored_hash.startswith("pbkdf2:"):
+            _, salt_hex, key_hex = stored_hash.split(":")
+            salt = bytes.fromhex(salt_hex)
+            key = hashlib.pbkdf2_hmac('sha256', api_key.encode('utf-8'), salt, 100000)
+            return key.hex() == key_hex
+        # Legacy SHA-256 support
+        return hashlib.sha256(api_key.encode("utf-8")).hexdigest() == stored_hash
 
     # -------------------------------------------------------------------
     # API Key管理
@@ -537,17 +561,30 @@ class AccessControlManager:
         Raises:
             APIKeyError: 吊销操作失败
         """
-        key_hash = self._hash_api_key(api_key)
-
         try:
             with self._get_connection() as conn:
+                # Find the key by verifying against stored hashes
+                cursor = conn.execute(
+                    "SELECT key_hash, key_prefix FROM api_keys WHERE is_active = 1"
+                )
+                rows = cursor.fetchall()
+
+                matched_hash = None
+                for row in rows:
+                    if self._verify_api_key(api_key, row["key_hash"]):
+                        matched_hash = row["key_hash"]
+                        break
+
+                if matched_hash is None:
+                    return False
+
                 cursor = conn.execute(
                     """
                     UPDATE api_keys
                     SET is_active = 0, revoked_at = ?
                     WHERE key_hash = ? AND is_active = 1
                     """,
-                    (time.time(), key_hash),
+                    (time.time(), matched_hash),
                 )
                 conn.commit()
 
@@ -557,7 +594,7 @@ class AccessControlManager:
                 logger.info("API Key已吊销: %s***", api_key[:12])
 
                 self._audit_logger.log(
-                    api_key_hash=key_hash,
+                    api_key_hash=matched_hash,
                     role="system",
                     action="revoke_api_key",
                     detail="API Key已被吊销",
@@ -623,44 +660,52 @@ class AccessControlManager:
                     """
                     SELECT key_hash, role, is_active, rate_limit
                     FROM api_keys
-                    WHERE key_hash = ?
+                    WHERE key_prefix = ?
                     """,
-                    (key_hash,),
+                    (f"{_API_KEY_PREFIX}{api_key[len(_API_KEY_PREFIX):].split('_', 1)[0]}_" if len(api_key) > len(_API_KEY_PREFIX) else "",),
                 )
-                row = cursor.fetchone()
+                rows = cursor.fetchall()
 
-            if row is None:
+            # Find matching key using secure verification
+            matched_row = None
+            for row in rows:
+                if self._verify_api_key(api_key, row["key_hash"]):
+                    matched_row = row
+                    break
+
+            if matched_row is None:
                 logger.warning("认证失败: 无效的API Key %s***", api_key[:8])
                 raise AuthenticationError("无效的API Key")
 
-            if not row["is_active"]:
+            if not matched_row["is_active"]:
                 logger.warning("认证失败: API Key已吊销 %s***", api_key[:8])
                 raise AuthenticationError("API Key已被吊销")
 
-            role = Role(row["role"])
+            role = Role(matched_row["role"])
             permissions = _ROLE_PERMISSIONS.get(role, Permission(0))
 
             # 更新最后使用时间
             with self._get_connection() as conn:
                 conn.execute(
                     "UPDATE api_keys SET last_used_at = ? WHERE key_hash = ?",
-                    (time.time(), key_hash),
+                    (time.time(), matched_row["key_hash"]),
                 )
                 conn.commit()
 
             # 速率限制检查
-            custom_limit = row["rate_limit"]
+            custom_limit = matched_row["rate_limit"]
+            stored_hash = matched_row["key_hash"]
             if custom_limit:
-                # 使用自定义限制创建临时检查
-                temp_limiter = RateLimiter(limit=custom_limit)
-                await temp_limiter.check(api_key)
+                if stored_hash not in self._custom_rate_limiters:
+                    self._custom_rate_limiters[stored_hash] = RateLimiter(limit=custom_limit)
+                await self._custom_rate_limiters[stored_hash].check(api_key)
             else:
                 await self._rate_limiter.check(api_key)
 
             return {
                 "role": role,
                 "permissions": permissions,
-                "key_hash": key_hash,
+                "key_hash": stored_hash,
                 "rate_limit": custom_limit or _DEFAULT_RATE_LIMIT,
             }
 

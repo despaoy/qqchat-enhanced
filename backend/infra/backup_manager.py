@@ -9,6 +9,7 @@ import gzip
 import hashlib
 import logging
 import os
+import re
 import shutil
 import sqlite3
 from dataclasses import dataclass, field
@@ -18,6 +19,13 @@ from pathlib import Path
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_table_name(name: str) -> str:
+    """Validate SQL table name to prevent injection."""
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
+        raise ValueError(f"Invalid table name: {name}")
+    return name
 
 
 class BackupType(Enum):
@@ -232,6 +240,7 @@ class BackupManager:
                 tables = [row[0] for row in cursor.fetchall()]
 
                 for table in tables:
+                    _validate_table_name(table)
                     # 获取建表语句
                     cursor.execute(
                         "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
@@ -303,15 +312,8 @@ class BackupManager:
         if self._stats.newest_backup is None or timestamp > self._stats.newest_backup:
             self._stats.newest_backup = timestamp
 
-    def backup(self, backup_type: BackupType = BackupType.FULL) -> Optional[BackupInfo]:
-        """执行备份操作。
-
-        Args:
-            backup_type: 备份类型，FULL或INCREMENTAL。
-
-        Returns:
-            备份信息，失败返回None。
-        """
+    def _backup_sync(self, backup_type: BackupType) -> Optional[BackupInfo]:
+        """同步执行备份操作（应在executor中运行以避免阻塞事件循环）。"""
         if backup_type == BackupType.FULL:
             result = self._create_full_backup()
         else:
@@ -321,6 +323,21 @@ class BackupManager:
             self._change_count = 0
             self._backups_cache.append(result)
 
+        return result
+
+    async def backup(self, backup_type: BackupType = BackupType.FULL) -> Optional[BackupInfo]:
+        """执行备份操作。
+
+        使用 run_in_executor 避免阻塞事件循环。
+
+        Args:
+            backup_type: 备份类型，FULL或INCREMENTAL。
+
+        Returns:
+            备份信息，失败返回None。
+        """
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, self._backup_sync, backup_type)
         return result
 
     def restore(self, backup_path: str) -> bool:
@@ -542,7 +559,7 @@ class BackupManager:
 
         return deleted_count
 
-    def record_change(self, count: int = 1) -> Optional[BackupInfo]:
+    async def record_change(self, count: int = 1) -> Optional[BackupInfo]:
         """记录数据变更，达到阈值时触发增量备份。
 
         Args:
@@ -557,7 +574,7 @@ class BackupManager:
                 "数据变更达到阈值 (%d/%d)，触发增量备份",
                 self._change_count, self.change_threshold,
             )
-            return self.backup(BackupType.INCREMENTAL)
+            return await self.backup(BackupType.INCREMENTAL)
         return None
 
     async def start_scheduled_backup(self) -> None:
@@ -586,9 +603,9 @@ class BackupManager:
                 if self._last_full_backup_time is None or (
                     datetime.now() - self._last_full_backup_time
                 ) > timedelta(hours=self.schedule_interval_hours * 4):
-                    self.backup(BackupType.FULL)
+                    await self.backup(BackupType.FULL)
                 else:
-                    self.backup(BackupType.INCREMENTAL)
+                    await self.backup(BackupType.INCREMENTAL)
 
                 # 执行轮转
                 self.rotate_backups()

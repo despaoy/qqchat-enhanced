@@ -4,7 +4,8 @@ import hashlib
 import os
 import time
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from app.dependencies import get_current_user
 from db.models import MessageRequest, GenerateResponse
 
 from db.adapter import db
@@ -24,27 +25,34 @@ logger = logging.getLogger(__name__)
 # ── vLLM 客户端（延迟初始化） ──
 _vllm_client = None
 _vllm_initialized = False
+_vllm_init_lock = asyncio.Lock()
 
 
-def _ensure_vllm():
-    """延迟初始化 vLLM 客户端，确保 .env 已加载"""
+async def _ensure_vllm():
+    """延迟初始化 vLLM 客户端，确保 .env 已加载（带锁防竞态）"""
     global _vllm_client, _vllm_initialized
-    if _vllm_initialized:
-        return _vllm_client is not None
-    _vllm_initialized = True
-    vllm_enabled = (
-        os.getenv("VLLM_ENABLED", "").lower() == "true"
-        or bool(os.getenv("VLLM_BASE_URLS", "").strip())
-    )
-    if vllm_enabled:
-        try:
-            from inference.vllm_client import VLLMClient
-            _vllm_client = VLLMClient()
-            logger.info("✅ vLLM 客户端初始化成功")
+    if _vllm_initialized and _vllm_client:
+        return True
+    async with _vllm_init_lock:
+        # double-check
+        if _vllm_initialized and _vllm_client:
             return True
-        except Exception as e:
-            logger.warning(f"vLLM 客户端初始化失败: {e}")
-    return False
+        if _vllm_initialized:
+            return False
+        _vllm_initialized = True
+        vllm_enabled = (
+            os.getenv("VLLM_ENABLED", "").lower() == "true"
+            or bool(os.getenv("VLLM_BASE_URLS", "").strip())
+        )
+        if vllm_enabled:
+            try:
+                from inference.vllm_client import VLLMClient
+                _vllm_client = VLLMClient()
+                logger.info("✅ vLLM 客户端初始化成功")
+                return True
+            except Exception as e:
+                logger.warning(f"vLLM 客户端初始化失败: {e}")
+        return False
 
 # 确保熔断器已注册（仅首次）
 if CIRCUIT_BREAKER_AVAILABLE and circuit_breaker_registry:
@@ -64,7 +72,7 @@ router = APIRouter()
 
 
 @router.post("/api/generate")
-async def generate_reply(request: MessageRequest):
+async def generate_reply(request: MessageRequest, current_user: dict = Depends(get_current_user)):
     """测试生成回复 - 优先使用vLLM，回退到模型管理器"""
     # 缓存查询
     if response_cache:
@@ -88,11 +96,12 @@ async def generate_reply(request: MessageRequest):
         if not is_valid:
             raise HTTPException(status_code=422, detail={"message": "输入验证失败", "errors": errors})
 
-    # 获取LoRA：优先使用前端指定的，否则使用当前激活的
+    # 获取LoRA：始终计算 active_lora，优先使用前端指定的，否则使用当前激活的
+    active_lora = next((l for l in db.loras if l["status"] == "active"), None)
+
     if request.loraName:
         lora_name = request.loraName
     else:
-        active_lora = next((l for l in db.loras if l["status"] == "active"), None)
         lora_name = active_lora["name"] if active_lora else "default"
 
     # 将数据库中的LoRA名称映射到vLLM注册的名称
@@ -105,7 +114,7 @@ async def generate_reply(request: MessageRequest):
 
     # 检查vLLM是否实际支持该LoRA，避免404触发熔断
     vllm_effective_lora = vllm_lora_name if lora_name != "default" else None
-    if vllm_effective_lora and _ensure_vllm() and _vllm_client:
+    if vllm_effective_lora and await _ensure_vllm() and _vllm_client:
         try:
             available_loras = await _vllm_client.list_loras()
             if available_loras is not None and vllm_effective_lora not in available_loras:
@@ -118,7 +127,7 @@ async def generate_reply(request: MessageRequest):
     start_time = time.time()
 
     # ── 优先使用 vLLM 高并发推理 ──
-    if _ensure_vllm() and _vllm_client:
+    if await _ensure_vllm() and _vllm_client:
         try:
             reply = await _generate_with_vllm(request, vllm_effective_lora)
             cost_time = round(time.time() - start_time, 2)
@@ -328,7 +337,7 @@ async def _save_message(request: MessageRequest, reply: str, model_name: str, lo
 @router.get("/api/vllm/status")
 async def vllm_status():
     """查询 vLLM 实例状态"""
-    if not _ensure_vllm() or not _vllm_client:
+    if not await _ensure_vllm() or not _vllm_client:
         return {"enabled": False, "instances": []}
     return {
         "enabled": True,
@@ -346,7 +355,7 @@ if _PIPELINE_ENABLED:
         from pipeline import get_pipeline, DegradationLevel
 
         @router.post("/api/generate/v2")
-        async def generate_reply_v2(request: MessageRequest):
+        async def generate_reply_v2(request: MessageRequest, current_user: dict = Depends(get_current_user)):
             """增强版生成回复 - 使用统一消息管道"""
             from inference.model_manager import get_model_manager, ModelProvider
             model_manager = get_model_manager()

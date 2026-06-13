@@ -4,7 +4,8 @@
 """
 
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from app.dependencies import get_current_user
 from pydantic import BaseModel
 from typing import Optional
 
@@ -53,7 +54,7 @@ class ModuleStatusResponse(BaseModel):
 
 
 @router.get("/api/module/status")
-async def get_module_status():
+async def get_module_status(current_user: dict = Depends(get_current_user)):
     """获取当前模块状态"""
     mgr = await get_module_manager()
     status = mgr.get_status()
@@ -85,7 +86,7 @@ async def get_module_status():
 
 
 @router.post("/api/module/switch", response_model=SwitchModeResponse)
-async def switch_mode(request: SwitchModeRequest):
+async def switch_mode(request: SwitchModeRequest, current_user: dict = Depends(get_current_user)):
     """切换系统模式"""
     mgr = await get_module_manager()
 
@@ -116,7 +117,7 @@ async def switch_mode(request: SwitchModeRequest):
 
 
 @router.get("/api/module/memory")
-async def get_memory_info():
+async def get_memory_info(current_user: dict = Depends(get_current_user)):
     """获取内存使用详情"""
     info = MemoryMonitor.get_memory_info()
     can_inference, reason = MemoryMonitor.can_load_inference_model()
@@ -144,7 +145,7 @@ async def get_memory_info():
 
 
 @router.post("/api/module/gc")
-async def force_garbage_collection():
+async def force_garbage_collection(current_user: dict = Depends(get_current_user)):
     """强制垃圾回收，释放内存"""
     from app.module_manager import MemoryMonitor
     mem_before = MemoryMonitor.get_memory_info()
@@ -167,7 +168,7 @@ async def force_garbage_collection():
 
 
 @router.get("/api/module/history")
-async def get_switch_history():
+async def get_switch_history(current_user: dict = Depends(get_current_user)):
     """获取模式切换历史"""
     mgr = await get_module_manager()
     return {"history": mgr.get_switch_history()}

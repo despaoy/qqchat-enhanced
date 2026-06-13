@@ -7,7 +7,8 @@ import re
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from app.dependencies import get_current_user
 from pydantic import BaseModel
 from typing import Optional
 
@@ -20,8 +21,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _validate_path(path_str: str, allowed_base: str = None) -> str:
+    """Validate path doesn't contain traversal sequences and is within allowed base."""
+    if not path_str:
+        raise ValueError("Path cannot be empty")
+    # Block path traversal
+    if '..' in path_str or '\x00' in path_str:
+        raise ValueError("Path contains invalid sequences")
+    resolved = Path(path_str).resolve()
+    if allowed_base:
+        base = Path(allowed_base).resolve()
+        if not str(resolved).startswith(str(base)):
+            raise ValueError(f"Path must be within {allowed_base}")
+    return str(resolved)
+
+
 @router.get("/api/training/datasets")
-async def list_datasets():
+async def list_datasets(current_user: dict = Depends(get_current_user)):
     """列出可用数据集"""
     try:
         from training.preprocessor import get_dataset_preprocessor
@@ -48,7 +64,7 @@ async def list_datasets():
 
 
 @router.post("/api/training/datasets")
-async def create_dataset(request: DatasetUploadRequest):
+async def create_dataset(request: DatasetUploadRequest, current_user: dict = Depends(get_current_user)):
     """创建新数据集"""
     try:
         from training.preprocessor import get_dataset_preprocessor
@@ -83,17 +99,24 @@ async def create_dataset(request: DatasetUploadRequest):
 
 
 @router.get("/api/training/datasets/{dataset_name}/export")
-async def export_dataset(dataset_name: str):
+async def export_dataset(dataset_name: str, current_user: dict = Depends(get_current_user)):
     """导出数据集为 ZIP 文件（用于上传到服务器训练）"""
     try:
         import io
         import zipfile
         from fastapi.responses import StreamingResponse
 
+        # Validate dataset_name to prevent path traversal
+        if '..' in dataset_name or '/' in dataset_name or '\\' in dataset_name or '\x00' in dataset_name:
+            raise HTTPException(status_code=400, detail="无效的数据集名称")
+
         from training.preprocessor import get_dataset_preprocessor
         preprocessor = get_dataset_preprocessor()
 
         dataset_dir = preprocessor.data_dir / dataset_name
+        # Ensure resolved path is within data directory
+        if not str(dataset_dir.resolve()).startswith(str(preprocessor.data_dir.resolve())):
+            raise HTTPException(status_code=400, detail="无效的数据集路径")
         if not dataset_dir.exists() or not dataset_dir.is_dir():
             raise HTTPException(status_code=404, detail=f"数据集不存在: {dataset_name}")
 
@@ -126,7 +149,7 @@ async def export_dataset(dataset_name: str):
 
 
 @router.get("/api/training/datasets/scan")
-async def scan_datasets(folder: Optional[str] = None):
+async def scan_datasets(folder: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     """扫描文件夹，发现所有有效的数据集子文件夹"""
     try:
         from training.preprocessor import scan_datasets_folder, DEFAULT_SCAN_DIR
@@ -148,21 +171,38 @@ class ImportDatasetRequest(BaseModel):
 
 
 @router.post("/api/training/datasets/scan/import")
-async def import_dataset(req: ImportDatasetRequest):
+async def import_dataset(req: ImportDatasetRequest, current_user: dict = Depends(get_current_user)):
     """从扫描结果导入数据集到训练目录"""
     try:
+        # Validate source_path to prevent path traversal
+        backend_dir = str(Path(__file__).parent.parent.resolve())
+        allowed_dirs = [backend_dir]
+        # Allow autodl-tmp directory if it exists
+        autodl_tmp = "/root/autodl-tmp"
+        if Path(autodl_tmp).exists():
+            allowed_dirs.append(str(Path(autodl_tmp).resolve()))
+        try:
+            validated_path = _validate_path(req.source_path)
+            resolved = Path(validated_path)
+            if not any(str(resolved).startswith(d) for d in allowed_dirs):
+                raise HTTPException(status_code=400, detail="源路径不在允许的目录范围内")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
         from training.preprocessor import import_dataset_from_folder
         result = import_dataset_from_folder(req.source_path, req.dataset_name)
         return result
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"导入数据集失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/api/training/models")
-async def list_model_configs():
+async def list_model_configs(current_user: dict = Depends(get_current_user)):
     """列出可用的模型配置（支持多种GPU）"""
     try:
         from training.task_manager import ALL_GPU_CONFIGS
@@ -206,7 +246,7 @@ async def list_model_configs():
 
 
 @router.post("/api/training/start")
-async def start_training(request: TrainingStartRequest):
+async def start_training(request: TrainingStartRequest, current_user: dict = Depends(get_current_user)):
     """启动LoRA训练"""
     try:
         # 输入验证
@@ -302,7 +342,7 @@ async def start_training(request: TrainingStartRequest):
 
 
 @router.get("/api/training/tasks")
-async def list_training_tasks():
+async def list_training_tasks(current_user: dict = Depends(get_current_user)):
     """列出所有训练任务"""
     try:
         from training.task_manager import get_simple_lora_trainer
@@ -316,7 +356,7 @@ async def list_training_tasks():
 
 
 @router.get("/api/training/tasks/{task_id}")
-async def get_training_task(task_id: str):
+async def get_training_task(task_id: str, current_user: dict = Depends(get_current_user)):
     """获取训练任务状态"""
     try:
         from training.task_manager import get_simple_lora_trainer
@@ -335,7 +375,7 @@ async def get_training_task(task_id: str):
 
 
 @router.post("/api/training/tasks/{task_id}/cancel")
-async def cancel_training_task(task_id: str):
+async def cancel_training_task(task_id: str, current_user: dict = Depends(get_current_user)):
     """取消训练任务"""
     try:
         from training.task_manager import get_simple_lora_trainer
@@ -354,7 +394,7 @@ async def cancel_training_task(task_id: str):
 
 
 @router.get("/api/training/styles")
-async def list_predefined_styles():
+async def list_predefined_styles(current_user: dict = Depends(get_current_user)):
     """列出预定义的人物风格"""
     try:
         from training.preprocessor import get_dataset_preprocessor
@@ -377,7 +417,7 @@ async def list_predefined_styles():
 
 
 @router.post("/api/training/generate-dialogues")
-async def generate_dialogues(request: DialogueGenerateRequest):
+async def generate_dialogues(request: DialogueGenerateRequest, current_user: dict = Depends(get_current_user)):
     """基于角色描述生成LoRA训练对话数据"""
 
     # 防止重复生成（异步安全检查+初始化）
@@ -507,7 +547,8 @@ async def generate_dialogues(request: DialogueGenerateRequest):
 
         BATCH_SIZE_PER_TURN = 6
         estimated_batches = sum(max(1, math.ceil(count / BATCH_SIZE_PER_TURN)) for _, count in turn_targets)
-        generation_state["total_batches"] = estimated_batches
+        async with generation_state_lock:
+            generation_state["total_batches"] = estimated_batches
         global_batch_num = 0
         scene_idx = 0
 
@@ -517,7 +558,12 @@ async def generate_dialogues(request: DialogueGenerateRequest):
             max_retries_per_turn = need_count * 3  # 防止模型持续生成不足轮次导致死循环
 
             while generated_this_turn < need_count:
-                if generation_state["cancel_requested"]:
+                async with generation_state_lock:
+                    if generation_state["cancel_requested"]:
+                        cancel_flag = True
+                    else:
+                        cancel_flag = False
+                if cancel_flag:
                     logger.info(f"对话生成已取消，已生成 {len(all_validated)} 组")
                     break
 
@@ -693,10 +739,12 @@ async def generate_dialogues(request: DialogueGenerateRequest):
 
                 logger.info(f"对话生成进度: {len(all_validated)}/{total_target} ({target_turns}轮批次, 已生成{generated_this_turn}/{need_count})")
 
-            if generation_state["cancel_requested"]:
-                break
+            async with generation_state_lock:
+                if generation_state["cancel_requested"]:
+                    break
 
-        was_cancelled = generation_state["cancel_requested"]
+        async with generation_state_lock:
+            was_cancelled = generation_state["cancel_requested"]
 
         if not all_validated and not was_cancelled:
             raise HTTPException(
@@ -706,11 +754,12 @@ async def generate_dialogues(request: DialogueGenerateRequest):
 
         all_validated = all_validated[:total_target]
 
-        generation_state.update({
-            "is_generating": False,
-            "progress": 100 if not was_cancelled else round(len(all_validated) / total_target * 100, 1),
-            "generated_count": len(all_validated),
-        })
+        async with generation_state_lock:
+            generation_state.update({
+                "is_generating": False,
+                "progress": 100 if not was_cancelled else round(len(all_validated) / total_target * 100, 1),
+                "generated_count": len(all_validated),
+            })
 
         return {
             "success": True,
@@ -721,16 +770,18 @@ async def generate_dialogues(request: DialogueGenerateRequest):
         }
 
     except HTTPException:
-        generation_state.update({"is_generating": False, "cancel_requested": False})
+        async with generation_state_lock:
+            generation_state.update({"is_generating": False, "cancel_requested": False})
         raise
     except Exception as e:
-        generation_state.update({"is_generating": False, "cancel_requested": False})
+        async with generation_state_lock:
+            generation_state.update({"is_generating": False, "cancel_requested": False})
         logger.error(f"对话生成失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/api/training/generate-dialogues/cancel")
-async def cancel_dialogue_generation():
+async def cancel_dialogue_generation(current_user: dict = Depends(get_current_user)):
     """取消正在进行的对话生成"""
     async with generation_state_lock:
         if not generation_state["is_generating"]:
@@ -740,7 +791,7 @@ async def cancel_dialogue_generation():
 
 
 @router.get("/api/training/generate-dialogues/progress")
-async def get_dialogue_generation_progress():
+async def get_dialogue_generation_progress(current_user: dict = Depends(get_current_user)):
     """获取对话生成进度（含新增对话的实时推送 + 所有已生成对话）"""
     async with generation_state_lock:
         new_dialogues = generation_state.get("new_dialogues", [])
@@ -750,7 +801,7 @@ async def get_dialogue_generation_progress():
 
 
 @router.post("/api/training/generate-dialogues/force-reset")
-async def force_reset_generation():
+async def force_reset_generation(current_user: dict = Depends(get_current_user)):
     """强制重置生成状态（用于断线重连后清理残留状态）"""
     async with generation_state_lock:
         if not generation_state["is_generating"] and not generation_state["cancel_requested"]:
@@ -785,7 +836,7 @@ class SaveDialoguesRequest(BaseModel):
 
 
 @router.get("/api/training/saved-dialogues")
-async def list_saved_dialogues():
+async def list_saved_dialogues(current_user: dict = Depends(get_current_user)):
     """列出所有已保存的对话"""
     try:
         rows = db.execute_sql('''
@@ -813,7 +864,7 @@ async def list_saved_dialogues():
 
 
 @router.post("/api/training/saved-dialogues")
-async def save_dialogues(request: SaveDialoguesRequest):
+async def save_dialogues(request: SaveDialoguesRequest, current_user: dict = Depends(get_current_user)):
     """保存对话数据"""
     try:
         now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -839,7 +890,7 @@ async def save_dialogues(request: SaveDialoguesRequest):
 
 
 @router.get("/api/training/saved-dialogues/{item_id}")
-async def get_saved_dialogue(item_id: int):
+async def get_saved_dialogue(item_id: int, current_user: dict = Depends(get_current_user)):
     """获取单个已保存对话"""
     try:
         rows = db.execute_sql('''
@@ -871,7 +922,7 @@ async def get_saved_dialogue(item_id: int):
 
 
 @router.delete("/api/training/saved-dialogues/{item_id}")
-async def delete_saved_dialogue(item_id: int):
+async def delete_saved_dialogue(item_id: int, current_user: dict = Depends(get_current_user)):
     """删除已保存对话"""
     try:
         rowcount = db.execute_sql('DELETE FROM saved_dialogues WHERE id = :item_id', {"item_id": item_id})
@@ -886,7 +937,7 @@ async def delete_saved_dialogue(item_id: int):
 
 
 @router.delete("/api/training/saved-dialogues/{item_id}/dialogues/{dialogue_index}")
-async def delete_dialogue_from_saved(item_id: int, dialogue_index: int):
+async def delete_dialogue_from_saved(item_id: int, dialogue_index: int, current_user: dict = Depends(get_current_user)):
     """从已保存对话中删除单条对话"""
     try:
         rows = db.execute_sql('SELECT dialogues_json FROM saved_dialogues WHERE id = :item_id', {"item_id": item_id})
@@ -918,7 +969,7 @@ async def delete_dialogue_from_saved(item_id: int, dialogue_index: int):
 
 
 @router.post("/api/training/saved-dialogues/{item_id}/create-dataset")
-async def create_dataset_from_saved(item_id: int, dataset_name: Optional[str] = None):
+async def create_dataset_from_saved(item_id: int, dataset_name: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     """从已保存对话创建训练数据集"""
     try:
         rows = db.execute_sql('SELECT name, dialogues_json FROM saved_dialogues WHERE id = :item_id', {"item_id": item_id})
