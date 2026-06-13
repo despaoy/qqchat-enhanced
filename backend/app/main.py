@@ -137,6 +137,9 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"访问控制管理器初始化失败: {e}")
 
+    # 延迟重建向量索引（首次搜索时自动触发，避免启动时阻塞）
+    # 见 api/knowledge.py search_knowledge 中的 _ensure_vector_index()
+
     logger.info("✅ 增强版服务启动完成！")
     yield
 
