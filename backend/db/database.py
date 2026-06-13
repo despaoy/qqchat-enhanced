@@ -243,6 +243,20 @@ class SQLiteDB:
             )
         ''')
         
+        # 创建训练任务表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS training_tasks (
+                task_id TEXT PRIMARY KEY,
+                lora_name TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                progress REAL DEFAULT 0,
+                error_message TEXT DEFAULT '',
+                config_json TEXT DEFAULT '{}',
+                created_at TEXT DEFAULT '',
+                updated_at TEXT DEFAULT ''
+            )
+        ''')
+
         # 创建 Claw 自定义工具表
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS claw_tools (
@@ -640,11 +654,13 @@ class SQLiteDB:
         cursor = conn.cursor()
         
         if status == "active":
-            # 先将所有其他LoRA设为inactive
-            cursor.execute('UPDATE loras SET status = ? WHERE id != ?', ('inactive', lora_id))
-        
-        # 更新指定LoRA的状态
-        cursor.execute('UPDATE loras SET status = ? WHERE id = ?', (status, lora_id))
+            # 原子操作：用CASE在单条SQL中完成，避免竞态条件
+            cursor.execute(
+                "UPDATE loras SET status = CASE WHEN id = ? THEN 'active' ELSE 'inactive' END",
+                (lora_id,)
+            )
+        else:
+            cursor.execute('UPDATE loras SET status = ? WHERE id = ?', (status, lora_id))
         
         conn.commit()
         
@@ -780,15 +796,25 @@ class SQLiteDB:
         """删除知识库（级联删除文件夹和文档）"""
         conn = self._get_connection()
         cursor = conn.cursor()
-        # 先删除关联文档的chunks
-        cursor.execute(
-            'DELETE FROM knowledge_chunks WHERE documentId IN (SELECT id FROM knowledge_documents WHERE knowledge_base_id = ?)',
-            (kb_id,)
-        )
-        cursor.execute('DELETE FROM knowledge_documents WHERE knowledge_base_id = ?', (kb_id,))
-        cursor.execute('DELETE FROM knowledge_folders WHERE knowledge_base_id = ?', (kb_id,))
-        cursor.execute('DELETE FROM knowledge_bases WHERE id = ?', (kb_id,))
-        conn.commit()
+        # knowledge_folders 有 ON DELETE CASCADE，会自动级联
+        # knowledge_documents 的外键是 ON DELETE SET NULL，需手动删除
+        # knowledge_chunks 有 ON DELETE CASCADE（引用 documents），删除文档后自动级联
+        # 用 BEGIN IMMEDIATE 包裹确保原子性，防止部分删除
+        cursor.execute('BEGIN IMMEDIATE')
+        try:
+            # 先删除关联文档的chunks（通过子查询）
+            cursor.execute(
+                'DELETE FROM knowledge_chunks WHERE documentId IN (SELECT id FROM knowledge_documents WHERE knowledge_base_id = ?)',
+                (kb_id,)
+            )
+            cursor.execute('DELETE FROM knowledge_documents WHERE knowledge_base_id = ?', (kb_id,))
+            # knowledge_folders 有 ON DELETE CASCADE，但显式删除更安全
+            cursor.execute('DELETE FROM knowledge_folders WHERE knowledge_base_id = ?', (kb_id,))
+            cursor.execute('DELETE FROM knowledge_bases WHERE id = ?', (kb_id,))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         return True
 
     # ============================================
@@ -917,6 +943,7 @@ class SQLiteDB:
         "title", "content", "summary", "folderId", "kbId",
         "chunkCount", "charCount", "status", "tags", "source",
         "updatedAt",
+        "knowledge_base_id", "folder_id", "sourceType", "sourceUrl", "fileType", "fileSize",
     }
 
     def update_knowledge_document(self, doc_id: int, document: Dict):
@@ -1304,6 +1331,78 @@ class SQLiteDB:
         cursor.execute('DELETE FROM loras WHERE id = ?', (lora_id,))
         conn.commit()
         return cursor.rowcount > 0
+
+    # ============================================
+    # 训练任务持久化
+    # ============================================
+    def save_training_task(self, task_id: str, task_data: dict):
+        """保存训练任务状态到数据库"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        import json
+        cursor.execute('''
+            INSERT OR REPLACE INTO training_tasks (task_id, lora_name, status, progress,
+            error_message, config_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            task_id,
+            task_data.get('lora_name', ''),
+            task_data.get('status', 'pending'),
+            task_data.get('progress', 0),
+            task_data.get('error_message', ''),
+            json.dumps(task_data.get('config', {}), ensure_ascii=False),
+            task_data.get('created_at', ''),
+            task_data.get('updated_at', '')
+        ))
+        conn.commit()
+
+    def get_training_task(self, task_id: str) -> dict | None:
+        """获取单个训练任务"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM training_tasks WHERE task_id = ?', (task_id,))
+        row = cursor.fetchone()
+        if row:
+            import json
+            columns = [desc[0] for desc in cursor.description]
+            result = dict(zip(columns, row))
+            result['config'] = json.loads(result.get('config_json', '{}'))
+            return result
+        return None
+
+    def get_all_training_tasks(self) -> list:
+        """获取所有训练任务"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM training_tasks ORDER BY created_at DESC')
+        rows = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        import json
+        results = []
+        for row in rows:
+            result = dict(zip(columns, row))
+            result['config'] = json.loads(result.get('config_json', '{}'))
+            results.append(result)
+        return results
+
+    def delete_training_task(self, task_id: str):
+        """删除训练任务记录"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM training_tasks WHERE task_id = ?', (task_id,))
+        conn.commit()
+
+    def get_active_training_by_lora_name(self, lora_name: str) -> list:
+        """查找指定lora_name的运行中任务"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM training_tasks WHERE lora_name = ? AND status IN ('pending', 'running', 'training')",
+            (lora_name,)
+        )
+        rows = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        return [dict(zip(columns, row)) for row in rows]
 
 # 全局数据库实例
 db = SQLiteDB()

@@ -17,8 +17,9 @@ interface ProxyOptions {
  * 代理请求到后端 FastAPI 服务
  *
  * 认证策略：
- * 1. 优先从 httpOnly Cookie (access_token) 中提取 JWT 转发给后端
- * 2. 回退到 Authorization header（向后兼容）
+ * 1. 从 httpOnly Cookie (access_token) 中提取 JWT，转为 Authorization: Bearer 头转发
+ *    （Node.js fetch 会忽略手动设置的 Cookie 头，因此必须转为 Authorization 头）
+ * 2. 回退到原始 Authorization header（向后兼容）
  */
 export async function proxyRequest(
   request: Request,
@@ -28,16 +29,23 @@ export async function proxyRequest(
   const { method = 'GET', body, headers: optHeaders = {}, timeout = PROXY_TIMEOUT } = options;
   const headers: Record<string, string> = { ...optHeaders };
 
-  // 认证：优先从 Cookie 提取 token，回退到 Authorization header
+  // 认证：从 Cookie 中提取 JWT token，转为 Authorization 头转发
+  // 注意：Node.js fetch 会忽略手动设置的 Cookie 头，必须用 Authorization 头传递认证信息
   const cookieHeader = request.headers.get('Cookie') || '';
-  const cookieToken = cookieHeader.split(';').find(c => c.trim().startsWith('access_token='));
-  if (cookieToken) {
-    const token = cookieToken.split('=')[1]?.trim();
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+  if (cookieHeader) {
+    // 正确解析 Cookie：用 substring 而非 split('=') 避免 JWT 中的 = 字符被截断
+    const cookieParts = cookieHeader.split(';');
+    for (const part of cookieParts) {
+      const trimmed = part.trim();
+      if (trimmed.startsWith('access_token=')) {
+        const token = trimmed.substring('access_token='.length);
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+        break;
+      }
     }
   }
-  // 如果 Cookie 中没有 token，回退到 Authorization header
   if (!headers['Authorization']) {
     const authHeader = request.headers.get('Authorization');
     if (authHeader) {

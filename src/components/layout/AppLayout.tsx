@@ -7,11 +7,15 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { LogOut, User } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const { t } = useSettings();
   const { user, logout } = useAuth();
   const router = useRouter();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => { setMounted(true); }, []);
 
   const handleLogout = () => {
     logout();
@@ -27,7 +31,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <h1 className="text-lg font-semibold">{t('header.title')}</h1>
           </div>
           <div className="flex items-center gap-4">
-            {user && (
+            {mounted && user && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <User className="h-4 w-4" />
                 <span>{user.username}</span>

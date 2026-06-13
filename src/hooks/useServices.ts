@@ -3,12 +3,13 @@
 import { useState, useEffect } from 'react';
 import { api, ServiceStatus } from '@/lib/api';
 
-export function useServices() {
+export function useServices(enabled = true) {
   const [services, setServices] = useState<ServiceStatus[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
 
   const fetchServices = async () => {
+    if (!enabled) return;
     try {
       setLoading(true);
       setError(null);
@@ -23,13 +24,17 @@ export function useServices() {
   };
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchServices();
-    
+
     // 每60秒刷新一次
     const interval = setInterval(fetchServices, 60000);
     return () => clearInterval(interval);
-  }, []);
+  }, [enabled]);
 
   return {
     services,

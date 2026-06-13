@@ -13,7 +13,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { ActivityChart } from '@/components/dashboard/ActivityChart';
-import { MessageSquare, Zap, Clock, Users, BrainCircuit, RefreshCw, AlertCircle, Send, Bot, User, Trash2, MessageCircle } from 'lucide-react';
+import { MessageSquare, Zap, Clock, Users, BrainCircuit, RefreshCw, AlertCircle, Send, Bot, User, Trash2, MessageCircle, LogIn } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -30,6 +30,8 @@ import { useStats } from '@/hooks/useStats';
 import { useLoras } from '@/hooks/useLoras';
 import { useServices } from '@/hooks/useServices';
 import { api, type LoraModel, type SessionSummary } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { AuthGuard } from '@/components/layout/AuthGuard';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -39,9 +41,10 @@ interface ChatMessage {
 }
 
 export default function DashboardClient() {
-  const { stats, loading: statsLoading, error: statsError, refetch: refetchStats } = useStats();
-  const { loras } = useLoras();
-  const { services, loading: servicesLoading, error: servicesError, refetch: refetchServices } = useServices();
+  const { user, loading: authLoading } = useAuth();
+  const { stats, loading: statsLoading, error: statsError, refetch: refetchStats } = useStats(!!user && !authLoading);
+  const { loras } = useLoras(!!user && !authLoading);
+  const { services, loading: servicesLoading, error: servicesError, refetch: refetchServices } = useServices(!!user && !authLoading);
 
   // 测试对话状态
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -154,7 +157,7 @@ export default function DashboardClient() {
     );
   }
 
-  if (!isMounted) {
+  if (authLoading || !isMounted) {
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
@@ -170,6 +173,22 @@ export default function DashboardClient() {
             <Skeleton key={i} className="h-32 rounded-lg" />
           ))}
         </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
+        <LogIn className="h-12 w-12 text-muted-foreground" />
+        <div className="text-center">
+          <h3 className="text-lg font-semibold">请先登录</h3>
+          <p className="text-muted-foreground">登录后即可查看仪表盘</p>
+        </div>
+        <Button onClick={() => window.location.href = '/login'}>
+          <LogIn className="mr-2 h-4 w-4" />
+          前往登录
+        </Button>
       </div>
     );
   }

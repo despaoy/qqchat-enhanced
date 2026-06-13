@@ -19,14 +19,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api, Message } from '@/lib/api';
 
-export function useMessages(limit = 20, offset = 0) {
+export function useMessages(limit = 20, offset = 0, enabled = true) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [total, setTotal] = useState(0);
   const [totalAll, setTotalAll] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
 
   const fetchMessages = useCallback(async () => {
+    if (!enabled) return;
     try {
       setLoading(true);
       setError(null);
@@ -40,12 +41,16 @@ export function useMessages(limit = 20, offset = 0) {
     } finally {
       setLoading(false);
     }
-  }, [limit, offset]);
+  }, [limit, offset, enabled]);
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchMessages();
-  }, [fetchMessages]);
+  }, [fetchMessages, enabled]);
 
   return {
     messages,

@@ -19,13 +19,14 @@
 import { useState, useEffect } from 'react';
 import { api, LoraModel } from '@/lib/api';
 
-export function useLoras() {
+export function useLoras(enabled = true) {
   const [loras, setLoras] = useState<LoraModel[]>([]);
   const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
 
   const fetchLoras = async () => {
+    if (!enabled) return;
     try {
       setLoading(true);
       setError(null);
@@ -76,9 +77,13 @@ export function useLoras() {
   };
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchLoras();
-  }, []);
+  }, [enabled]);
 
   return {
     loras,

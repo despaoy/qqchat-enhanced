@@ -302,17 +302,21 @@ def _load_kb_documents(kbs: list) -> Dict[str, str]:
 
 
 def _get_vllm_client():
-    try:
-        from api.generate import _vllm_client, _ensure_vllm
-        if _ensure_vllm() and _vllm_client:
-            return _vllm_client
-    except Exception:
-        pass
+    """通过 inference 层获取 vLLM 客户端，不依赖 api 层"""
+    vllm_enabled = (
+        os.getenv("VLLM_ENABLED", "").lower() == "true"
+        or bool(os.getenv("VLLM_BASE_URLS", "").strip())
+    )
+    if not vllm_enabled:
+        logger.warning("vLLM 未启用（缺少 VLLM_ENABLED 或 VLLM_BASE_URLS 环境变量）")
+        return None
     try:
         from inference.vllm_client import VLLMClient
-        return VLLMClient()
+        client = VLLMClient()
+        logger.info("vLLM 客户端初始化成功（通过 inference 层）")
+        return client
     except Exception as e:
-        logger.warning(f"vLLM客户端初始化失败: {e}")
+        logger.warning(f"vLLM 客户端初始化失败: {e}")
         return None
 
 

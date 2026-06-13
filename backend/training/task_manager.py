@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field, asdict
 
+from fastapi import HTTPException
+
 logger = logging.getLogger(__name__)
 
 
@@ -115,18 +117,24 @@ class SimpleLoRATrainer:
     内部桥接到train_lora.py的LoRATrainer执行实际训练，通过线程池实现异步训练。
     """
 
-    def __init__(self, base_dir: Optional[Path] = None):
+    def __init__(self, base_dir: Optional[Path] = None, db=None):
         """初始化训练器兼容层。
 
         Args:
             base_dir: 基础目录路径，默认为当前文件所在目录
+            db: 数据库实例，用于训练任务持久化
         """
         self.base_dir = base_dir or Path(__file__).parent
         self.loras_dir = self.base_dir / "loras"
         self.loras_dir.mkdir(exist_ok=True)
+        self.db = db
         self.tasks: Dict[str, Dict[str, Any]] = {}
         self._cancel_events: Dict[str, threading.Event] = {}
         self._lock = asyncio.Lock()
+
+        # 从数据库恢复未完成的任务到内存
+        if self.db:
+            self._restore_tasks_from_db()
 
     async def start_training(self, lora_name: str, dataset_path: Path, config: Dict[str, Any]) -> str:
         """启动异步LoRA训练任务。
@@ -139,6 +147,15 @@ class SimpleLoRATrainer:
         Returns:
             str: 训练任务ID，用于后续状态查询
         """
+        # 幂等性检查：是否已有同名lora_name的运行中任务
+        if self.db:
+            active_tasks = self.db.get_active_training_by_lora_name(lora_name)
+            if active_tasks:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"已有运行中的训练任务使用lora_name='{lora_name}'，请等待完成或取消后再试"
+                )
+
         task_id = str(uuid.uuid4())[:8]
 
         task = {
@@ -163,6 +180,10 @@ class SimpleLoRATrainer:
             self.tasks[task_id] = task
             self._cancel_events[task_id] = threading.Event()
 
+        # 持久化到数据库
+        if self.db:
+            self.db.save_training_task(task_id, task)
+
         asyncio.create_task(self._run_training(task_id, lora_name, dataset_path, config))
 
         logger.info(f"训练任务已创建: {task_id}, LoRA: {lora_name}")
@@ -175,6 +196,8 @@ class SimpleLoRATrainer:
             self.tasks[task_id]["status"] = "training"
             self.tasks[task_id]["started_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
             self.tasks[task_id]["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+
+        self._persist_task(task_id)
 
         try:
             from train_lora import LoRATrainingConfig, LoRATrainer
@@ -190,6 +213,8 @@ class SimpleLoRATrainer:
                     if self.tasks[task_id]["status"] != "cancelled":
                         self.tasks[task_id]["status"] = "cancelled"
                         self.tasks[task_id]["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                        self.tasks[task_id]["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                self._persist_task(task_id)
                 logger.info(f"训练任务在配置阶段被取消: {task_id}")
                 return
 
@@ -204,10 +229,13 @@ class SimpleLoRATrainer:
                     if self.tasks[task_id]["status"] != "cancelled":
                         self.tasks[task_id]["status"] = "cancelled"
                         self.tasks[task_id]["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                        self.tasks[task_id]["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                    self._persist_task(task_id)
                     logger.info(f"训练任务在启动前被取消: {task_id}")
                     return
                 self.tasks[task_id]["progress"] = 0.1
                 self.tasks[task_id]["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                self._persist_task(task_id)
 
             # 在线程中执行阻塞的训练操作，传入取消事件供训练循环检查
             def _train_with_cancel_check():
@@ -223,11 +251,14 @@ class SimpleLoRATrainer:
                     if self.tasks[task_id]["status"] != "cancelled":
                         self.tasks[task_id]["status"] = "cancelled"
                         self.tasks[task_id]["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                        self.tasks[task_id]["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                self._persist_task(task_id)
                 logger.info(f"训练任务完成后发现已被取消: {task_id}")
                 return
 
             async with self._lock:
                 if self.tasks[task_id]["status"] == "cancelled":
+                    self._persist_task(task_id)
                     logger.info(f"训练任务完成后发现已被取消: {task_id}")
                     return
                 self.tasks[task_id]["status"] = "completed"
@@ -236,6 +267,7 @@ class SimpleLoRATrainer:
                 self.tasks[task_id]["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                 self.tasks[task_id]["output_dir"] = str(output_path)
 
+            self._persist_task(task_id)
             logger.info(f"训练任务完成: {task_id}")
 
         except Exception as e:
@@ -245,11 +277,14 @@ class SimpleLoRATrainer:
             async with self._lock:
                 # 如果已被取消，不覆盖cancelled状态
                 if self.tasks[task_id]["status"] == "cancelled":
+                    self._persist_task(task_id)
                     return
                 self.tasks[task_id]["status"] = "failed"
                 self.tasks[task_id]["error_message"] = str(e)
                 self.tasks[task_id]["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                 self.tasks[task_id]["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+
+            self._persist_task(task_id)
 
     def _build_config(self, lora_name: str, dataset_path: Path, config: Dict[str, Any]) -> "LoRATrainingConfig":
         from train_lora import LoRATrainingConfig
@@ -304,11 +339,28 @@ class SimpleLoRATrainer:
             任务状态字典，包含status、progress等字段，不存在则返回None
         """
         async with self._lock:
-            return self.tasks.get(task_id)
+            task = self.tasks.get(task_id)
+            if task:
+                return task
+        # 内存中没有，尝试从数据库读取
+        if self.db:
+            db_task = self.db.get_training_task(task_id)
+            if db_task:
+                return db_task
+        return None
 
     async def get_all_tasks(self) -> List[Dict[str, Any]]:
         async with self._lock:
             self._cleanup_old_tasks()
+
+        # 优先从数据库读取（重启后也能恢复）
+        if self.db:
+            try:
+                return self.db.get_all_training_tasks()
+            except Exception as e:
+                logger.warning(f"从数据库读取训练任务失败，回退到内存: {e}")
+
+        async with self._lock:
             return list(self.tasks.values())
 
     def _cleanup_old_tasks(self, max_completed: int = 50):
@@ -339,15 +391,48 @@ class SimpleLoRATrainer:
                 cancel_event = self._cancel_events.get(task_id)
                 if cancel_event:
                     cancel_event.set()
+                self._persist_task(task_id)
                 return True
         return False
+
+    def _persist_task(self, task_id: str):
+        """将内存中的任务状态同步到数据库。"""
+        if not self.db:
+            return
+        task = self.tasks.get(task_id)
+        if task:
+            try:
+                self.db.save_training_task(task_id, task)
+            except Exception as e:
+                logger.warning(f"持久化训练任务 {task_id} 失败: {e}")
+
+    def _restore_tasks_from_db(self):
+        """从数据库恢复任务到内存（服务重启后调用）。"""
+        if not self.db:
+            return
+        try:
+            db_tasks = self.db.get_all_training_tasks()
+            for db_task in db_tasks:
+                task_id = db_task["task_id"]
+                status = db_task.get("status", "pending")
+                # 将重启前未完成的任务标记为中断状态
+                if status in ("pending", "training"):
+                    db_task["status"] = "interrupted"
+                    db_task["error_message"] = "服务重启，任务被中断"
+                    db_task["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                    self.db.save_training_task(task_id, db_task)
+                self.tasks[task_id] = db_task
+            if db_tasks:
+                logger.info(f"从数据库恢复了 {len(db_tasks)} 个训练任务到内存")
+        except Exception as e:
+            logger.warning(f"从数据库恢复训练任务失败: {e}")
 
 
 _simple_lora_trainer: Optional[SimpleLoRATrainer] = None
 
 
-def get_simple_lora_trainer() -> SimpleLoRATrainer:
+def get_simple_lora_trainer(db=None) -> SimpleLoRATrainer:
     global _simple_lora_trainer
     if _simple_lora_trainer is None:
-        _simple_lora_trainer = SimpleLoRATrainer()
+        _simple_lora_trainer = SimpleLoRATrainer(db=db)
     return _simple_lora_trainer

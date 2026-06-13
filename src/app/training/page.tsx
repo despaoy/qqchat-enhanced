@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { AuthGuard } from '@/components/layout/AuthGuard';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -63,6 +64,14 @@ const statusIcons: Record<string, typeof Clock> = {
 };
 
 export default function TrainingPage() {
+  return (
+    <AuthGuard>
+      <TrainingContent />
+    </AuthGuard>
+  );
+}
+
+function TrainingContent() {
   const [activeTab, setActiveTab] = useState('datasets');
 
   // 表单数据持久化

@@ -295,7 +295,7 @@ async def start_training(request: TrainingStartRequest, current_user: dict = Dep
         from training.task_manager import get_simple_lora_trainer, ALL_GPU_CONFIGS
         from training.preprocessor import get_dataset_preprocessor
 
-        trainer = get_simple_lora_trainer()
+        trainer = get_simple_lora_trainer(db=db)
         preprocessor = get_dataset_preprocessor()
 
         # 验证数据集是否存在
@@ -346,7 +346,7 @@ async def list_training_tasks(current_user: dict = Depends(get_current_user)):
     """列出所有训练任务"""
     try:
         from training.task_manager import get_simple_lora_trainer
-        trainer = get_simple_lora_trainer()
+        trainer = get_simple_lora_trainer(db=db)
 
         tasks = await trainer.get_all_tasks()
         return {"success": True, "tasks": tasks}
@@ -360,7 +360,7 @@ async def get_training_task(task_id: str, current_user: dict = Depends(get_curre
     """获取训练任务状态"""
     try:
         from training.task_manager import get_simple_lora_trainer
-        trainer = get_simple_lora_trainer()
+        trainer = get_simple_lora_trainer(db=db)
 
         task = await trainer.get_task_status(task_id)
         if not task:
@@ -379,7 +379,7 @@ async def cancel_training_task(task_id: str, current_user: dict = Depends(get_cu
     """取消训练任务"""
     try:
         from training.task_manager import get_simple_lora_trainer
-        trainer = get_simple_lora_trainer()
+        trainer = get_simple_lora_trainer(db=db)
 
         success = await trainer.cancel_task(task_id)
         if success:

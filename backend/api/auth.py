@@ -97,6 +97,6 @@ async def get_current_user_info(current_user: dict = Depends(get_current_user)):
         "success": True,
         "user": {
             "id": current_user["user_id"],
-            "username": current_user["sub"],
+            "username": current_user["username"],
         }
     }

@@ -120,8 +120,9 @@ async def generate_reply(request: MessageRequest, current_user: dict = Depends(g
             if available_loras is not None and vllm_effective_lora not in available_loras:
                 logger.info(f"vLLM 无 LoRA '{vllm_effective_lora}'，使用基础模型 (可用: {available_loras})")
                 vllm_effective_lora = None
-        except Exception:
+        except Exception as e:
             # 查询失败时保守地尝试使用
+            logger.warning(f"查询vLLM可用LoRA失败: {e}")
             pass
 
     start_time = time.time()
@@ -145,7 +146,8 @@ async def generate_reply(request: MessageRequest, current_user: dict = Depends(g
                     cache_key = hashlib.md5(f"generate:{request.message}:{request.sessionId}".encode()).hexdigest()
                     prompt_hash = hashlib.md5(request.message.encode()).hexdigest()
                     await response_cache.set(prompt_hash, cache_key, result.dict(), ttl=300)
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"vLLM缓存写入失败: {e}")
                     pass
 
             return result
@@ -222,7 +224,8 @@ async def generate_reply(request: MessageRequest, current_user: dict = Depends(g
         if load_balancer_mgr:
             try:
                 await load_balancer_mgr.record_success(current_provider, cost_time)
-            except Exception:
+            except Exception as e:
+                logger.warning(f"负载均衡记录成功失败: {e}")
                 pass
 
         await _save_message(request, reply, model_name, lora_name, cost_time)
@@ -238,7 +241,8 @@ async def generate_reply(request: MessageRequest, current_user: dict = Depends(g
                 cache_key = hashlib.md5(f"generate:{request.message}:{request.sessionId}".encode()).hexdigest()
                 prompt_hash = hashlib.md5(request.message.encode()).hexdigest()
                 await response_cache.set(prompt_hash, cache_key, result.dict(), ttl=300)
-            except Exception:
+            except Exception as e:
+                logger.warning(f"模型管理器缓存写入失败: {e}")
                 pass
 
         return result
@@ -277,7 +281,8 @@ async def _generate_with_vllm(request: MessageRequest, lora_name: str) -> str:
         need_rag, _ = needs_rag(request.message)
         if need_rag:
             rag_context = rag_build_prompt(request.message, top_k=3)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"RAG检索失败: {e}")
         pass
 
     if rag_context:
@@ -306,7 +311,8 @@ def _get_system_prompt(lora_name: str) -> str:
         from bot.bot import LORA_REGISTRY
         if lora_name in LORA_REGISTRY:
             return LORA_REGISTRY[lora_name].get("system_prompt", "")
-    except Exception:
+    except Exception as e:
+        logger.warning(f"获取系统提示词失败: {e}")
         pass
     return ""
 

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { AuthGuard } from '@/components/layout/AuthGuard';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,6 +30,14 @@ interface ClawTool {
 }
 
 export default function ClawPage() {
+  return (
+    <AuthGuard>
+      <ClawContent />
+    </AuthGuard>
+  );
+}
+
+function ClawContent() {
   const [tools, setTools] = useState<ClawTool[]>([]);
   const [loading, setLoading] = useState(true);
   const [editDialogOpen, setEditDialogOpen] = useState(false);

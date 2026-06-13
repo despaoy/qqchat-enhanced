@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { AuthGuard } from '@/components/layout/AuthGuard';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,14 @@ import { useSettings } from '@/contexts/SettingsContext';
 import { getSupportedLocales, getSupportedTimezones } from '@/lib/i18n';
 
 export default function SettingsPage() {
+  return (
+    <AuthGuard>
+      <SettingsContent />
+    </AuthGuard>
+  );
+}
+
+function SettingsContent() {
   const { t, updateSettings } = useSettings();
   const [config, setConfig] = useState<SystemConfig>({});
   const [loading, setLoading] = useState(true);

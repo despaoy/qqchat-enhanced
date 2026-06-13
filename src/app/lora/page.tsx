@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { AuthGuard } from '@/components/layout/AuthGuard';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -15,6 +16,14 @@ import { api } from '@/lib/api';
 import { toast } from 'sonner';
 
 export default function LoraPage() {
+  return (
+    <AuthGuard>
+      <LoraContent />
+    </AuthGuard>
+  );
+}
+
+function LoraContent() {
   const [activeTab, setActiveTab] = useState('all');
   const [scanning, setScanning] = useState(false);
   const { loras, loading, error, refetch, toggleLoraStatus, deleteLora } = useLoras();

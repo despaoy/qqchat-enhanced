@@ -263,7 +263,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={
             "success": False,
-            "error": str(exc),
+            "error": "Internal Server Error",
             "message": "服务器内部错误",
         },
     )

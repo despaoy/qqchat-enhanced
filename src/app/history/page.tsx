@@ -15,10 +15,21 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Separator } from '@/components/ui/separator';
 import { useMessages } from '@/hooks/useMessages';
 import { api, type LoraModel } from '@/lib/api';
+import { AuthGuard } from '@/components/layout/AuthGuard';
+import { useAuth } from '@/contexts/AuthContext';
 import { format } from 'date-fns';
 import type { Message } from '@/lib/api';
 
 export default function HistoryPage() {
+  return (
+    <AuthGuard>
+      <HistoryContent />
+    </AuthGuard>
+  );
+}
+
+function HistoryContent() {
+  const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [sessionType, setSessionType] = useState('all');
   const [sessionNameFilter, setSessionNameFilter] = useState('');
@@ -29,17 +40,18 @@ export default function HistoryPage() {
   const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
   const [batchDeleting, setBatchDeleting] = useState(false);
   const [loraModels, setLoraModels] = useState<LoraModel[]>([]);
-  const { messages, totalAll, loading, error, refetch } = useMessages(50, 0);
+  const { messages, totalAll, loading, error, refetch } = useMessages(50, 0, !!user);
 
   // 加载 LoRA 模型列表
   const loadLoras = useCallback(async () => {
+    if (!user) return;
     try {
       const res = await api.getLoras();
       setLoraModels(res.loras);
     } catch {
       // 忽略，筛选框降级为无选项
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     loadLoras();

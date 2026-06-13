@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # ============================================
 # 默认连接字符串
 # ============================================
-DEFAULT_DATABASE_URL = "postgresql+asyncpg://qqassistant:qqassistant2026@localhost:5432/qqassistant"
+DEFAULT_DATABASE_URL = ""  # 必须通过环境变量 DATABASE_URL 配置
 
 # ============================================
 # SQLAlchemy Core 表定义
@@ -1304,6 +1304,9 @@ class SyncPgAdapter:
 
     def get_knowledge_chunks(self, doc_id):
         return self._run(self._pg.get_knowledge_chunks(doc_id))
+
+    def get_all_knowledge_chunks(self):
+        return self._run(self._pg.get_all_knowledge_chunks())
 
     def add_knowledge_chunk(self, chunk_data):
         return self._run(self._pg.add_knowledge_chunk(chunk_data))

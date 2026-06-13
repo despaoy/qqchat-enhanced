@@ -168,7 +168,7 @@ PIPELINE_MAX_QUEUE=500
 PIPELINE_GROUP_RATE=5
 
 # ── 安全配置 ──
-JWT_SECRET=change-this-in-production
+JWT_SECRET=PLEASE_SET_A_SECURE_SECRET_HERE
 
 # ── 数据库 ──
 DB_PATH=./qq_assistant.db

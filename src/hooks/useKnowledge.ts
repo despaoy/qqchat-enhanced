@@ -8,31 +8,32 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { 
-  api, 
-  KnowledgeDocument, 
+import { toast } from 'sonner';
+import {
+  api,
+  KnowledgeDocument,
   KnowledgeBase,
   KnowledgeFolder,
-  KnowledgeStats, 
+  KnowledgeStats,
   KnowledgeSearchResult,
   KnowledgeCreateRequest,
   KnowledgeUpdateRequest,
   ScanDirectory
 } from '@/lib/api';
 
-export function useKnowledge() {
+export function useKnowledge(enabled = true) {
   // 知识库
   const [bases, setBases] = useState<KnowledgeBase[]>([]);
   const [activeBaseId, setActiveBaseId] = useState<number | null>(null);
-  
+
   // 文件夹
   const [folders, setFolders] = useState<KnowledgeFolder[]>([]);
   const [activeFolderId, setActiveFolderId] = useState<number | null>(null);
-  
+
   // 文档
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [stats, setStats] = useState<KnowledgeStats | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
   
   // 搜索
@@ -54,19 +55,33 @@ export function useKnowledge() {
   }, []);
 
   const createBase = async (name: string, description: string = '') => {
-    const data = await api.createKnowledgeBase(name, description);
-    await fetchBases();
-    return data.base;
+    try {
+      const data = await api.createKnowledgeBase(name, description);
+      await fetchBases();
+      return data.base;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '创建失败';
+      setError(msg);
+      toast.error(msg);
+      throw err;
+    }
   };
 
   const deleteBase = async (kbId: number) => {
-    await api.deleteKnowledgeBase(kbId);
-    if (activeBaseId === kbId) {
-      setActiveBaseId(null);
-      setFolders([]);
-      setDocuments([]);
+    try {
+      await api.deleteKnowledgeBase(kbId);
+      if (activeBaseId === kbId) {
+        setActiveBaseId(null);
+        setFolders([]);
+        setDocuments([]);
+      }
+      await fetchBases();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '删除失败';
+      setError(msg);
+      toast.error(msg);
+      throw err;
     }
-    await fetchBases();
   };
 
   const selectBase = (kbId: number | null) => {
@@ -85,15 +100,29 @@ export function useKnowledge() {
   }, []);
 
   const createFolder = async (kbId: number, name: string) => {
-    const data = await api.createKnowledgeFolder(kbId, name);
-    await fetchFolders(kbId);
-    return data.folder;
+    try {
+      const data = await api.createKnowledgeFolder(kbId, name);
+      await fetchFolders(kbId);
+      return data.folder;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '创建文件夹失败';
+      setError(msg);
+      toast.error(msg);
+      throw err;
+    }
   };
 
   const deleteFolder = async (folderId: number) => {
-    await api.deleteKnowledgeFolder(folderId);
-    if (activeBaseId) await fetchFolders(activeBaseId);
-    if (activeFolderId === folderId) setActiveFolderId(null);
+    try {
+      await api.deleteKnowledgeFolder(folderId);
+      if (activeBaseId) await fetchFolders(activeBaseId);
+      if (activeFolderId === folderId) setActiveFolderId(null);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '删除文件夹失败';
+      setError(msg);
+      toast.error(msg);
+      throw err;
+    }
   };
 
   const selectFolder = (folderId: number | null) => {
@@ -189,10 +218,17 @@ export function useKnowledge() {
   };
 
   const uploadZip = async (kbId: number, file: File) => {
-    const result = await api.uploadKnowledgeZip(kbId, file);
-    await fetchFolders(kbId);
-    if (activeBaseId === kbId) await fetchDocuments();
-    return result;
+    try {
+      const result = await api.uploadKnowledgeZip(kbId, file);
+      await fetchFolders(kbId);
+      if (activeBaseId === kbId) await fetchDocuments();
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '上传ZIP失败';
+      setError(msg);
+      toast.error(msg);
+      throw err;
+    }
   };
 
   // ========== 扫描操作 ==========
@@ -211,31 +247,44 @@ export function useKnowledge() {
   };
 
   const importDir = async (directoryName: string, kbId?: number) => {
-    const result = await api.importScannedDir(directoryName, kbId);
-    await fetchBases();
-    if (activeBaseId) {
-      await fetchFolders(activeBaseId);
-      await fetchDocuments();
+    try {
+      const result = await api.importScannedDir(directoryName, kbId);
+      await fetchBases();
+      if (activeBaseId) {
+        await fetchFolders(activeBaseId);
+        await fetchDocuments();
+      }
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '导入目录失败';
+      setError(msg);
+      toast.error(msg);
+      throw err;
     }
-    return result;
   };
 
   // ========== 副作用 ==========
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     fetchBases();
-  }, [fetchBases]);
+  }, [fetchBases, enabled]);
 
   useEffect(() => {
+    if (!enabled) return;
     if (activeBaseId) {
       fetchFolders(activeBaseId);
     } else {
       setFolders([]);
     }
-  }, [activeBaseId, fetchFolders]);
+  }, [activeBaseId, fetchFolders, enabled]);
 
   useEffect(() => {
+    if (!enabled) return;
     fetchDocuments();
-  }, [fetchDocuments]);
+  }, [fetchDocuments, enabled]);
 
   return {
     // 知识库

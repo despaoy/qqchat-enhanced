@@ -1,6 +1,7 @@
 'use client';
 
 import { AppLayout } from '@/components/layout/AppLayout';
+import { AuthGuard } from '@/components/layout/AuthGuard';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -48,6 +49,14 @@ import { zhCN } from 'date-fns/locale';
 import { type KnowledgeDocument, type KnowledgeBase, type KnowledgeFolder, type ScanDirectory } from '@/lib/api';
 
 export default function KnowledgePage() {
+  return (
+    <AuthGuard>
+      <KnowledgeContent />
+    </AuthGuard>
+  );
+}
+
+function KnowledgeContent() {
   const { 
     bases,
     activeBaseId,

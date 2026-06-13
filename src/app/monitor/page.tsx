@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { AuthGuard } from '@/components/layout/AuthGuard';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Activity, Server, Cpu, HardDrive, Wifi, Zap, RefreshCw, AlertCircle, Clock } from 'lucide-react';
@@ -11,6 +12,14 @@ import { api, StatsResponse, ServiceStatus } from '@/lib/api';
 import { useSettings } from '@/contexts/SettingsContext';
 
 export default function MonitorPage() {
+  return (
+    <AuthGuard>
+      <MonitorContent />
+    </AuthGuard>
+  );
+}
+
+function MonitorContent() {
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [services, setServices] = useState<ServiceStatus[]>([]);
   const [loading, setLoading] = useState(true);

@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional, Set
 from threading import RLock
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, OrderedDict
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -204,6 +204,11 @@ class VectorDatabase:
         self._use_gpu = self._check_gpu_availability()
         self._add_count = 0
         self._dirty = False
+
+        # 查询结果LRU缓存
+        self._query_cache: OrderedDict = OrderedDict()
+        self._query_cache_max_size = 100
+        self._query_cache_ttl = 300  # 查询缓存TTL（秒）
 
         self.bm25 = BM25Retriever()
 
@@ -551,6 +556,37 @@ class VectorDatabase:
         if self._dirty:
             self._save_index()
 
+    def _normalize_query(self, query: str) -> str:
+        """规范化查询文本，用于缓存key生成"""
+        return " ".join(query.lower().split())
+
+    def _get_query_cache_key(self, query: str, top_k: int, threshold: float, filters: Optional[Dict[str, Any]]) -> str:
+        """生成查询缓存key"""
+        normalized = self._normalize_query(query)
+        filter_str = json.dumps(filters, sort_keys=True) if filters else ""
+        return f"{normalized}|{top_k}|{threshold}|{filter_str}"
+
+    def _get_cached_query(self, cache_key: str) -> Optional[List[Dict[str, Any]]]:
+        """从查询缓存中获取结果，过期则返回None"""
+        if cache_key not in self._query_cache:
+            return None
+        cached_entry = self._query_cache[cache_key]
+        cached_time, cached_results = cached_entry
+        if time.time() - cached_time > self._query_cache_ttl:
+            # 缓存过期，移除
+            self._query_cache.pop(cache_key, None)
+            return None
+        # LRU：移到末尾
+        self._query_cache.move_to_end(cache_key)
+        return cached_results
+
+    def _set_query_cache(self, cache_key: str, results: List[Dict[str, Any]]) -> None:
+        """将查询结果存入缓存"""
+        # LRU淘汰
+        while len(self._query_cache) >= self._query_cache_max_size:
+            self._query_cache.popitem(last=False)
+        self._query_cache[cache_key] = (time.time(), results)
+
     def search(
         self,
         query: str,
@@ -559,6 +595,7 @@ class VectorDatabase:
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """纯向量语义搜索，将查询文本向量化后在Faiss索引中进行最近邻检索。
+        支持查询结果缓存，相同查询参数在TTL内直接返回缓存结果。
 
         Args:
             query: 搜索查询文本
@@ -572,6 +609,13 @@ class VectorDatabase:
         self._ensure_index()
         if len(self.metadata) == 0:
             return []
+
+        # 查询缓存检查
+        cache_key = self._get_query_cache_key(query, top_k, threshold, filters)
+        cached = self._get_cached_query(cache_key)
+        if cached is not None:
+            logger.debug(f"查询缓存命中: query='{query[:30]}...'")
+            return cached
 
         with self._lock:
             query_embedding = self._get_embedding(query)
@@ -596,6 +640,9 @@ class VectorDatabase:
                 results.append(result)
                 if len(results) >= top_k:
                     break
+
+            # 存入查询缓存
+            self._set_query_cache(cache_key, results)
 
             return results
 
@@ -848,7 +895,9 @@ class VectorDatabase:
             }
 
     def clear_cache(self):
-        logger.info("向量缓存已清除")
+        """清除查询结果缓存"""
+        self._query_cache.clear()
+        logger.info("向量查询缓存已清除")
 
 
 _vector_db: Optional[VectorDatabase] = None

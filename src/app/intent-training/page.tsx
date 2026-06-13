@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { AuthGuard } from '@/components/layout/AuthGuard';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +25,14 @@ import { toast } from 'sonner';
 const MAX_KB_COUNT = 8;
 
 export default function IntentTrainingPage() {
+  return (
+    <AuthGuard>
+      <IntentTrainingContent />
+    </AuthGuard>
+  );
+}
+
+function IntentTrainingContent() {
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [selectedKbIds, setSelectedKbIds] = useState<number[]>([]);
   const [activeKbIds, setActiveKbIds] = useState<number[]>([]);
@@ -77,11 +86,12 @@ export default function IntentTrainingPage() {
   const loadActiveKbs = useCallback(async () => {
     try {
       const res = await api.getActiveKnowledgeBases();
-      const ids = (res.active_kbs || []).map((kb: { id: number }) => kb.id);
+      const activeNames = (res.active_kbs || []).filter(kb => kb.isActive).map(kb => kb.kbName);
+      const ids = knowledgeBases.filter(kb => activeNames.includes(kb.name)).map(kb => kb.id);
       setActiveKbIds(ids);
       if (selectedKbIds.length === 0) setSelectedKbIds(ids);
     } catch { /* ignore */ }
-  }, [selectedKbIds.length]);
+  }, [selectedKbIds.length, knowledgeBases]);
 
   const loadModelInfo = useCallback(async () => {
     try {

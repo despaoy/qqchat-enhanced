@@ -16,12 +16,13 @@
 import { useState, useEffect } from 'react';
 import { api, StatsResponse } from '@/lib/api';
 
-export function useStats() {
+export function useStats(enabled = true) {
   const [stats, setStats] = useState<StatsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
 
   const fetchStats = async () => {
+    if (!enabled) return;
     try {
       setLoading(true);
       setError(null);
@@ -36,13 +37,17 @@ export function useStats() {
   };
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchStats();
-    
+
     // 每30秒刷新一次
     const interval = setInterval(fetchStats, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [enabled]);
 
   return {
     stats,

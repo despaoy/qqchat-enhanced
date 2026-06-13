@@ -137,7 +137,7 @@ class KnowledgeSearchResult(BaseModel):
 class RegisterRequest(BaseModel):
     """用户注册请求"""
     username: str = Field(..., min_length=2, max_length=50)
-    password: str = Field(..., min_length=4, max_length=100)
+    password: str = Field(..., min_length=8, max_length=100)
 
 
 class LoginRequest(BaseModel):

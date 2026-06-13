@@ -611,6 +611,15 @@ class ApiClient {
     });
 
     if (!response.ok) {
+      // 401 时自动清理用户状态并跳转登录页
+      if (response.status === 401) {
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('qq_assistant_user');
+          if (!window.location.pathname.includes('/login')) {
+            window.location.href = '/login';
+          }
+        }
+      }
       // 尝试提取后端错误详情
       let detail = '';
       try {

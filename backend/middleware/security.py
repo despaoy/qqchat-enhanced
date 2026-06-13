@@ -373,7 +373,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # 公开只读端点放行（无需认证）
-        PUBLIC_GET_PATHS = {"/api/stats", "/api/stats/activity", "/api/stats/services", "/api/config", "/api/model/status", "/api/vllm/status", "/health", "/ready"}
+        PUBLIC_GET_PATHS = {"/api/stats", "/api/stats/activity", "/api/stats/services", "/api/model/status", "/api/vllm/status", "/health", "/ready"}
         # 公开POST端点（Bot使用的搜索接口）
         PUBLIC_POST_PATHS = {"/api/knowledge/search"}
         if request.method in ("GET", "HEAD") and (path in PUBLIC_GET_PATHS or path.startswith("/docs") or path.startswith("/redoc")):
@@ -386,13 +386,8 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         auth_header = request.headers.get("Authorization", "")
 
         # 从 Cookie 中提取 token（httpOnly Cookie 认证）
-        cookie_token = ""
-        cookie_header = request.headers.get("Cookie", "")
-        for cookie_part in cookie_header.split(";"):
-            cookie_part = cookie_part.strip()
-            if cookie_part.startswith("access_token="):
-                cookie_token = cookie_part[len("access_token="):]
-                break
+        # 使用 Starlette 内置 API 自动处理 URL 解码
+        cookie_token = request.cookies.get("access_token", "")
 
         bearer_token = ""
         if auth_header.startswith("Bearer "):
@@ -411,11 +406,14 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 request.state.user = payload.get("sub", "unknown")
                 request.state.auth_type = "jwt"
                 request.state.jwt_payload = payload
-                return await call_next(request)
             except ImportError:
                 logger.warning("jwt 库未安装，无法验证 JWT Token")
             except Exception as e:
-                logger.debug(f"JWT 验证失败: {e}")
+                logger.debug(f"JWT 验证失败: {type(e).__name__}: {e}")
+
+            # JWT 验证成功，放行请求（call_next 的异常不应被认证逻辑捕获）
+            if hasattr(request.state, "jwt_payload") and request.state.jwt_payload:
+                return await call_next(request)
 
         # 尝试 API Key 匹配
         if api_key and self._api_keys and api_key in self._api_keys:

@@ -24,31 +24,34 @@ export function useAuth() {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => {
-    if (typeof window === 'undefined') return null;
-    const cachedUser = localStorage.getItem('qq_assistant_user');
-    if (cachedUser) {
-      try {
-        return JSON.parse(cachedUser);
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  });
+  // 不在 useState 初始化时从 localStorage 恢复 user，避免 SSR/CSR hydration 不匹配
+  // 也不在 loading 期间让 user 有值，防止子组件在 token 验证前发起 API 请求
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   // 异步验证 token 是否仍然有效（Cookie 由浏览器自动携带）
   useEffect(() => {
     fetch('/api/auth/me', {
       credentials: 'include', // 携带 httpOnly Cookie
-    }).then(res => {
-      if (!res.ok) {
+    }).then(async res => {
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user) {
+          const userData: User = { id: data.user.id, username: data.user.username, created_at: data.user.created_at || '' };
+          localStorage.setItem('qq_assistant_user', JSON.stringify(userData));
+          setUser(userData);
+        }
+      } else {
         localStorage.removeItem('qq_assistant_user');
         setUser(null);
       }
-    }).catch(() => {})
-      .finally(() => setLoading(false));
+    }).catch(() => {
+      // 网络错误时尝试从 localStorage 恢复（离线容错）
+      const cachedUser = localStorage.getItem('qq_assistant_user');
+      if (cachedUser) {
+        try { setUser(JSON.parse(cachedUser)); } catch { /* ignore */ }
+      }
+    }).finally(() => setLoading(false));
   }, []);
 
   const login = useCallback(async (username: string, password: string) => {
@@ -110,20 +113,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const savePageData = useCallback(async (pageKey: string, data: Record<string, unknown>) => {
-    if (!user) return;
+    if (!user || loading) return;
     localStorage.setItem(`qq_assistant_data_${pageKey}`, JSON.stringify(data));
     try {
       await api.saveUserData(pageKey, JSON.stringify(data));
     } catch (err) {
       console.error('Failed to save user data to server:', err);
     }
-  }, [user]);
+  }, [user, loading]);
 
   const loadPageData = useCallback(async (pageKey: string): Promise<Record<string, unknown> | null> => {
     const localData = localStorage.getItem(`qq_assistant_data_${pageKey}`);
     let result = localData ? (() => { try { return JSON.parse(localData); } catch { return null; } })() : null;
 
-    if (user) {
+    if (user && !loading) {
       try {
         const res = await api.getUserData(pageKey);
         if (res.success && res.data) {
@@ -139,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     return result;
-  }, [user]);
+  }, [user, loading]);
 
   return (
     <AuthContext.Provider value={{ user, loading, login, register, logout, savePageData, loadPageData }}>

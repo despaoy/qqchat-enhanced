@@ -61,10 +61,35 @@ const NavItem = memo(function NavItem({
   );
 });
 
+// 认证状态区域 - 独立组件，仅在客户端挂载后渲染，避免hydration不匹配
+const AuthSection = memo(function AuthSection() {
+  const { user } = useAuth();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => { setMounted(true); }, []);
+
+  if (!mounted) return null;
+
+  return user ? (
+    <div className="mt-auto px-3 py-2 text-xs text-muted-foreground flex items-center gap-2">
+      <User className="h-3 w-3" />
+      <span>{user.username}</span>
+    </div>
+  ) : (
+    <Link
+      href="/login"
+      prefetch={false}
+      className="mt-auto flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+    >
+      <LogIn className="h-4 w-4" />
+      <span>登录</span>
+    </Link>
+  );
+});
+
 export function Sidebar() {
   const pathname = usePathname();
   const { t } = useSettings();
-  const { user } = useAuth();
 
   const navigation = [
     { name: t('nav.dashboard'), href: '/', icon: Home },
@@ -98,21 +123,7 @@ export function Sidebar() {
             isActive={pathname === item.href}
           />
         ))}
-        {user ? (
-          <div className="mt-auto px-3 py-2 text-xs text-muted-foreground flex items-center gap-2">
-            <User className="h-3 w-3" />
-            <span>{user.username}</span>
-          </div>
-        ) : (
-          <Link
-            href="/login"
-            prefetch={false}
-            className="mt-auto flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-          >
-            <LogIn className="h-4 w-4" />
-            <span>登录</span>
-          </Link>
-        )}
+        <AuthSection />
       </nav>
       <StatusBar />
     </div>
