@@ -54,9 +54,13 @@ def main():
     parser.add_argument("--port", type=int, default=8000, help="监听端口（默认8000）")
     parser.add_argument("--host", default="0.0.0.0", help="监听地址")
     parser.add_argument("--reload", action="store_true", help="开发模式热重载")
+    parser.add_argument("--workers", type=int, default=None, help="Worker进程数（默认自动）")
     args = parser.parse_args()
 
-    worker_count = min(4, multiprocessing.cpu_count()) if sys.platform != 'win32' else 1
+    if args.workers is not None:
+        worker_count = args.workers
+    else:
+        worker_count = min(4, multiprocessing.cpu_count()) if sys.platform != 'win32' else 1
 
     uvicorn.run(
         "app.main:app",

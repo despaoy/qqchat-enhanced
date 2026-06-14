@@ -815,12 +815,82 @@ async def delete_knowledge_document(doc_id: int, current_user: dict = Depends(ge
 # 搜索
 # ============================================
 
+_vector_index_built = False
+
+
+def _ensure_vector_index():
+    """延迟重建向量索引：首次搜索时从数据库加载chunks并构建Faiss索引。
+    避免在启动时阻塞服务（尤其是多worker场景下GPU显存竞争）。
+    """
+    global _vector_index_built
+    if _vector_index_built:
+        return True
+
+    try:
+        from app.config import VECTOR_DB_AVAILABLE
+        if not VECTOR_DB_AVAILABLE:
+            _vector_index_built = True
+            return True
+
+        from knowledge.vector_db import get_vector_db
+        vector_db = get_vector_db()
+        stats = vector_db.get_stats()
+
+        if stats["total_documents"] > 0:
+            logger.info(f"向量索引已存在: {stats['total_documents']} 个文档，跳过重建")
+            _vector_index_built = True
+            return True
+
+        logger.info("向量索引为空，从数据库重建...")
+        chunks = db.get_all_knowledge_chunks()
+        if not chunks:
+            logger.info("数据库中无知识库chunks，跳过向量索引重建")
+            _vector_index_built = True
+            return True
+
+        all_docs = {doc["id"]: doc for doc in db.get_knowledge_documents(limit=10000)}
+        vector_docs = []
+        for chunk in chunks:
+            doc = all_docs.get(chunk.get("documentId"))
+            if not doc:
+                continue
+            kb_name = ""
+            folder_name = doc.get("category", "")
+            if doc.get("knowledge_base_id"):
+                kb = db.get_knowledge_base(doc["knowledge_base_id"])
+                if kb:
+                    kb_name = kb["name"]
+            path_prefix = f"[{kb_name}/{folder_name}]" if kb_name else f"[{folder_name}]"
+            enriched = f"{path_prefix} {doc['title']}: {chunk['content']}"
+            vector_docs.append({
+                "id": f"doc_{chunk['documentId']}_chunk_{chunk['chunkIndex']}",
+                "chunk_index": chunk["chunkIndex"],
+                "title": doc["title"],
+                "content": enriched,
+                "document_id": chunk["documentId"],
+                "category": folder_name,
+                "knowledge_base_id": doc.get("knowledge_base_id"),
+            })
+
+        if vector_docs:
+            vector_db.add_documents(vector_docs)
+            logger.info(f"向量索引重建完成: {len(vector_docs)} 个chunks")
+        _vector_index_built = True
+        return True
+    except Exception as e:
+        logger.warning(f"向量索引重建失败: {e}")
+        return False
+
+
 @router.post("/api/knowledge/search")
 async def search_knowledge(request: KnowledgeSearchRequest):
     """搜索知识库 - 使用 RAGHelper 两阶段检索（向量+BM25混合 → Cross-Encoder精排）"""
     try:
         query = request.query
         top_k = request.topK
+
+        # 首次搜索时确保向量索引已构建
+        _ensure_vector_index()
 
         # 优先使用 RAGHelper 完整管线
         try:
@@ -863,9 +933,12 @@ async def search_knowledge(request: KnowledgeSearchRequest):
             except Exception as ve:
                 logger.warning(f"向量检索失败: {ve}")
 
-        # 最终回退：SQLite 关键词
-        logger.info("回退到 SQLite 关键词匹配")
+        # 最终回退：关键词匹配（支持分词匹配，提高召回率）
+        logger.info("回退到关键词匹配")
         query_lower = query.lower()
+        # 提取查询中的关键词（中文单字+英文单词）
+        import re as _re
+        query_keywords = _re.findall(r'[\u4e00-\u9fff]|[a-zA-Z]+', query_lower)
         all_chunks = db.get_all_knowledge_chunks()
         all_docs = {doc["id"]: doc for doc in db.get_knowledge_documents(limit=1000)}
         results = []
@@ -874,14 +947,21 @@ async def search_knowledge(request: KnowledgeSearchRequest):
             doc = all_docs.get(chunk["documentId"])
             if not doc:
                 continue
+            # 完整匹配
             score = content.count(query_lower) * 0.5
             if query_lower in doc["title"].lower():
                 score += 1.0
+            # 分词匹配：每个关键词命中加分
+            for kw in query_keywords:
+                if len(kw) >= 2 or (len(kw) == 1 and '\u4e00' <= kw <= '\u9fff'):
+                    score += content.count(kw) * 0.2
+                    if kw in doc["title"].lower():
+                        score += 0.5
             if score > 0:
                 results.append({
                     "documentId": chunk["documentId"], "documentTitle": doc["title"],
                     "chunkIndex": chunk["chunkIndex"], "content": chunk["content"],
-                    "score": score, "searchType": "keyword"
+                    "score": round(score, 2), "searchType": "keyword"
                 })
         results.sort(key=lambda x: x["score"], reverse=True)
         results = results[:top_k]

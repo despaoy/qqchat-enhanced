@@ -237,13 +237,19 @@ class VectorDatabase:
                 from sentence_transformers import SentenceTransformer
                 logger.info("正在加载向量嵌入模型...")
                 self._device = "cuda" if self._use_gpu else "cpu"
-                model_kwargs = {}
-                if self._use_gpu:
-                    model_kwargs['device'] = self._device
                 model_path = self._find_local_embedding_model()
                 logger.info(f"使用嵌入模型路径: {model_path}")
-                self._model = SentenceTransformer(model_path, **model_kwargs)
-                logger.info(f"向量嵌入模型加载完成，设备: {self._device}")
+                try:
+                    self._model = SentenceTransformer(model_path, device=self._device)
+                    logger.info(f"向量嵌入模型加载完成，设备: {self._device}")
+                except (RuntimeError, Exception) as gpu_err:
+                    if "CUDA out of memory" in str(gpu_err) or "out of memory" in str(gpu_err).lower():
+                        logger.warning(f"GPU显存不足，回退到CPU加载嵌入模型: {gpu_err}")
+                        self._device = "cpu"
+                        self._model = SentenceTransformer(model_path, device="cpu")
+                        logger.info(f"向量嵌入模型加载完成，设备: cpu（GPU回退）")
+                    else:
+                        raise
             except Exception as e:
                 logger.error(f"加载模型失败: {e}")
                 raise

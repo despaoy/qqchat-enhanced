@@ -1266,6 +1266,12 @@ class SyncPgAdapter:
     def get_knowledge_bases(self):
         return self._run(self._pg.get_knowledge_bases())
 
+    def get_knowledge_base(self, kb_id):
+        return self._run(self._pg.get_knowledge_base(kb_id))
+
+    def get_knowledge_folder(self, folder_id):
+        return self._run(self._pg.get_knowledge_folder(folder_id))
+
     def create_knowledge_base(self, name, description=""):
         return self._run(self._pg.create_knowledge_base(name, description))
 
