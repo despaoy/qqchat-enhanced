@@ -9,13 +9,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { 
   Dialog, 
   DialogContent, 
   DialogDescription, 
@@ -46,7 +39,7 @@ import { useState, useRef } from 'react';
 import { toast } from 'sonner';
 import { formatDistanceToNow } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
-import { type KnowledgeDocument, type KnowledgeBase, type KnowledgeFolder, type ScanDirectory } from '@/lib/api';
+import { type KnowledgeDocument, type ScanDirectory } from '@/lib/api';
 
 export default function KnowledgePage() {
   return (
@@ -282,7 +275,7 @@ function KnowledgeContent() {
                   <DialogContent className="sm:max-w-md">
                     <DialogHeader>
                       <DialogTitle>创建知识库</DialogTitle>
-                      <DialogDescription>知识库是文档的顶层容器，如"原神知识"</DialogDescription>
+                      <DialogDescription>知识库是文档的顶层容器，如&quot;原神知识&quot;</DialogDescription>
                     </DialogHeader>
                     <div className="py-4">
                       <Input placeholder="知识库名称" value={newBaseName} onChange={e => setNewBaseName(e.target.value)} />

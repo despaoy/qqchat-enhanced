@@ -264,6 +264,7 @@ export function useKnowledge(enabled = true) {
   };
 
   // ========== 副作用 ==========
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     if (!enabled) {
       setLoading(false);
@@ -272,6 +273,7 @@ export function useKnowledge(enabled = true) {
     fetchBases();
   }, [fetchBases, enabled]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     if (!enabled) return;
     if (activeBaseId) {

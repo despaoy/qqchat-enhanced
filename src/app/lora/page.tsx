@@ -38,7 +38,7 @@ function LoraContent() {
       } else {
         toast.error(result.message);
       }
-    } catch (err) {
+    } catch {
       toast.error('扫描LoRA失败');
     } finally {
       setScanning(false);

@@ -677,7 +677,7 @@ function SettingsContent() {
                               toast.error(result.message);
                             }
                             setModuleStatus(await api.getModuleStatus());
-                          } catch (e) {
+                          } catch {
                             toast.error('切换失败');
                           } finally {
                             setSwitching(false);
@@ -702,7 +702,7 @@ function SettingsContent() {
                               toast.error(result.message);
                             }
                             setModuleStatus(await api.getModuleStatus());
-                          } catch (e) {
+                          } catch {
                             toast.error('切换失败');
                           } finally {
                             setSwitching(false);
