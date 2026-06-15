@@ -132,13 +132,13 @@ export default function DashboardClient() {
     }
   };
 
-  // 打开会话管理对话框时加载数据
-  useEffect(() => {
-    if (sessionDialogOpen) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+  // 打开会话管理对话框时加载数据（通过 onOpenChange 回调避免 useEffect 中 setState）
+  const handleSessionDialogOpenChange = (open: boolean) => {
+    setSessionDialogOpen(open);
+    if (open) {
       loadSessions();
     }
-  }, [sessionDialogOpen]);
+  };
 
   if (statsError) {
     return (
@@ -523,7 +523,7 @@ export default function DashboardClient() {
               </Button>
 
               {/* 管理会话 */}
-              <Dialog open={sessionDialogOpen} onOpenChange={setSessionDialogOpen}>
+              <Dialog open={sessionDialogOpen} onOpenChange={handleSessionDialogOpenChange}>
                 <DialogTrigger asChild>
                   <Button variant="ghost" className="flex flex-col items-center justify-center rounded-lg border p-4 h-auto hover:bg-muted transition-colors">
                     <Users className="h-6 w-6 mb-2 text-primary" />
