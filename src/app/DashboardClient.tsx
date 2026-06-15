@@ -18,9 +18,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
@@ -29,9 +28,8 @@ import { Switch } from '@/components/ui/switch';
 import { useStats } from '@/hooks/useStats';
 import { useLoras } from '@/hooks/useLoras';
 import { useServices } from '@/hooks/useServices';
-import { api, type LoraModel, type SessionSummary } from '@/lib/api';
+import { api, type SessionSummary } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { AuthGuard } from '@/components/layout/AuthGuard';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -135,6 +133,7 @@ export default function DashboardClient() {
   };
 
   // 打开会话管理对话框时加载数据
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     if (sessionDialogOpen) {
       loadSessions();
