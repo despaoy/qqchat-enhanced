@@ -133,9 +133,9 @@ export default function DashboardClient() {
   };
 
   // 打开会话管理对话框时加载数据
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     if (sessionDialogOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       loadSessions();
     }
   }, [sessionDialogOpen]);
