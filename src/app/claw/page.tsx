@@ -64,10 +64,7 @@ function ClawContent() {
     }
   }, []);
 
-  // 初始加载工具列表（使用 eslint-disable 块注释抑制 set-state-in-effect 规则）
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => { loadTools(); }, [loadTools]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   const openNewTool = () => {
     setEditName('');
