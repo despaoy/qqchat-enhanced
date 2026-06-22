@@ -23,6 +23,9 @@ const eslintConfig = defineConfig([
     // Build artifacts:
     'server.js',
     'dist/**',
+    // Python virtual environment (contains .js files from torch/sklearn):
+    'backend/.venv/**',
+    'backend/**',
   ]),
 ]);
 

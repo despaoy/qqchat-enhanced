@@ -4,14 +4,12 @@
  * 全站最外层布局，配置：
  * - 主题切换（next-themes ThemeProvider）
  * - 全局设置（SettingsProvider - 语言/时区）
- * - 开发环境 Inspector 工具
  * - 全局 Toast 通知容器
  *
  * 包含 SEO 元数据（title、description、keywords）。
  */
 
 import type { Metadata } from 'next';
-import { Inspector } from 'react-dev-inspector';
 import { ThemeProvider } from 'next-themes';
 import './globals.css';
 import { Toaster } from '@/components/ui/sonner';
