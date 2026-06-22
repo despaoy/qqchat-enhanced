@@ -1,19 +1,36 @@
 # FastAPI Backend
+# 构建参数：
+#   INSTALL_GPU_DEPS=true  安装 PyTorch CUDA + vLLM（生产部署，需要 NVIDIA GPU）
+#   INSTALL_GPU_DEPS=false 仅安装 CPU 版 PyTorch，跳过 vLLM（CI / 无 GPU 环境）
+ARG INSTALL_GPU_DEPS=true
+
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies (gcc for cryptography/bitsandbytes; asyncpg 不需要 libpq-dev)
+# Install system dependencies (gcc for cryptography/bitsandbytes)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc && \
     rm -rf /var/lib/apt/lists/*
 
-# Install PyTorch first (CUDA 12.1), then vLLM, then remaining deps
+# Re-declare ARG after FROM (ARG before FROM is only for FROM itself)
+ARG INSTALL_GPU_DEPS=true
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
-    --index-url https://download.pytorch.org/whl/cu121 && \
-    pip install --no-cache-dir vllm==0.7.2 && \
-    pip install --no-cache-dir -r requirements.txt
+
+# Conditional dependency installation based on GPU availability
+RUN if [ "$INSTALL_GPU_DEPS" = "true" ]; then \
+        echo "Installing GPU dependencies (PyTorch CUDA + vLLM)..." && \
+        pip install --no-cache-dir torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
+            --index-url https://download.pytorch.org/whl/cu121 && \
+        pip install --no-cache-dir vllm==0.7.2; \
+    else \
+        echo "Installing CPU-only dependencies (skipping vLLM)..." && \
+        pip install --no-cache-dir torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
+            --index-url https://download.pytorch.org/whl/cpu; \
+    fi && \
+    grep -v -E "^(torch==|torchvision==|torchaudio==|vllm==)" requirements.txt > requirements-filtered.txt && \
+    pip install --no-cache-dir -r requirements-filtered.txt
 
 # Copy application code
 COPY . .
