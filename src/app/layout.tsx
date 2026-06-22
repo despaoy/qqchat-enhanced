@@ -40,15 +40,12 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const isDev = process.env.COZE_PROJECT_ENV === 'DEV';
-
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <body className={`antialiased`}>
         <ThemeProvider attribute="class" defaultTheme="light">
           <AuthProvider>
             <SettingsProvider>
-              {isDev && <Inspector />}
               {children}
               <Toaster />
             </SettingsProvider>
