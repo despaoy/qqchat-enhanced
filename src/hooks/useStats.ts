@@ -13,7 +13,7 @@
  *   - refetch: 手动刷新数据的函数
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api, StatsResponse } from '@/lib/api';
 
 export function useStats(enabled = true) {
@@ -21,7 +21,9 @@ export function useStats(enabled = true) {
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchStats = async () => {
+  // useCallback：fetchStats 引用稳定，可安全放入 effect 依赖（消除 stale closure），
+  // 且作为 refetch 返回时不会触发消费方不必要的重渲染。
+  const fetchStats = useCallback(async () => {
     if (!enabled) return;
     try {
       setLoading(true);
@@ -34,20 +36,22 @@ export function useStats(enabled = true) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [enabled]);
 
   useEffect(() => {
     if (!enabled) {
       setLoading(false);
       return;
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchStats();
 
-    // 每30秒刷新一次
-    const interval = setInterval(fetchStats, 30000);
+    // 每30秒刷新一次；页面不可见时跳过，避免后台无谓请求
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      fetchStats();
+    }, 30000);
     return () => clearInterval(interval);
-  }, [enabled]);
+  }, [enabled, fetchStats]);
 
   return {
     stats,

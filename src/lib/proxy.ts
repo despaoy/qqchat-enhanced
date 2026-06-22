@@ -6,6 +6,48 @@
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000';
 const PROXY_TIMEOUT = 30000; // 30秒超时
 
+// 安全：允许转发的后端路径前缀白名单。
+// 路径安全：拒绝含 '..' 或 '//' 的路径，防止目录穿越。
+// 说明：auth/* 同时有专用 route（处理 Set-Cookie）和 catch-all 两条路径，
+//       Next.js 路由优先级下专用 route 优先匹配，此处保留 auth/* 是因为
+//       专用 route 内部也调用 proxyRequest，需要通过白名单校验。
+//       后端安全中间件独立校验认证（AUTH_WHITELIST 保护 login/register），
+//       所以前端白名单不会降低安全性。
+const PROXY_ALLOWED_PREFIXES = [
+  '/api/auth',
+  '/api/messages',
+  '/api/sessions',
+  '/api/generate',
+  '/api/vllm/',
+  '/api/loras',
+  '/api/training',
+  '/api/knowledge',
+  '/api/vector/',
+  '/api/model',
+  '/api/config',
+  '/api/user/',
+  '/api/stats',
+  '/api/services',
+  '/api/claw',
+  '/api/module',
+  '/api/enhanced',
+  '/health',
+  '/ready',
+];
+
+/**
+ * 校验目标后端路径是否允许通过 catch-all 代理。
+ * 拒绝：空路径、含 `..`、未在白名单前缀中的路径。
+ */
+export function isProxyPathAllowed(backendPath: string): boolean {
+  if (!backendPath) return false;
+  // 仅取 path 部分（剥离 query）
+  const pathOnly = backendPath.split('?')[0];
+  if (pathOnly.includes('..') || pathOnly.includes('//')) return false;
+  // 必须命中白名单前缀
+  return PROXY_ALLOWED_PREFIXES.some((p) => pathOnly === p || pathOnly.startsWith(p + '/') || pathOnly.startsWith(p));
+}
+
 interface ProxyOptions {
   method?: string;
   body?: unknown;
@@ -27,6 +69,15 @@ export async function proxyRequest(
   options: ProxyOptions = {}
 ): Promise<Response> {
   const { method = 'GET', body, headers: optHeaders = {}, timeout = PROXY_TIMEOUT } = options;
+
+  // 安全：禁止转发到未授权的后端路径，防止把整张后端 API 表面开放成代理
+  if (!isProxyPathAllowed(path)) {
+    return new Response(
+      JSON.stringify({ detail: '禁止访问该路径' }),
+      { status: 403, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+
   const headers: Record<string, string> = { ...optHeaders };
 
   // 认证：从 Cookie 中提取 JWT token，转为 Authorization 头转发

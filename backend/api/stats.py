@@ -71,13 +71,13 @@ def get_system_stats():
         disk = psutil.disk_usage('C:')  # Windows使用C盘
         disk_used = round(disk.used / (1024 ** 3), 1)
         disk_total = round(disk.total / (1024 ** 3), 1)
-    except:
+    except Exception:
         # 如果C盘不可用，使用根目录
         try:
             disk = psutil.disk_usage('/')
             disk_used = round(disk.used / (1024 ** 3), 1)
             disk_total = round(disk.total / (1024 ** 3), 1)
-        except:
+        except Exception:
             disk_used = 0.0
             disk_total = 0.0
 
@@ -124,10 +124,14 @@ async def get_stats():
     """获取系统统计数据"""
     # 从真实消息记录计算
     today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_messages = [
-        msg for msg in db.messages
-        if datetime.fromisoformat(msg['createdAt']) >= today_start
-    ]
+    today_messages = []
+    for msg in db.messages:
+        try:
+            if datetime.fromisoformat(msg['createdAt']) >= today_start:
+                today_messages.append(msg)
+        except (ValueError, KeyError, TypeError):
+            # createdAt 缺失或格式非法，跳过该记录
+            continue
 
     # 今日回复数
     today_replies = len(today_messages)
@@ -167,34 +171,23 @@ async def get_activity():
     """获取活动趋势数据 - 从真实数据计算"""
     # 初始化24小时的数据，每2小时一个数据点
     hours = [f"{h:02d}:00" for h in range(0, 24, 2)]
-    activity_data = []
+    # 性能：只加载一次消息，避免在循环中反复读取全部记录
+    activity_map: dict[int, dict[str, int]] = {int(h.split(":")[0]): {"messages": 0, "replies": 0} for h in hours}
 
-    # 从真实消息记录计算每个时间段的活动
-    for hour in hours:
-        hour_num = int(hour.split(':')[0])
-        # 计算当前小时内的消息数
-        hour_messages = 0
-        hour_replies = 0
+    for msg in db.messages:
+        try:
+            msg_time = datetime.fromisoformat(msg['createdAt'])
+        except (ValueError, KeyError, TypeError):
+            continue
+        slot = activity_map.get(msg_time.hour)
+        if slot is None:
+            continue
+        slot["messages"] += 1
+        if msg.get("reply"):
+            slot["replies"] += 1
 
-        for msg in db.messages:
-            try:
-                msg_time = datetime.fromisoformat(msg['createdAt'])
-                if msg_time.hour == hour_num:
-                    hour_messages += 1
-                    if msg.get('reply'):
-                        hour_replies += 1
-            except:
-                continue
-
-        activity_data.append({
-            "time": hour,
-            "messages": hour_messages,
-            "replies": hour_replies
-        })
-
-    return {
-        "activity": activity_data
-    }
+    activity_data = [{"time": h, **activity_map[int(h.split(":")[0])]} for h in hours]
+    return {"activity": activity_data}
 
 
 @router.get("/services")

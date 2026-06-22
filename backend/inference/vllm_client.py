@@ -559,7 +559,6 @@ class VLLMClient:
                     if data_str.strip() == "[DONE]":
                         break
                     try:
-                        import json
                         chunk = json.loads(data_str)
                         delta = chunk.get("choices", [{}])[0].get("delta", {})
                         content = delta.get("content", "")
@@ -795,9 +794,19 @@ class VLLMClient:
         }
 
 
-# 接口契约验证：确保 VLLMClient 实现 InferenceInterface 接口
-def _check_interface():
-    if not isinstance(VLLMClient("", ""), InferenceInterface):
-        pass  # Protocol structural check - methods must match
+# 接口契约验证：确保 VLLMClient 的方法签名与 InferenceInterface 一致。
+# 原实现 _check_interface() 在导入时实例化 VLLMClient("", "")（空实例 + 日志副作用），
+# 且对非 @runtime_checkable 的 Protocol 做 isinstance 永真/永假，校验无意义。
+# 改为静态方法签名比对，避免导入副作用。
+def _check_interface() -> None:
+    expected = {
+        "generate", "generate_with_rag", "health_check", "get_active_loras",
+        "close",
+    }
+    missing = expected - set(dir(VLLMClient))
+    if missing:
+        raise TypeError(
+            f"VLLMClient 未实现 InferenceInterface 要求的方法: {missing}"
+        )
 
 _check_interface()

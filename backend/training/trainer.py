@@ -279,7 +279,6 @@ class LoRATrainer:
         logger.info("加载Tokenizer...")
         tokenizer = AutoTokenizer.from_pretrained(
             str(self.config.base_model_path),
-            trust_remote_code=True,
         )
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
@@ -447,7 +446,6 @@ class LoRATrainer:
             str(self.config.base_model_path),
             torch_dtype=torch_dtype,
             device_map="auto",
-            trust_remote_code=True,
             low_cpu_mem_usage=True,
         )
         model = prepare_model_for_kbit_training(model)
@@ -558,7 +556,6 @@ class LoRATrainer:
                 gradient_checkpointing=self.config.gradient_checkpointing,
                 max_length=self.config.max_seq_length,
                 seed=self.config.seed,
-                dataset_text_field="text",
                 packing=False,
             )
 
@@ -576,6 +573,7 @@ class LoRATrainer:
                 eval_dataset=datasets["eval"],
                 data_collator=data_collator,
                 callbacks=callbacks,
+                processing_class=tokenizer,
             )
 
             logger.info("=" * 60)

@@ -1233,7 +1233,7 @@ class ApiClient {
 
   /** 获取模块状态 */
   async getModuleStatus(): Promise<ModuleStatusResponse> {
-    return this.request('/module/status');
+    return this.request<ModuleStatusResponse>('/module/status');
   }
 
   /** 切换系统模式 */

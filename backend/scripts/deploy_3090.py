@@ -82,7 +82,6 @@ python -m vllm.entrypoints.openai.api_server \\
   --max-model-len {max_model_len} \\
   --max-num-seqs {max_num_seqs} \\
   --max-num-batched-tokens {max_num_batched_tokens} \\
-  --enable-prefix-caching \\
   --enable-lora \\
   --max-lora-rank {max_lora_rank} \\
   --max-loras {max_loras} \\

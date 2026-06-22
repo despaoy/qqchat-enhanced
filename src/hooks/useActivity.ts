@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api, ActivityData } from '@/lib/api';
 
 export function useActivity() {
@@ -8,7 +8,10 @@ export function useActivity() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchActivity = async () => {
+  // useCallback 保证 fetchActivity 引用稳定：
+  // 1. 作为 refetch 返回时不会触发消费方不必要的重渲染
+  // 2. 可安全放入下方 effect 依赖，消除 stale closure 隐患
+  const fetchActivity = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -20,16 +23,18 @@ export function useActivity() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchActivity();
-    
-    // 每60秒刷新一次
-    const interval = setInterval(fetchActivity, 60000);
+
+    // 每60秒刷新一次；页面不可见时跳过，避免后台无谓请求
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      fetchActivity();
+    }, 60000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchActivity]);
 
   return {
     activity,

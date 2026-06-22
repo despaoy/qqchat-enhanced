@@ -46,11 +46,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
       }
     }).catch(() => {
-      // 网络错误时尝试从 localStorage 恢复（离线容错）
-      const cachedUser = localStorage.getItem('qq_assistant_user');
-      if (cachedUser) {
-        try { setUser(JSON.parse(cachedUser)); } catch { /* ignore */ }
-      }
+      // 安全：网络失败时不可从 localStorage 恢复 user。
+      // localStorage 是客户端可篡改的存储，把它当作鉴权依据会让任何人在断网/伪造时绕过登录。
+      // 离线即视为未认证，由 AuthGuard 引导用户重新登录。
+      localStorage.removeItem('qq_assistant_user');
+      setUser(null);
     }).finally(() => setLoading(false));
   }, []);
 

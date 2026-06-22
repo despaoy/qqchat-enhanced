@@ -252,7 +252,7 @@ async def start_training(request: TrainingStartRequest, current_user: dict = Dep
         # 输入验证
         if INPUT_VALIDATOR_AVAILABLE:
             from infra.input_validator import InputValidator
-            is_valid, errors = InputValidator.validate(request.dict(), TRAINING_SCHEMA)
+            is_valid, errors = InputValidator.validate(request.model_dump(), TRAINING_SCHEMA)
             if not is_valid:
                 raise HTTPException(status_code=422, detail={"message": "输入验证失败", "errors": errors})
 

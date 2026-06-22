@@ -72,8 +72,13 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 QQ智能助手后端服务启动中（增强版）...")
 
     # 初始化数据库
+    # SQLiteDB 在 __init__ 中已通过 _init_database() 完成建表，无独立 init() 方法。
+    # 此处仅做一次连接探活（SELECT 1），确认数据库文件可读写。
     try:
-        db.init()
+        if hasattr(db, "init"):
+            db.init()
+        conn = db.get_connection()
+        conn.execute("SELECT 1")
         logger.info("✅ 数据库初始化完成")
     except Exception as e:
         logger.error(f"数据库初始化失败: {e}")

@@ -68,13 +68,12 @@ class HutaoInferencer:
             BASE_MODEL_PATH,
             quantization_config=nf4_config,
             device_map="auto",
-            trust_remote_code=True,
         )
 
         self.model = PeftModel.from_pretrained(base_model, LORA_PATH)
         self.model.eval()
 
-        self.tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_PATH, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_PATH)
 
         allocated = torch.cuda.memory_allocated() / 1024**3
         print(f"模型加载完成！显存占用: {allocated:.1f}GB")

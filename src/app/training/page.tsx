@@ -46,6 +46,7 @@ import { Separator } from '@/components/ui/separator';
 import { api, type Dataset, type ModelConfig, type TrainingTask, type CharacterStyle, type CreateDatasetRequest, type StartTrainingRequest, type DialogueConversation, type DialogueGenerateRequest, type SavedDialogueItem } from '@/lib/api';
 import { toast } from 'sonner';
 import { usePageData } from '@/hooks/usePageData';
+import { TrainingParamsEditor } from '@/components/training/TrainingParamsEditor';
 
 const statusColors: Record<string, string> = {
   pending: 'bg-yellow-100 text-yellow-800',
@@ -124,6 +125,7 @@ function TrainingContent() {
   // 启动训练对话框
   const [startTrainingOpen, setStartTrainingOpen] = useState(false);
   const [selectedDataset, setSelectedDataset] = useState('');
+  const [trainingSubmitting, setTrainingSubmitting] = useState(false);
 
   // ========== 快速生成对话状态 ==========
   const [generating, setGenerating] = useState(false);
@@ -323,18 +325,30 @@ function TrainingContent() {
   }, [loadDatasets, loadModelConfigs, loadStyles, loadTrainingTasks]);
 
   // 定期刷新训练任务
+  // 使用 ref 保存最新的 trainingTasks，避免把它放进定时器 effect 依赖导致
+  // 每次轮询后 trainingTasks 变化 → effect 重跑 → interval 反复重建（丢 tick + 抖动）。
+  const trainingTasksRef = useRef(trainingTasks);
   useEffect(() => {
+    trainingTasksRef.current = trainingTasks;
+  }, [trainingTasks]);
+
+  useEffect(() => {
+    const POLL_INTERVAL = 3000;
     const interval = setInterval(() => {
-      const hasActiveTasks = trainingTasks.some(
+      // 页面不可见时跳过轮询，节省后端请求
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return;
+      }
+      const hasActiveTasks = trainingTasksRef.current.some(
         task => task.status === 'pending' || task.status === 'training'
       );
       if (hasActiveTasks) {
         loadTrainingTasks();
       }
-    }, 3000);
+    }, POLL_INTERVAL);
 
     return () => clearInterval(interval);
-  }, [trainingTasks, loadTrainingTasks]);
+  }, [loadTrainingTasks]);
 
   // 处理文件选择
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -395,20 +409,27 @@ function TrainingContent() {
     }
   };
 
-  // 启动训练
-  const handleStartTraining = async () => {
+  // 启动训练（由 TrainingParamsEditor 提交）
+  const handleStartTraining = async (params: {
+    loraName: string;
+    datasetName: string;
+    customConfig: Record<string, unknown>;
+  }) => {
+    setTrainingSubmitting(true);
     try {
       const request: StartTrainingRequest = {
-        lora_name: newLoraName,
-        dataset_name: selectedDataset,
-        model_type: selectedModelConfig
+        lora_name: params.loraName,
+        dataset_name: params.datasetName,
+        // 仍传一个默认 model_type 作为后端基础配置兜底，
+        // custom_config 会覆盖/补充所有自定义字段
+        model_type: selectedModelConfig,
+        custom_config: params.customConfig,
       };
 
       const response = await api.startTraining(request);
       if (response.success) {
         toast.success('训练任务已启动');
         setStartTrainingOpen(false);
-        updateFormField('newLoraName', '');
         setSelectedDataset('');
         loadTrainingTasks();
       } else {
@@ -419,6 +440,8 @@ function TrainingContent() {
       console.error('Failed to start training:', error);
       const msg = error instanceof Error ? error.message : '启动训练失败';
       toast.error(msg, { duration: 6000 });
+    } finally {
+      setTrainingSubmitting(false);
     }
   };
 
@@ -1720,63 +1743,26 @@ function TrainingContent() {
                     新建训练
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="sm:max-w-[500px] max-h-[85vh] flex flex-col">
+                <DialogContent className="sm:max-w-[760px] max-h-[92vh] flex flex-col">
                   <DialogHeader>
-                    <DialogTitle>启动LoRA训练</DialogTitle>
+                    <DialogTitle>启动 LoRA 训练</DialogTitle>
                     <DialogDescription>
-                      配置训练参数并启动训练任务
+                      配置训练参数并启动训练任务；高级设置可一键应用显存预设。
                     </DialogDescription>
                   </DialogHeader>
-                  <div className="space-y-4 py-4 overflow-y-auto flex-1 min-h-0">
-                    <div className="space-y-2">
-                      <Label htmlFor="lora-name">LoRA 名称</Label>
-                      <Input
-                        id="lora-name"
-                        placeholder="例如：minamo-lora"
-                        value={newLoraName}
-                        onChange={(e) => updateFormField('newLoraName', e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="dataset-select">选择数据集</Label>
-                      <Select value={selectedDataset} onValueChange={setSelectedDataset}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="选择数据集" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {datasets.map((dataset) => (
-                            <SelectItem key={dataset.name} value={dataset.name}>
-                              {dataset.name} ({dataset.stats.total || 0} 样本)
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="model-config">模型配置</Label>
-                      <Select value={selectedModelConfig} onValueChange={(v) => updateFormField('selectedModelConfig', v)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="选择模型配置" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {modelConfigs.map((config) => (
-                            <SelectItem key={config.name} value={config.name}>
-                              {config.gpu_type || config.name} — {config.model_name?.split('/').pop() || ''} (rank={config.lora_rank}, batch={config.batch_size}×{config.gradient_accumulation_steps ?? 1})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                  <div className="overflow-y-auto flex-1 min-h-0 pr-1">
+                    <TrainingParamsEditor
+                      datasets={datasets.map((d) => ({
+                        name: d.name,
+                        sampleCount: d.stats?.total ?? 0,
+                      }))}
+                      submitting={trainingSubmitting}
+                      onSubmit={handleStartTraining}
+                    />
                   </div>
                   <DialogFooter className="shrink-0">
                     <Button variant="secondary" onClick={() => setStartTrainingOpen(false)}>
-                      取消
-                    </Button>
-                    <Button
-                      onClick={handleStartTraining}
-                      disabled={!newLoraName || !selectedDataset}
-                    >
-                      开始训练
+                      关闭
                     </Button>
                   </DialogFooter>
                 </DialogContent>

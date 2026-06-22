@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api, ServiceStatus } from '@/lib/api';
 
 export function useServices(enabled = true) {
@@ -8,7 +8,9 @@ export function useServices(enabled = true) {
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchServices = async () => {
+  // useCallback：fetchServices 引用稳定，可安全放入 effect 依赖（消除 stale closure），
+  // 且作为 refetch 返回时不会触发消费方不必要的重渲染。
+  const fetchServices = useCallback(async () => {
     if (!enabled) return;
     try {
       setLoading(true);
@@ -21,20 +23,22 @@ export function useServices(enabled = true) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [enabled]);
 
   useEffect(() => {
     if (!enabled) {
       setLoading(false);
       return;
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchServices();
 
-    // 每60秒刷新一次
-    const interval = setInterval(fetchServices, 60000);
+    // 每60秒刷新一次；页面不可见时跳过
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      fetchServices();
+    }, 60000);
     return () => clearInterval(interval);
-  }, [enabled]);
+  }, [enabled, fetchServices]);
 
   return {
     services,

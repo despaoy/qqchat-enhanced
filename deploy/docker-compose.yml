@@ -1,20 +1,18 @@
-version: "3.8"
-
 services:
   # PostgreSQL + pgvector
   postgres:
     image: pgvector/pgvector:pg14
     restart: unless-stopped
     environment:
-      POSTGRES_USER: qqassistant
-      POSTGRES_PASSWORD: qqassistant2026
-      POSTGRES_DB: qqassistant
+      POSTGRES_USER: ${PG_USER:-qqassistant}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-changeme}
+      POSTGRES_DB: ${PG_DATABASE:-qqassistant}
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U qqassistant"]
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-qqassistant}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -23,7 +21,7 @@ services:
 
   # Redis
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     restart: unless-stopped
     command: redis-server --appendonly yes --appendfsync everysec --maxmemory 512mb --maxmemory-policy volatile-lru
     volumes:
@@ -38,9 +36,9 @@ services:
     networks:
       - internal
 
-  # vLLM Inference Engine
+  # vLLM Inference Engine (RTX 3090 优化配置 - Qwen2.5-7B-Instruct FP16)
   vllm:
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.7.2
     restart: unless-stopped
     deploy:
       resources:
@@ -52,16 +50,14 @@ services:
     command: >
       --model /models/Qwen2.5-7B-Instruct
       --enable-lora
-      --max-loras 8
+      --max-loras 4
       --max-lora-rank 64
-      --enable-prefix-caching
-      --gpu-memory-utilization 0.9
+      --gpu-memory-utilization 0.90
       --max-model-len 4096
-      --dtype bfloat16
+      --dtype float16
       --host 0.0.0.0
       --port 8001
       --lora-modules-dir /loras
-      --trust-remote-code
     volumes:
       - /root/autodl-tmp/Qwen2.5-7B-Instruct:/models/Qwen2.5-7B-Instruct
       - /root/autodl-tmp/qqchat-enhanced/backend/loras:/loras
@@ -85,9 +81,9 @@ services:
       USE_POSTGRESQL: "true"
       PG_HOST: postgres
       PG_PORT: "5432"
-      PG_USER: qqassistant
-      PG_PASSWORD: qqassistant2026
-      PG_DATABASE: qqassistant
+      PG_USER: ${PG_USER:-qqassistant}
+      PG_PASSWORD: ${PG_PASSWORD:-changeme}
+      PG_DATABASE: ${PG_DATABASE:-qqassistant}
       REDIS_URL: redis://redis:6379/0
       VLLM_ENABLED: "true"
       VLLM_BASE_URL: http://vllm:8001
@@ -116,7 +112,7 @@ services:
 
   # Nginx Reverse Proxy
   nginx:
-    image: nginx:alpine
+    image: nginx:1.27-alpine
     restart: unless-stopped
     depends_on:
       - frontend

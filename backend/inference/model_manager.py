@@ -435,7 +435,7 @@ class TransformersPeftProvider(BaseProvider):
             if not Path(base_path).exists():
                 raise FileNotFoundError(f"模型路径不存在: {base_path}")
 
-            self._tokenizer = AutoTokenizer.from_pretrained(base_path, trust_remote_code=True)
+            self._tokenizer = AutoTokenizer.from_pretrained(base_path)
 
             # 尝试多种加载策略（Windows bitsandbytes 兼容性）
             load_strategies = [
@@ -484,7 +484,6 @@ class TransformersPeftProvider(BaseProvider):
             quantization_config=nf4_config,
             device_map="auto",
             low_cpu_mem_usage=True,
-            trust_remote_code=True,
         )
 
     def _load_8bit(self, base_path: str):
@@ -497,7 +496,6 @@ class TransformersPeftProvider(BaseProvider):
             quantization_config=config,
             device_map="auto",
             low_cpu_mem_usage=True,
-            trust_remote_code=True,
         )
 
     def _load_fp16(self, base_path: str):
@@ -509,7 +507,6 @@ class TransformersPeftProvider(BaseProvider):
             torch_dtype=torch.float16,
             device_map="auto",
             low_cpu_mem_usage=True,
-            trust_remote_code=True,
         )
 
     def set_lora_adapter(self, lora_path: Optional[str]):

@@ -67,11 +67,11 @@ export function ActivityChart() {
         <div className="h-[300px]">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={activity}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="time" stroke="var(--muted-foreground)" fontSize={12} />
-              <YAxis stroke="var(--muted-foreground)" fontSize={12} />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+              <XAxis dataKey="time" stroke="var(--muted-foreground)" tick={{ fontSize: 12 }} />
+              <YAxis stroke="var(--muted-foreground)" tick={{ fontSize: 12 }} />
               <Tooltip
-                contentStyle={{
+                wrapperStyle={{
                   backgroundColor: 'var(--card)',
                   border: '1px solid var(--border)',
                   borderRadius: 'var(--radius)',

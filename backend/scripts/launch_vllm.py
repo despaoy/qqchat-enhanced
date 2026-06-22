@@ -2,21 +2,22 @@
 """
 QQ智能助手 - vLLM 推理服务启动脚本
 
-在 E5-2680 + 2×RTX 3090 (24GB×2) 上使用 vLLM 启动 Qwen2.5-7B 推理服务。
+在 RTX 3090 (24GB) 上使用 vLLM 启动 Qwen2.5-7B 推理服务。
 
 硬件适配:
-  - 2×3090 24GB: 使用张量并行 (tensor-parallel-size=2)
-  - 单卡 24GB 足以容纳 Qwen2.5-7B AWQ 4bit + KV Cache
-  - 总吞吐量: ~50-60 req/s (远超 30 req/s 需求)
+  - 单卡 24GB: Qwen2.5-7B-Instruct FP16 可直接运行
+  - 双卡 24GB×2: 可使用张量并行 (tensor-parallel-size=2) 提升吞吐
+  - AWQ 4bit: 显存降至 ~6GB，适合多 LoRA 并存
 
 启动:
-  python scripts/launch_vllm.py                    # FP16 + TP=2
-  python scripts/launch_vllm.py --quant awq        # AWQ 4bit 量化
+  python scripts/launch_vllm.py                              # FP16 默认
+  python scripts/launch_vllm.py --quant awq                 # AWQ 4bit 量化
   python scripts/launch_vllm.py --model Qwen/Qwen2.5-7B-Instruct
   python scripts/launch_vllm.py --lora-path ./loras/hutao_lora_7b/final
+  python scripts/launch_vllm.py --tensor-parallel 1         # 单卡模式
 
 要求:
-  pip install vllm
+  pip install vllm==0.7.2
 """
 import argparse
 import subprocess
@@ -39,11 +40,11 @@ def build_args(args) -> list:
         "--max-num-batched-tokens", str(args.max_batched_tokens),
     ]
 
-    # 双卡张量并行
+    # 张量并行
     if args.tensor_parallel > 1:
         cmd += ["--tensor-parallel-size", str(args.tensor_parallel)]
 
-    # 量化
+    # 量化（仅指定量化方法时添加）
     if args.quant:
         cmd += ["--quantization", args.quant]
 
@@ -60,9 +61,9 @@ def build_args(args) -> list:
     if args.dtype:
         cmd += ["--dtype", args.dtype]
 
-    # 前缀缓存 (共享 system prompt)
-    if args.enable_prefix_caching:
-        cmd += ["--enable-prefix-caching"]
+    # 禁用前缀缓存（vLLM 0.7.x 默认已启用，此选项用于关闭）
+    if args.disable_prefix_caching:
+        cmd += ["--no-prefix-caching"]
 
     return cmd
 
@@ -83,31 +84,25 @@ def main():
                         help="最大并发序列数 (Continuous Batching 上限)")
     parser.add_argument("--max-batched-tokens", type=int, default=8192,
                         help="单次 batch 最大 token 数")
-    parser.add_argument("--tensor-parallel", type=int, default=2,
-                        help="张量并行数 (2×3090 → 2)")
+    parser.add_argument("--tensor-parallel", type=int, default=1,
+                        help="张量并行数 (单卡=1, 双卡=2)")
     parser.add_argument("--quant", choices=["awq", "gptq", "fp8"],
-                        default="awq", help="量化方法 (AWQ 推荐, 23%显存节省)")
+                        default="", help="量化方法 (留空=不量化; awq/gptq 需对应量化模型)")
     parser.add_argument("--dtype", default="auto",
                         help="数据类型 (auto/float16/bfloat16)")
     parser.add_argument("--lora-path", help="LoRA 适配器路径")
     parser.add_argument("--max-lora-rank", type=int, default=16,
                         help="LoRA 最大秩")
-    parser.add_argument("--enable-prefix-caching", action="store_true",
-                        default=True, help="启用前缀缓存 (共享 system prompt KV Cache)")
-    parser.add_argument("--no-quant", action="store_true",
-                        help="不使用量化 (FP16 模式, 需 TP=2)")
+    parser.add_argument("--disable-prefix-caching", action="store_true",
+                        default=False, help="禁用前缀缓存 (vLLM 0.7+ 默认已启用)")
 
     args = parser.parse_args()
-
-    if args.no_quant:
-        args.quant = ""
-        print("[INFO] FP16 模式 (不使用量化) — 需要双卡张量并行")
 
     cmd = build_args(args)
     print(f"[vLLM] 启动命令: {' '.join(cmd)}")
     print(f"[vLLM] API 地址: http://{args.host}:{args.port}/v1")
     print(f"[vLLM] 模型: {args.model}")
-    print(f"[vLLM] 量化: {args.quant or 'FP16'}")
+    print(f"[vLLM] 量化: {args.quant or 'FP16 (不量化)'}")
     print(f"[vLLM] 张量并行: TP={args.tensor_parallel}")
     print(f"[vLLM] 最大并发序列: {args.max_num_seqs}")
     print("-" * 60)

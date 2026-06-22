@@ -442,14 +442,13 @@ def _load_7b_model(lora_name: str = None):
         )
 
         logger.info(f"加载 Qwen2.5-7B (4bit)...")
-        _hutao_7b_tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=True)
+        _hutao_7b_tokenizer = AutoTokenizer.from_pretrained(base_model_path)
 
         base_model = AutoModelForCausalLM.from_pretrained(
             base_model_path,
             quantization_config=nf4_config,
             device_map="auto",
             low_cpu_mem_usage=True,
-            trust_remote_code=True,
         )
         _hutao_7b_model = PeftModel.from_pretrained(
             base_model, LORA_REGISTRY[lora_name]["path"], adapter_name=lora_name

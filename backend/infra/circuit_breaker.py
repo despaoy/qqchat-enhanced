@@ -230,6 +230,44 @@ class CircuitBreaker:
         """设置默认值，用于DEFAULT降级模式。"""
         self._default_value = value
 
+    async def record_success(self) -> None:
+        """记录一次成功调用（手动模式，用于流式等无法整体包裹的场景）。
+
+        与 call() 内部逻辑一致：成功在 HALF_OPEN → CLOSED，CLOSED 下重置失败计数。
+        必须由调用方在确认成功后显式调用。
+        """
+        async with self._lock:
+            self._stats.record_success()
+            if self._state == CircuitState.HALF_OPEN:
+                self._transition_to_closed()
+            elif self._state == CircuitState.CLOSED:
+                self._failure_count = 0
+
+    async def record_failure(self, error: Optional[Any] = None) -> None:
+        """记录一次失败调用（手动模式，用于流式等无法整体包裹的场景）。
+
+        与 call() 内部逻辑一致：失败在 HALF_OPEN → OPEN，CLOSED 下计数达阈值 → OPEN。
+        必须由调用方在捕获异常后显式调用。
+        """
+        async with self._lock:
+            self._stats.record_failure()
+            self._failure_count += 1
+            self._last_failure_time = time.monotonic()
+            if self._state == CircuitState.HALF_OPEN:
+                self._transition_to_open()
+            elif self._failure_count >= self.failure_threshold:
+                self._transition_to_open()
+        if error is not None:
+            logger.error(
+                "熔断器 [%s] 调用失败: %s (连续失败: %d/%d)",
+                self.name, error, self._failure_count, self.failure_threshold,
+            )
+
+    @property
+    def default_value(self) -> Any:
+        """DEFAULT/CACHE 降级时返回的默认值（读访问）。"""
+        return self._default_value
+
     async def call(self, func: Callable[..., Coroutine[Any, Any, Any]], *args: Any, **kwargs: Any) -> Any:
         """通过熔断器调用异步函数。
 

@@ -12,7 +12,8 @@ router = APIRouter()
 @router.get("/api/user/data")
 async def get_user_data(page_key: str = "", current_user: dict = Depends(get_current_user)):
     """获取用户表单数据"""
-    username = current_user.get("sub") or current_user.get("username", "unknown")
+    # get_current_user 返回 {"user_id": ..., "username": ...}（无 "sub" 键）
+    username = current_user.get("username") or "unknown"
 
     try:
         user = db.get_user_by_username(username)
@@ -40,7 +41,8 @@ async def get_user_data(page_key: str = "", current_user: dict = Depends(get_cur
 @router.put("/api/user/data")
 async def save_user_data(request: UserDataRequest, current_user: dict = Depends(get_current_user)):
     """保存用户表单数据"""
-    username = current_user.get("sub") or current_user.get("username", "unknown")
+    # get_current_user 返回 {"user_id": ..., "username": ...}（无 "sub" 键）
+    username = current_user.get("username") or "unknown"
 
     try:
         user = db.get_user_by_username(username)

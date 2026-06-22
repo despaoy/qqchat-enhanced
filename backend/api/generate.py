@@ -92,7 +92,7 @@ async def generate_reply(request: MessageRequest, current_user: dict = Depends(g
 
     # 输入验证
     if INPUT_VALIDATOR_AVAILABLE:
-        is_valid, errors = InputValidator.validate(request.dict(), MESSAGE_SCHEMA)
+        is_valid, errors = InputValidator.validate(request.model_dump(), MESSAGE_SCHEMA)
         if not is_valid:
             raise HTTPException(status_code=422, detail={"message": "输入验证失败", "errors": errors})
 
@@ -145,7 +145,7 @@ async def generate_reply(request: MessageRequest, current_user: dict = Depends(g
                 try:
                     cache_key = hashlib.md5(f"generate:{request.message}:{request.sessionId}".encode()).hexdigest()
                     prompt_hash = hashlib.md5(request.message.encode()).hexdigest()
-                    await response_cache.set(prompt_hash, cache_key, result.dict(), ttl=300)
+                    await response_cache.set(prompt_hash, cache_key, result.model_dump(), ttl=300)
                 except Exception as e:
                     logger.warning(f"vLLM缓存写入失败: {e}")
                     pass
@@ -240,7 +240,7 @@ async def generate_reply(request: MessageRequest, current_user: dict = Depends(g
             try:
                 cache_key = hashlib.md5(f"generate:{request.message}:{request.sessionId}".encode()).hexdigest()
                 prompt_hash = hashlib.md5(request.message.encode()).hexdigest()
-                await response_cache.set(prompt_hash, cache_key, result.dict(), ttl=300)
+                await response_cache.set(prompt_hash, cache_key, result.model_dump(), ttl=300)
             except Exception as e:
                 logger.warning(f"模型管理器缓存写入失败: {e}")
                 pass
