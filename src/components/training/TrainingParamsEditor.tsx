@@ -48,7 +48,7 @@ interface RequiredParams {
   datasetName: string;        // 选用已有数据集时使用
 }
 
-/** 高级参数（完整集合，与 custom_config 对齐） */
+/** 高级参数（完整集合，与后端 _build_config + LoRATrainingConfig 一一对应） */
 interface AdvancedParams {
   // LoRA 结构
   lora_rank: number;
@@ -58,13 +58,17 @@ interface AdvancedParams {
   // 训练策略
   learning_rate: number;
   lr_scheduler_type: 'cosine' | 'constant' | 'linear';
-  warmup_steps: number;         // 0 表示自动（5%）
+  warmup_ratio: number;          // 0.05 = 5% 步数预热（与 HuggingFace TrainingArguments 对齐）
   num_train_epochs: number;
   per_device_train_batch_size: number;
   gradient_accumulation_steps: number;
   max_seq_length: number;
   truncation_direction: 'right' | 'left';
   chat_template: boolean;
+  // 正则化与早停
+  weight_decay: number;
+  max_grad_norm: number;
+  early_stopping_patience: number;
   // 硬件与性能
   mixed_precision: 'fp16' | 'bf16' | 'no';
   use_8bit_adam: boolean;
@@ -97,13 +101,16 @@ const DEFAULT_ADVANCED: AdvancedParams = {
   lora_dropout: 0.05,
   learning_rate: 5e-5,
   lr_scheduler_type: 'cosine',
-  warmup_steps: 0,
+  warmup_ratio: 0.05,
   num_train_epochs: 3,
   per_device_train_batch_size: 2,
   gradient_accumulation_steps: 4,
   max_seq_length: 1024,
   truncation_direction: 'right',
   chat_template: true,
+  weight_decay: 0.01,
+  max_grad_norm: 0.5,
+  early_stopping_patience: 3,
   mixed_precision: 'fp16',
   use_8bit_adam: true,
   gradient_checkpointing: true,
@@ -194,9 +201,12 @@ function validateField(name: keyof AdvancedParams, value: number | string | bool
     case 'num_train_epochs':
     case 'per_device_train_batch_size':
     case 'gradient_accumulation_steps':
+    case 'early_stopping_patience':
       return Number.isInteger(value) && (value as number) >= 1 ? null : '必须为正整数';
-    case 'warmup_steps':
-      return Number.isInteger(value) && (value as number) >= 0 ? null : '必须为 0 或正整数';
+    case 'warmup_ratio': {
+      const n = value as number;
+      return n >= 0 && n <= 1 ? null : '预热比例须为 0~1（如 0.05 = 5%）';
+    }
     case 'max_seq_length': {
       const n = value as number;
       return Number.isInteger(n) && n >= 128 && n <= 8192 ? null : '序列长度须为 128~8192 的整数';
@@ -204,6 +214,14 @@ function validateField(name: keyof AdvancedParams, value: number | string | bool
     case 'lora_dropout': {
       const n = value as number;
       return n >= 0 && n <= 0.5 ? null : 'dropout 须在 0~0.5 之间';
+    }
+    case 'weight_decay': {
+      const n = value as number;
+      return n >= 0 && n <= 1 ? null : '权重衰减须在 0~1 之间';
+    }
+    case 'max_grad_norm': {
+      const n = value as number;
+      return n >= 0 ? null : '梯度裁剪值不能为负数';
     }
     default:
       return null;
@@ -411,28 +429,34 @@ export function TrainingParamsEditor({
       ? (uploadedFile?.name.replace(/\.(json|jsonl)$/i, '') ?? 'uploaded')
       : required.datasetName;
 
-    // 组装 custom_config（与后端 _build_config 字段对齐 + 新增字段透传）
+    // 组装 custom_config（与后端 _build_config 字段一一对应 + 新增字段透传）
     const customConfig: Record<string, unknown> = {
+      // 必填字段
       model_name_or_path: required.baseModel,
       output_dir: `${required.outputDir}/${required.outputModelName}`,
-      // 已有字段（后端 _build_config 会读取）
+      // LoRA 结构
       lora_rank: advanced.lora_rank,
       lora_alpha: advanced.lora_alpha,
       lora_dropout: advanced.lora_dropout,
+      target_modules: advanced.target_modules,
+      // 训练策略
       learning_rate: advanced.learning_rate,
+      lr_scheduler_type: advanced.lr_scheduler_type,
+      warmup_ratio: advanced.warmup_ratio,
       num_train_epochs: advanced.num_train_epochs,
       per_device_train_batch_size: advanced.per_device_train_batch_size,
       gradient_accumulation_steps: advanced.gradient_accumulation_steps,
       max_seq_length: advanced.max_seq_length,
+      truncation_direction: advanced.truncation_direction,
+      chat_template: advanced.chat_template,
+      // 正则化与早停
+      weight_decay: advanced.weight_decay,
+      max_grad_norm: advanced.max_grad_norm,
+      early_stopping_patience: advanced.early_stopping_patience,
+      // 硬件与性能
       fp16: advanced.mixed_precision === 'fp16',
       bf16: advanced.mixed_precision === 'bf16',
       use_gradient_checkpointing: advanced.gradient_checkpointing,
-      // 新增字段（透传，后端 _build_config 未读取的会原样写入 config_json）
-      target_modules: advanced.target_modules,
-      lr_scheduler_type: advanced.lr_scheduler_type,
-      warmup_steps: advanced.warmup_steps,
-      truncation_direction: advanced.truncation_direction,
-      chat_template: advanced.chat_template,
       use_8bit_adam: advanced.use_8bit_adam,
       use_deepspeed: advanced.use_deepspeed,
     };
@@ -740,15 +764,62 @@ export function TrainingParamsEditor({
                     </Select>
                   </FieldRow>
                   <FieldRow
-                    label="预热步数"
-                    hint="学习率从 0 线性增加的步数，0 表示自动（总步数 5%）"
-                    error={showErrors ? advancedErrors.warmup_steps : null}
+                    label="预热比例"
+                    hint="学习率线性增加到目标值的步数比例，0.05=5% 步数（与 HuggingFace warmup_ratio 对齐）"
+                    error={showErrors ? advancedErrors.warmup_ratio : null}
                   >
                     <Input
                       type="number"
-                      value={advanced.warmup_steps}
-                      onChange={(e) => updateAdvanced('warmup_steps', parseInt(e.target.value || '0', 10))}
-                      className={errClass(!!advancedErrors.warmup_steps)}
+                      step={0.01}
+                      min={0}
+                      max={1}
+                      value={advanced.warmup_ratio}
+                      onChange={(e) => updateAdvanced('warmup_ratio', parseFloat(e.target.value || '0'))}
+                      className={errClass(!!advancedErrors.warmup_ratio)}
+                    />
+                  </FieldRow>
+                  <FieldRow
+                    label="权重衰减"
+                    hint="权重衰减正则化系数（weight_decay），防止过拟合，常用 0.01"
+                    error={showErrors ? advancedErrors.weight_decay : null}
+                  >
+                    <Input
+                      type="number"
+                      step={0.001}
+                      min={0}
+                      max={1}
+                      value={advanced.weight_decay}
+                      onChange={(e) => updateAdvanced('weight_decay', parseFloat(e.target.value || '0'))}
+                      className={errClass(!!advancedErrors.weight_decay)}
+                    />
+                  </FieldRow>
+                  <FieldRow
+                    label="梯度裁剪"
+                    hint="梯度范数裁剪阈值（max_grad_norm），防止梯度爆炸，常用 0.5~1.0"
+                    error={showErrors ? advancedErrors.max_grad_norm : null}
+                  >
+                    <Input
+                      type="number"
+                      step={0.1}
+                      min={0}
+                      value={advanced.max_grad_norm}
+                      onChange={(e) => updateAdvanced('max_grad_norm', parseFloat(e.target.value || '0'))}
+                      className={errClass(!!advancedErrors.max_grad_norm)}
+                    />
+                  </FieldRow>
+                  <FieldRow
+                    label="早停耐心值"
+                    hint="验证指标连续不提升 N 轮后提前停止，0 表示不启用早停"
+                    error={showErrors ? advancedErrors.early_stopping_patience : null}
+                  >
+                    <Input
+                      type="number"
+                      step={1}
+                      min={0}
+                      max={20}
+                      value={advanced.early_stopping_patience}
+                      onChange={(e) => updateAdvanced('early_stopping_patience', parseInt(e.target.value || '0', 10))}
+                      className={errClass(!!advancedErrors.early_stopping_patience)}
                     />
                   </FieldRow>
                   <FieldRow

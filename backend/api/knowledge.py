@@ -243,7 +243,7 @@ async def upload_zip(kb_id: int, file: UploadFile = File(...), current_user: dic
             try:
                 from app.config import get_vector_db
                 vector_db = get_vector_db()
-                vector_db.add_documents(vector_docs)
+                await asyncio.to_thread(vector_db.add_documents, vector_docs)
             except Exception as ve:
                 logger.error(f"添加到向量数据库失败: {ve}")
 
@@ -448,12 +448,12 @@ async def import_scanned_directory(directory_name: str, kb_id: int = None, curre
                     try:
                         from app.config import get_vector_db
                         vector_db = get_vector_db()
-                        vector_db.add_documents(vector_docs)
+                        await asyncio.to_thread(vector_db.add_documents, vector_docs)
                     except Exception as ve:
                         logger.error(f"添加到向量数据库失败: {ve}")
-                
+
                 created_docs += 1
-                
+
             except Exception as e:
                 errors.append(f"处理文件 {file_path.name} 失败: {str(e)}")
     
@@ -521,10 +521,10 @@ async def import_scanned_directory(directory_name: str, kb_id: int = None, curre
                 try:
                     from app.config import get_vector_db
                     vector_db = get_vector_db()
-                    vector_db.add_documents(vector_docs)
+                    await asyncio.to_thread(vector_db.add_documents, vector_docs)
                 except Exception as ve:
                     logger.error(f"添加到向量数据库失败: {ve}")
-            
+
             created_docs += 1
         except Exception as e:
             errors.append(f"处理根目录文件 {file_path.name} 失败: {str(e)}")
@@ -652,7 +652,7 @@ async def create_knowledge_document(request: KnowledgeDocumentCreate, current_us
             try:
                 from app.config import get_vector_db
                 vector_db = get_vector_db()
-                vector_db.add_documents(vector_docs)
+                await asyncio.to_thread(vector_db.add_documents, vector_docs)
                 logger.info(f"文档已添加到向量数据库: {document['title']}")
             except Exception as ve:
                 logger.error(f"添加到向量数据库失败: {ve}")
@@ -760,8 +760,8 @@ async def update_knowledge_document(doc_id: int, request: KnowledgeDocumentUpdat
                     if old_chunk_ids:
                         from app.config import get_vector_db
                         vector_db = get_vector_db()
-                        vector_db.delete_documents(old_chunk_ids)
-                    vector_db.add_documents(vector_docs)
+                        await asyncio.to_thread(vector_db.delete_documents, old_chunk_ids)
+                    await asyncio.to_thread(vector_db.add_documents, vector_docs)
                     logger.info(f"文档 {doc_id} 向量数据库已更新")
                 except Exception as ve:
                     logger.warning(f"更新向量数据库失败: {ve}")
@@ -797,7 +797,7 @@ async def delete_knowledge_document(doc_id: int, current_user: dict = Depends(ge
                     chunk_id = f"doc_{doc_id}_chunk_{chunk.get('chunkIndex', chunk.get('id', 0))}"
                     chunk_ids.append(chunk_id)
                 if chunk_ids:
-                    vector_db.delete_documents(chunk_ids)
+                    await asyncio.to_thread(vector_db.delete_documents, chunk_ids)
             except Exception as ve:
                 logger.warning(f"从向量数据库删除文档失败: {ve}")
 
@@ -884,19 +884,35 @@ def _ensure_vector_index():
 
 @router.post("/api/knowledge/search")
 async def search_knowledge(request: KnowledgeSearchRequest):
-    """搜索知识库 - 使用 RAGHelper 两阶段检索（向量+BM25混合 → Cross-Encoder精排）"""
+    """搜索知识库 - 使用 RAGHelper 两阶段检索（向量+BM25混合 → Cross-Encoder精排）
+
+    支持通过 knowledgeBaseName 按指定知识库过滤检索结果，
+    用于意图分类器路由后的精准检索。
+    """
     try:
         query = request.query
         top_k = request.topK
 
-        # 首次搜索时确保向量索引已构建
-        _ensure_vector_index()
+        # 构造检索过滤器：如果指定了知识库名称，则按 knowledge_base_id 过滤
+        filters = None
+        if request.knowledgeBaseName:
+            # 查询知识库名称对应的ID
+            all_bases = db.get_knowledge_bases()
+            matched = [b for b in all_bases if b["name"] == request.knowledgeBaseName]
+            if matched:
+                filters = {"knowledge_base_id": matched[0]["id"]}
+                logger.info(f"搜索过滤: 知识库「{request.knowledgeBaseName}」(id={matched[0]['id']})")
+            else:
+                logger.warning(f"未找到知识库「{request.knowledgeBaseName}」，不应用过滤")
 
-        # 优先使用 RAGHelper 完整管线
+        # 首次搜索时确保向量索引已构建（同步操作，放线程池避免阻塞事件循环）
+        await asyncio.to_thread(_ensure_vector_index)
+
+        # 优先使用 RAGHelper 完整管线（retrieve_context 是同步阻塞的 CPU 密集型操作）
         try:
             from knowledge.rag_helper import get_rag_helper
             rag = get_rag_helper()
-            results = rag.retrieve_context(query, top_k=top_k, enable_rerank=True)
+            results = await asyncio.to_thread(rag.retrieve_context, query, top_k, True, filters, None)
             if results:
                 formatted = []
                 for r in results:
@@ -912,12 +928,14 @@ async def search_knowledge(request: KnowledgeSearchRequest):
         except Exception as e:
             logger.warning(f"RAGHelper检索失败，回退向量检索: {e}")
 
-        # 回退：向量检索
+        # 回退：向量检索（hybrid_search 同步阻塞，放线程池）
         if VECTOR_DB_AVAILABLE:
             try:
                 from app.config import get_vector_db
                 vector_db = get_vector_db()
-                vector_results = vector_db.hybrid_search(query, top_k=top_k)
+                vector_results = await asyncio.to_thread(
+                    lambda: vector_db.hybrid_search(query, top_k=top_k, filters=filters)
+                )
                 if vector_results:
                     formatted = []
                     for r in vector_results:
@@ -987,7 +1005,7 @@ async def get_vector_stats(current_user: dict = Depends(get_current_user)):
     try:
         from app.config import get_vector_db
         vector_db = get_vector_db()
-        stats = vector_db.get_stats()
+        stats = await asyncio.to_thread(vector_db.get_stats)
         return {"success": True, "stats": stats}
     except Exception as e:
         logger.error(f"获取向量数据库统计失败: {e}")

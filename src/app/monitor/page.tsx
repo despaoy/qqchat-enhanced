@@ -55,8 +55,22 @@ function MonitorContent() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
 
-    const interval = setInterval(() => fetchData(true), 10000);
-    return () => clearInterval(interval);
+    // 标签页隐藏时跳过轮询，可见时恢复，减少后台无效请求
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      fetchData(true);
+    }, 10000);
+
+    // 标签页重新可见时立即刷新一次，保证数据最新
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchData(true);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [fetchData]);
 
   const formatBytes = (gb: number) => `${gb.toFixed(1)}GB`;

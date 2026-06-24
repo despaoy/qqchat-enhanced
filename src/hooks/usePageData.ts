@@ -20,6 +20,13 @@ export function usePageData<T extends Record<string, unknown>>(
   const initializedRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // 用 ref 保存最新的 savePageData，避免其引用变化触发自动保存 effect 重跑
+  // （savePageData 依赖 user/loading，若进入 effect 依赖会形成潜在循环）
+  const savePageDataRef = useRef(savePageData);
+  useEffect(() => {
+    savePageDataRef.current = savePageData;
+  }, [savePageData]);
+
   // 初始化：从 localStorage 或后端加载数据
   useEffect(() => {
     if (initializedRef.current) return;
@@ -47,24 +54,22 @@ export function usePageData<T extends Record<string, unknown>>(
     loadData();
   }, [pageKey, defaultData, loadPageData]);
 
-  // 自动保存：数据变化后延迟保存
+  // 手动保存：先 localStorage 再后端
   const saveData = useCallback(async () => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
     }
-    // 先保存到 localStorage（即时）
     localStorage.setItem(`qq_assistant_data_${pageKey}`, JSON.stringify(data));
-    // 再保存到后端
     if (user) {
       try {
-        await savePageData(pageKey, data);
+        await savePageDataRef.current(pageKey, data);
       } catch (err) {
         console.error('Failed to save page data to server:', err);
       }
     }
-  }, [data, pageKey, user, savePageData]);
+  }, [data, pageKey, user]);
 
-  // 数据变化时自动延迟保存
+  // 数据变化时自动延迟保存（1秒防抖）
   useEffect(() => {
     if (!initializedRef.current) return;
     if (saveTimerRef.current) {
@@ -73,18 +78,18 @@ export function usePageData<T extends Record<string, unknown>>(
     saveTimerRef.current = setTimeout(() => {
       localStorage.setItem(`qq_assistant_data_${pageKey}`, JSON.stringify(data));
       if (user) {
-        savePageData(pageKey, data).catch(err => {
+        savePageDataRef.current(pageKey, data).catch(err => {
           console.error('Auto-save failed:', err);
         });
       }
-    }, 1000); // 1秒防抖
+    }, 1000);
 
     return () => {
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
       }
     };
-  }, [data, pageKey, user, savePageData]);
+  }, [data, pageKey, user]);
 
   return [data, setData, saveData];
 }

@@ -117,6 +117,7 @@ class KnowledgeSearchRequest(BaseModel):
     """知识库搜索请求"""
     query: str
     topK: int = 5
+    knowledgeBaseName: Optional[str] = None  # 按知识库名称过滤检索结果
 
 
 class KnowledgeSearchResult(BaseModel):

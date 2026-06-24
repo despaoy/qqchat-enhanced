@@ -198,6 +198,7 @@ async def get_services():
     # 检查各个服务
     backend_running = True  # 我们自己肯定在运行
     nonebot_running = _check_service(8081)  # NoneBot运行在8081端口
+    napcat_running = _check_service(6099)   # NapCat HTTP API 默认端口 6099
 
     return {
         "services": [
@@ -223,8 +224,8 @@ async def get_services():
             },
             {
                 "name": "NapCat",
-                "status": "connecting",
-                "uptime": "-"
+                "status": "running" if napcat_running else "stopped",
+                "uptime": uptime_str if napcat_running else "-"
             }
         ]
     }

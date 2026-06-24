@@ -10,33 +10,36 @@
  * - 快捷操作入口（测试回复、切换模型、重启服务、管理会话）
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { StatCard } from '@/components/dashboard/StatCard';
-import { ActivityChart } from '@/components/dashboard/ActivityChart';
-import { MessageSquare, Zap, Clock, Users, BrainCircuit, RefreshCw, AlertCircle, Send, Bot, User, Trash2, MessageCircle, LogIn } from 'lucide-react';
+import { TestChatDialog } from '@/components/dashboard/TestChatDialog';
+import { SessionManagerDialog } from '@/components/dashboard/SessionManagerDialog';
+import { MessageSquare, Zap, Clock, Users, BrainCircuit, RefreshCw, AlertCircle, LogIn } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Switch } from '@/components/ui/switch';
 import { useStats } from '@/hooks/useStats';
 import { useLoras } from '@/hooks/useLoras';
 import { useServices } from '@/hooks/useServices';
-import { api, type SessionSummary } from '@/lib/api';
+import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 
-interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-  loraName?: string;
-  costTime?: number;
-}
+// 懒加载 ActivityChart：recharts 是重依赖（~200KB），仅在仪表盘可见时加载
+const ActivityChart = dynamic(
+  () => import('@/components/dashboard/ActivityChart').then(m => ({ default: m.ActivityChart })),
+  {
+    loading: () => (
+      <Card>
+        <CardHeader><CardTitle>今日活动趋势</CardTitle></CardHeader>
+        <CardContent><div className="h-[300px]"><Skeleton className="h-full w-full" /></div></CardContent>
+      </Card>
+    ),
+    ssr: false,
+  }
+);
 
 export default function DashboardClient() {
   const { user, loading: authLoading } = useAuth();
@@ -44,99 +47,14 @@ export default function DashboardClient() {
   const { loras } = useLoras(!!user && !authLoading);
   const { services, loading: servicesLoading, error: servicesError, refetch: refetchServices } = useServices(!!user && !authLoading);
 
-  // 测试对话状态
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
-  const [selectedLora, setSelectedLora] = useState('');
-  const [sessionType, setSessionType] = useState<'private' | 'group'>('private');
-  const [chatDialogOpen, setChatDialogOpen] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
-
-  // 管理会话状态
-  const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [sessionLoading, setSessionLoading] = useState(false);
-  const [sessionFilter, setSessionFilter] = useState<'all' | 'private' | 'group'>('all');
-
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
   }, []);
 
-  // 聊天消息自动滚动到底部
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
-
   // 获取当前激活的LoRA
   const activeLora = loras.find(lora => lora.status === 'active');
-
-  // 发送聊天消息
-  const handleSendMessage = async () => {
-    if (!chatInput.trim() || chatLoading) return;
-
-    const userMsg: ChatMessage = { role: 'user', content: chatInput };
-    setChatMessages(prev => [...prev, userMsg]);
-    setChatInput('');
-    setChatLoading(true);
-
-    try {
-      const response = await api.generateReply({
-        message: chatInput,
-        sessionType,
-        sessionId: sessionType === 'group' ? 'test-group' : 'test-private',
-        userId: 'dashboard-user',
-        userName: sessionType === 'group' ? '群成员' : '测试用户',
-        loraName: selectedLora || undefined,
-      });
-      const botMsg: ChatMessage = {
-        role: 'assistant',
-        content: response.reply,
-        loraName: selectedLora || 'default',
-        costTime: response.costTime,
-      };
-      setChatMessages(prev => [...prev, botMsg]);
-    } catch (err) {
-      console.error('Failed to generate reply:', err);
-      setChatMessages(prev => [...prev, { role: 'assistant', content: '生成失败，请稍后重试' }]);
-    } finally {
-      setChatLoading(false);
-    }
-  };
-
-  // 加载会话列表
-  const loadSessions = async () => {
-    setSessionLoading(true);
-    try {
-      const data = await api.getSessionSummaries();
-      setSessions(data.sessions);
-    } catch {
-      // ignore
-    } finally {
-      setSessionLoading(false);
-    }
-  };
-
-  // 切换会话机器人开关
-  const handleToggleBot = async (sessionId: string, enabled: boolean) => {
-    try {
-      await api.toggleSessionBot(sessionId, enabled);
-      setSessions(prev => prev.map(s =>
-        s.sessionId === sessionId ? { ...s, botEnabled: enabled } : s
-      ));
-    } catch {
-      // ignore
-    }
-  };
-
-  // 打开会话管理对话框时加载数据
-  useEffect(() => {
-    if (sessionDialogOpen) {
-      loadSessions();
-    }
-  }, [sessionDialogOpen]);
 
   if (statsError) {
     return (
@@ -336,129 +254,8 @@ export default function DashboardClient() {
           </CardHeader>
           <CardContent className="grid gap-4">
             <div className="grid grid-cols-2 gap-3">
-              {/* 测试回复 - 聊天式对话 */}
-              <Dialog open={chatDialogOpen} onOpenChange={setChatDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="ghost" className="flex flex-col items-center justify-center rounded-lg border p-4 h-auto hover:bg-muted transition-colors">
-                    <MessageSquare className="h-6 w-6 mb-2 text-primary" />
-                    <span className="text-sm font-medium">测试回复</span>
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-[550px] max-h-[85vh] flex flex-col">
-                  <DialogHeader>
-                    <DialogTitle>测试机器人回复</DialogTitle>
-                    <DialogDescription>
-                      模拟私聊或群聊场景，测试不同LoRA的回复效果
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="space-y-3 overflow-y-auto flex-1 min-h-0">
-                    {/* 配置栏 */}
-                    <div className="flex gap-2">
-                      <Select value={sessionType} onValueChange={(v) => setSessionType(v as 'private' | 'group')}>
-                        <SelectTrigger className="w-[100px] h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="private">私聊</SelectItem>
-                          <SelectItem value="group">群聊</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Select value={selectedLora} onValueChange={setSelectedLora}>
-                        <SelectTrigger className="flex-1 h-8 text-xs">
-                          <SelectValue placeholder="选择LoRA模型" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="default">基础模型（无LoRA）</SelectItem>
-                          {loras.map((lora) => (
-                            <SelectItem key={lora.id} value={lora.name}>
-                              {lora.name} {lora.status === 'active' ? '(激活)' : ''}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0"
-                        onClick={() => setChatMessages([])}
-                        title="清空对话"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-
-                    <Separator />
-
-                    {/* 聊天区域 */}
-                    <ScrollArea className="h-[300px] rounded-lg border p-3">
-                      {chatMessages.length === 0 ? (
-                        <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                          发送一条消息开始测试
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          {chatMessages.map((msg, i) => (
-                            <div key={i} className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                              {msg.role === 'assistant' && (
-                                <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center bg-purple-100 text-purple-700">
-                                  <Bot className="h-3.5 w-3.5" />
-                                </div>
-                              )}
-                              <div className={`max-w-[75%] rounded-lg p-2.5 text-sm ${
-                                msg.role === 'user'
-                                  ? 'bg-primary text-primary-foreground'
-                                  : 'bg-muted'
-                              }`}>
-                                <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-                                {msg.role === 'assistant' && msg.costTime && (
-                                  <p className="text-[10px] text-muted-foreground mt-1">
-                                    {msg.loraName || 'default'} · {msg.costTime}s
-                                  </p>
-                                )}
-                              </div>
-                              {msg.role === 'user' && (
-                                <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center bg-blue-100 text-blue-700">
-                                  <User className="h-3.5 w-3.5" />
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                          {chatLoading && (
-                            <div className="flex gap-2 justify-start">
-                              <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center bg-purple-100 text-purple-700">
-                                <Bot className="h-3.5 w-3.5" />
-                              </div>
-                              <div className="bg-muted rounded-lg p-2.5 text-sm text-muted-foreground">
-                                正在思考...
-                              </div>
-                            </div>
-                          )}
-                          <div ref={chatEndRef} />
-                        </div>
-                      )}
-                    </ScrollArea>
-
-                    {/* 输入区域 */}
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder={sessionType === 'group' ? '在群聊中发送消息...' : '发送消息...'}
-                        value={chatInput}
-                        onChange={(e) => setChatInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            handleSendMessage();
-                          }
-                        }}
-                        disabled={chatLoading}
-                      />
-                      <Button size="icon" onClick={handleSendMessage} disabled={chatLoading || !chatInput.trim()}>
-                        <Send className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
+              {/* 测试回复 - 聊天式对话（已拆分为独立组件，隔离输入状态） */}
+              <TestChatDialog loras={loras} />
 
               {/* 切换模型 */}
               <Dialog>
@@ -520,102 +317,8 @@ export default function DashboardClient() {
                 <span className="text-sm font-medium">重启服务</span>
               </Button>
 
-              {/* 管理会话 */}
-              <Dialog open={sessionDialogOpen} onOpenChange={setSessionDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="ghost" className="flex flex-col items-center justify-center rounded-lg border p-4 h-auto hover:bg-muted transition-colors">
-                    <Users className="h-6 w-6 mb-2 text-primary" />
-                    <span className="text-sm font-medium">管理会话</span>
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-[650px] max-h-[85vh] flex flex-col">
-                  <DialogHeader>
-                    <DialogTitle>会话管理</DialogTitle>
-                    <DialogDescription>
-                      查看各会话的对话概况，控制机器人在各会话中的启用状态
-                    </DialogDescription>
-                  </DialogHeader>
-                  {/* 筛选栏 */}
-                  <div className="flex items-center gap-2">
-                    <Select value={sessionFilter} onValueChange={(v) => setSessionFilter(v as 'all' | 'private' | 'group')}>
-                      <SelectTrigger className="w-[120px] h-8 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">全部会话</SelectItem>
-                        <SelectItem value="private">私聊</SelectItem>
-                        <SelectItem value="group">群聊</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <div className="flex-1" />
-                    <Button variant="secondary" size="sm" onClick={loadSessions} disabled={sessionLoading}>
-                      <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${sessionLoading ? 'animate-spin' : ''}`} />
-                      刷新
-                    </Button>
-                  </div>
-                  <ScrollArea className="h-[420px]">
-                    {sessionLoading ? (
-                      <div className="space-y-3 p-2">
-                        {[1, 2, 3, 4].map((i) => (
-                          <Skeleton key={i} className="h-24 w-full" />
-                        ))}
-                      </div>
-                    ) : sessions.filter(s => sessionFilter === 'all' || s.sessionType === sessionFilter).length === 0 ? (
-                      <div className="text-center py-12 text-muted-foreground">
-                        <Users className="h-10 w-10 mx-auto mb-3 opacity-30" />
-                        <p>暂无会话记录</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-2 p-1">
-                        {sessions
-                          .filter(s => sessionFilter === 'all' || s.sessionType === sessionFilter)
-                          .map((session) => (
-                          <div key={session.sessionId} className="border rounded-lg p-3 hover:bg-accent/50 transition-colors">
-                            {/* 头部：会话名 + 类型 + 开关 */}
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <div className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center ${
-                                  session.sessionType === 'group' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
-                                }`}>
-                                  {session.sessionType === 'group' ? <Users className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="text-sm font-medium truncate">{session.sessionName}</div>
-                                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                                    <Badge variant={session.sessionType === 'group' ? 'default' : 'secondary'} className="text-[10px] px-1.5 py-0">
-                                      {session.sessionType === 'group' ? '群聊' : '私聊'}
-                                    </Badge>
-                                    <span>{session.messageCount} 条消息</span>
-                                    <span>·</span>
-                                    <span>{new Date(session.lastActive).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2 shrink-0">
-                                <Label htmlFor={`bot-${session.sessionId}`} className="text-xs text-muted-foreground cursor-pointer">
-                                  机器人
-                                </Label>
-                                <Switch
-                                  id={`bot-${session.sessionId}`}
-                                  checked={session.botEnabled}
-                                  onCheckedChange={(checked) => handleToggleBot(session.sessionId, checked)}
-                                />
-                              </div>
-                            </div>
-                            {/* 摘要 */}
-                            {session.summary && (
-                              <div className="flex gap-1.5 text-xs text-muted-foreground bg-muted/50 rounded px-2 py-1.5">
-                                <MessageCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                                <p className="line-clamp-2">{session.summary}</p>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </ScrollArea>
-                </DialogContent>
-              </Dialog>
+              {/* 管理会话（已拆分为独立组件，隔离会话列表状态） */}
+              <SessionManagerDialog />
             </div>
           </CardContent>
         </Card>

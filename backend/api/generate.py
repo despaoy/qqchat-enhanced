@@ -28,6 +28,39 @@ _vllm_initialized = False
 _vllm_init_lock = asyncio.Lock()
 
 
+def _resolve_kb_id(kb_name: str):
+    """根据知识库名称查询其ID，用于RAG检索过滤
+
+    优先从意图分类器模型的config中读取映射（训练时保存），
+    回退到数据库实时查询。
+    """
+    # 优先从模型config读取（训练时保存的映射，避免每次查库）
+    try:
+        from pathlib import Path
+        config_path = Path(__file__).parent.parent / "intent_classifier_model" / "config.json"
+        if config_path.exists():
+            import json
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            kb_name_to_id = config.get("kb_name_to_id", {})
+            if kb_name in kb_name_to_id:
+                return kb_name_to_id[kb_name]
+    except Exception as e:
+        logger.debug(f"从模型config读取KB映射失败: {e}")
+
+    # 回退到数据库查询
+    try:
+        from db.adapter import db
+        bases = db.get_knowledge_bases()
+        for b in bases:
+            if b["name"] == kb_name:
+                return b["id"]
+    except Exception as e:
+        logger.warning(f"数据库查询KB ID失败: {e}")
+
+    return None
+
+
 async def _ensure_vllm():
     """延迟初始化 vLLM 客户端，确保 .env 已加载（带锁防竞态）"""
     global _vllm_client, _vllm_initialized
@@ -248,7 +281,7 @@ async def generate_reply(request: MessageRequest, current_user: dict = Depends(g
         return result
 
     except Exception as e:
-        logger.error(f"生成回复失败: {e}")
+        logger.error(f"生成回复失败: {e}", exc_info=True)
         if failover_mgr:
             try:
                 fallback_provider = await failover_mgr.check_and_failover()
@@ -256,7 +289,9 @@ async def generate_reply(request: MessageRequest, current_user: dict = Depends(g
                     logger.info(f"故障转移至: {fallback_provider}")
             except Exception as fe:
                 logger.warning(f"故障转移失败: {fe}")
-        raise HTTPException(status_code=500, detail=f"生成回复失败: {str(e)}")
+        # 安全：不把内部异常字符串返回给客户端（信息泄露），
+        # 真实详情已写入日志（含 exc_info=True），客户端只收到通用消息。
+        raise HTTPException(status_code=500, detail="生成回复失败，请稍后重试")
 
 
 # ═══════════════════════════════════════════
@@ -273,14 +308,21 @@ async def _generate_with_vllm(request: MessageRequest, lora_name: str) -> str:
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
 
-    # RAG 检索（如果启用）
+    # RAG 检索（如果启用）- 同步阻塞操作放线程池避免阻塞事件循环
     rag_context = ""
     try:
         from knowledge.rag_helper import rag_build_prompt
         from knowledge.intent_detector import needs_rag
-        need_rag, _ = needs_rag(request.message)
+        need_rag, _, kb_name = await asyncio.to_thread(needs_rag, request.message)
         if need_rag:
-            rag_context = rag_build_prompt(request.message, top_k=3)
+            # 按预测的KB名称构造过滤条件，仅检索该知识库的内容
+            filters = None
+            if kb_name:
+                kb_id = _resolve_kb_id(kb_name)
+                if kb_id is not None:
+                    filters = {"knowledge_base_id": kb_id}
+                    logger.info(f"RAG路由: 消息→「{kb_name}」(id={kb_id})")
+            rag_context = await asyncio.to_thread(rag_build_prompt, request.message, 3, filters)
     except Exception as e:
         logger.warning(f"RAG检索失败: {e}")
         pass
