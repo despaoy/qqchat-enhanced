@@ -74,6 +74,7 @@ async def lifespan(app: FastAPI):
     # 初始化数据库
     # SQLiteDB 在 __init__ 中已通过 _init_database() 完成建表，无独立 init() 方法。
     # 此处仅做一次连接探活（SELECT 1），确认数据库文件可读写。
+    # 重要：初始化失败应阻断启动，防止服务带病运行（容器编排会自动重启）。
     try:
         if hasattr(db, "init"):
             db.init()
@@ -81,7 +82,8 @@ async def lifespan(app: FastAPI):
         conn.execute("SELECT 1")
         logger.info("✅ 数据库初始化完成")
     except Exception as e:
-        logger.error(f"数据库初始化失败: {e}")
+        logger.critical(f"❌ 数据库初始化失败，服务无法启动: {e}", exc_info=True)
+        raise RuntimeError(f"数据库初始化失败: {e}") from e
 
     # 初始化 Redis 缓存（可选，失败不影响服务）
     try:

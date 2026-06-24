@@ -278,6 +278,12 @@ class SQLiteDB:
         cursor.execute('PRAGMA synchronous=NORMAL')
         cursor.execute('PRAGMA cache_size=-8000')  # 8MB cache
         cursor.execute('PRAGMA temp_store=MEMORY')
+        
+        # 为高频查询建索引：按 sessionId 查消息，避免全表扫
+        try:
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_messages_sessionId_createdAt ON messages(sessionId, createdAt)')
+        except Exception:
+            pass  # 索引已存在或 SQLite 版本不支，不影响功能
 
         # 初始化LoRA数据（如果表为空）
         cursor.execute('SELECT COUNT(*) FROM loras')
@@ -539,17 +545,30 @@ class SQLiteDB:
         for key, value in default_config.items():
             cursor.execute('INSERT INTO config (key, value) VALUES (?, ?)', (key, value))
     
-    def get_messages(self, limit: int = 100, offset: int = 0):
-        """获取消息记录"""
+    def get_messages(self, limit: int = 100, offset: int = 0, session_id: str | None = None):
+        """获取消息记录，支持按会话 ID 筛选。
+        
+        Args:
+            limit: 返回条数上限
+            offset: 偏移量
+            session_id: 可选，指定会话 ID 时在 SQL 层过滤（避免全表拉取再 Python 过滤）
+        """
         conn = self._get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
-            SELECT * FROM messages 
-            ORDER BY createdAt DESC 
-            LIMIT ? OFFSET ?
-        ''', (limit, offset))
+        if session_id:
+            cursor.execute('''
+                SELECT * FROM messages 
+                WHERE sessionId = ?
+                ORDER BY createdAt DESC 
+                LIMIT ? OFFSET ?
+            ''', (session_id, limit, offset))
+        else:
+            cursor.execute('''
+                SELECT * FROM messages 
+                ORDER BY createdAt DESC 
+                LIMIT ? OFFSET ?
+            ''', (limit, offset))
         rows = cursor.fetchall()
-        
         messages = []
         for row in rows:
             messages.append(dict(row))

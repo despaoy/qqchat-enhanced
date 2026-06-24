@@ -16,7 +16,7 @@
  *   - deleteLora: 删除指定 LoRA 模型
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api, LoraModel } from '@/lib/api';
 
 export function useLoras(enabled = true) {
@@ -25,7 +25,7 @@ export function useLoras(enabled = true) {
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchLoras = async () => {
+  const fetchLoras = useCallback(async () => {
     if (!enabled) return;
     try {
       setLoading(true);
@@ -39,7 +39,7 @@ export function useLoras(enabled = true) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [enabled]);
 
   const toggleLoraStatus = async (id: string) => {
     try {
@@ -81,9 +81,8 @@ export function useLoras(enabled = true) {
       setLoading(false);
       return;
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchLoras();
-  }, [enabled]);
+  }, [enabled, fetchLoras]);
 
   return {
     loras,

@@ -17,6 +17,15 @@ if config.config_file_name is not None:
 
 # 从环境变量覆盖数据库URL
 db_url = os.getenv("ALEMBIC_DATABASE_URL")
+if not db_url:
+    # 兼容 Dockerfile 中的 PG_* 环境变量，自动构建连接串
+    pg_host = os.getenv("PG_HOST", "localhost")
+    pg_port = os.getenv("PG_PORT", "5432")
+    pg_user = os.getenv("PG_USER", "qqassistant")
+    pg_password = os.getenv("PG_PASSWORD", "")
+    pg_database = os.getenv("PG_DATABASE", "qqassistant")
+    if pg_password:
+        db_url = f"postgresql+asyncpg://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_database}"
 if db_url:
     config.set_main_option("sqlalchemy.url", db_url)
 

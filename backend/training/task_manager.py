@@ -291,26 +291,54 @@ class SimpleLoRATrainer:
 
         dataset_file = self._find_dataset_file(dataset_path)
 
-        train_config = LoRATrainingConfig(
-            base_model_path=config.get("model_name_or_path", _resolve_model_path("BASE_MODEL_PATH", "models/Qwen2.5-7B-Instruct")),
-            train_data_path=str(dataset_file),
-            output_dir=str(self.loras_dir / lora_name),
-            lora_r=config.get("lora_rank", 16),
-            lora_alpha=config.get("lora_alpha", 32),
-            lora_dropout=config.get("lora_dropout", 0.1),
-            learning_rate=config.get("learning_rate", 3e-4),
-            num_train_epochs=int(config.get("num_train_epochs", 3)),
-            per_device_train_batch_size=config.get("per_device_train_batch_size", 2),
-            gradient_accumulation_steps=config.get("gradient_accumulation_steps", 4),
-            max_seq_length=config.get("max_seq_length", 512),
-            warmup_ratio=config.get("warmup_ratio", 0.05),
-            weight_decay=config.get("weight_decay", 0.01),
-            max_grad_norm=config.get("max_grad_norm", 0.5),
-            early_stopping_patience=config.get("early_stopping_patience", 3),
-            fp16=config.get("fp16", True),
-            bf16=config.get("bf16", False),
-            gradient_checkpointing=config.get("use_gradient_checkpointing", True),
-        )
+        # 已知字段从 config dict 提取（前端 TrainingParamsEditor 发送 + 预设兜底）
+        kwargs: Dict[str, Any] = {
+            "base_model_path": config.get("model_name_or_path", _resolve_model_path("BASE_MODEL_PATH", "models/Qwen2.5-7B-Instruct")),
+            "train_data_path": str(dataset_file),
+            "output_dir": str(self.loras_dir / lora_name),
+            "lora_r": config.get("lora_rank", 16),
+            "lora_alpha": config.get("lora_alpha", 32),
+            "lora_dropout": config.get("lora_dropout", 0.1),
+            "learning_rate": config.get("learning_rate", 3e-4),
+            "num_train_epochs": int(config.get("num_train_epochs", 3)),
+            "per_device_train_batch_size": config.get("per_device_train_batch_size", 2),
+            "gradient_accumulation_steps": config.get("gradient_accumulation_steps", 4),
+            "max_seq_length": config.get("max_seq_length", 512),
+            "fp16": config.get("fp16", True),
+            "bf16": config.get("bf16", False),
+            "gradient_checkpointing": config.get("use_gradient_checkpointing", True),
+            # 以下字段前端可能发送，后端读取时兜底默认值
+            "warmup_ratio": float(config.get("warmup_ratio", 0.05)),
+            "weight_decay": float(config.get("weight_decay", 0.01)),
+            "max_grad_norm": float(config.get("max_grad_norm", 0.5)),
+            "early_stopping_patience": int(config.get("early_stopping_patience", 3)),
+        }
+
+        # 透传前端可能发送的额外字段（LoRATrainingConfig 可能支持）
+        extra_keys = {
+            "target_modules", "lr_scheduler_type", "truncation_direction",
+            "chat_template", "use_8bit_adam", "use_deepspeed",
+            "lora_target_modules", "load_in_4bit", "load_in_8bit",
+            "use_cache", "preprocessing_num_workers", "dataloader_num_workers",
+            "logging_steps", "save_steps", "eval_steps", "save_total_limit",
+        }
+        for key in extra_keys:
+            if key in config:
+                kwargs[key] = config[key]
+
+        # 透传 config 中任何未被显式提取的字段（未来扩展兼容）
+        known = {
+            "model_name_or_path", "lora_rank", "lora_alpha", "lora_dropout",
+            "learning_rate", "num_train_epochs", "per_device_train_batch_size",
+            "gradient_accumulation_steps", "max_seq_length", "fp16", "bf16",
+            "use_gradient_checkpointing", "warmup_ratio", "weight_decay",
+            "max_grad_norm", "early_stopping_patience",
+        } | extra_keys
+        for key, value in config.items():
+            if key not in known and key not in kwargs:
+                kwargs[key] = value
+
+        train_config = LoRATrainingConfig(**kwargs)
 
         return train_config
 

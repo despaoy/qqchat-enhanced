@@ -147,12 +147,11 @@ class SessionHistory:
     def _load_from_db(self, session_id: str):
         """从数据库恢复最近N轮对话（通过db.adapter）"""
         try:
-            messages = db.get_messages(limit=10)
-            # 过滤当前会话的消息
-            session_msgs = [
-                m for m in reversed(messages)
-                if m.get('sessionId') == session_id
-            ][:10]
+            # 修复：使用 SQL 层 session_id 过滤，避免取全局最近 10 条后 Python 过滤
+            #   原实现 db.get_messages(limit=10) 取全局前 10 条 → 若当前会话不在前 10 则颗粒无收
+            messages = db.get_messages(limit=10, session_id=session_id)
+            # 按时间正序排列（SQL 返回 DESC，reversed 后为 ASC——最早→最新）
+            session_msgs = list(reversed(messages))
 
             result = []
             for msg in session_msgs:
@@ -225,15 +224,25 @@ claw_sessions: Dict[str, bool] = {}
 # ============================================
 RAG_AVAILABLE = True  # 始终可用（通过HTTP API）
 
-async def _rag_search_via_api(query: str, top_k: int = 5) -> str:
-    """通过后端API进行RAG检索（使用后端进程的向量数据库实例）"""
+async def _rag_search_via_api(query: str, top_k: int = 5, kb_name: Optional[str] = None) -> str:
+    """通过后端API进行RAG检索（使用后端进程的向量数据库实例）
+
+    Args:
+        query: 查询文本
+        top_k: 返回结果数
+        kb_name: 可选的知识库名称，用于按KB过滤检索结果
+    """
     try:
         import httpx
         api_base = config.API_BASE_URL
+        # 构造请求体，如果指定了KB名称则传递 knowledgeBaseName 供后端过滤
+        payload = {"query": query, "topK": top_k}
+        if kb_name:
+            payload["knowledgeBaseName"] = kb_name
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 f"{api_base}/api/knowledge/search",
-                json={"query": query, "topK": top_k},
+                json=payload,
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -286,14 +295,15 @@ async def generate_with_ollama(prompt: str, session_id: Optional[str] = None) ->
 
         if RAG_INTENT_DETECTOR_AVAILABLE:
             try:
-                need_rag, rag_reason = needs_rag(prompt)
-                logger.info(f"RAG意图检测结果: 需要RAG={need_rag}, 原因: {rag_reason}")
+                need_rag, rag_reason, kb_name = needs_rag(prompt)
+                logger.info(f"RAG意图检测结果: 需要RAG={need_rag}, 原因: {rag_reason}, KB={kb_name}")
             except Exception as e:
                 logger.warning(f"RAG意图检测失败: {e}")
                 need_rag = True
+                kb_name = None
 
         if need_rag:
-            rag_context = await _rag_search_via_api(prompt, top_k=5)
+            rag_context = await _rag_search_via_api(prompt, top_k=5, kb_name=kb_name)
             rag_status = f"成功（{rag_reason}）" if rag_context else f"无结果（{rag_reason}）"
         else:
             rag_status = f"跳过（{rag_reason}）"
@@ -497,9 +507,9 @@ async def generate_with_local_model(prompt: str, session_id: Optional[str] = Non
             if not is_claw:
                 if RAG_INTENT_DETECTOR_AVAILABLE:
                     try:
-                        need_rag, _ = needs_rag(prompt)
+                        need_rag, _, kb_name = needs_rag(prompt)
                         if need_rag:
-                            rag_context = await _rag_search_via_api(prompt, top_k=3)
+                            rag_context = await _rag_search_via_api(prompt, top_k=3, kb_name=kb_name)
                     except Exception:
                         rag_context = await _rag_search_via_api(prompt, top_k=3)
                 else:
@@ -556,14 +566,15 @@ async def generate_with_local_model(prompt: str, session_id: Optional[str] = Non
 
             if RAG_INTENT_DETECTOR_AVAILABLE:
                 try:
-                    need_rag, rag_reason = needs_rag(prompt)
-                    logger.info(f"RAG意图检测结果: 需要RAG={need_rag}, 原因: {rag_reason}")
+                    need_rag, rag_reason, kb_name = needs_rag(prompt)
+                    logger.info(f"RAG意图检测结果: 需要RAG={need_rag}, 原因: {rag_reason}, KB={kb_name}")
                 except Exception as e:
                     logger.warning(f"RAG意图检测失败: {e}")
                     need_rag = True
+                    kb_name = None
 
             if need_rag:
-                rag_context = await _rag_search_via_api(prompt, top_k=3)
+                rag_context = await _rag_search_via_api(prompt, top_k=3, kb_name=kb_name)
                 rag_status = f"成功（{rag_reason}）" if rag_context else f"无结果（{rag_reason}）"
             else:
                 rag_status = f"跳过（{rag_reason}）"

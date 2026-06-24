@@ -556,6 +556,9 @@ class VectorDatabase:
 
             self._maybe_migrate_index(len(self.metadata))
 
+            # 数据变更后清除查询缓存，防止脏读过期结果
+            self.clear_cache()
+
             logger.info(f"成功添加 {len(documents)} 个文档到向量数据库（总计: {len(self.metadata)}）")
 
     def flush(self):
@@ -841,6 +844,9 @@ class VectorDatabase:
                 self._rebuild_id_mapping()
                 self._rebuild_bm25()
                 self._save_index()
+
+                # 数据变更后清除查询缓存
+                self.clear_cache()
 
                 return len(indices_to_remove)
 

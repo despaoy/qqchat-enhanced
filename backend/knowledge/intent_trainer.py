@@ -184,6 +184,11 @@ async def generate_samples(
     """
     异步生成训练样本（不训练，仅生成供审查）
     LLM会先接收知识库文档内容，再基于文档生成样本
+
+    生成策略：
+    - 正例：每个KB基于自身文档生成具体问题
+    - 通用负例：日常闲聊、社交消息（不需要RAG）
+    - 硬负例：每个KB生成"看起来像但实际属于其他KB"的跨域混淆问题
     """
     global _generation_status
 
@@ -233,34 +238,48 @@ async def generate_samples(
         total_kbs = len(selected_kbs)
         for i, kb in enumerate(selected_kbs):
             _check_cancelled()
-            progress = 12 + int(55 * i / total_kbs)
+            progress = 12 + int(40 * i / total_kbs)
             _generation_status.update(
                 stage="generate_kb",
-                message=f"为「{kb['name']}」生成样本 ({i+1}/{total_kbs})...",
+                message=f"为「{kb['name']}」生成正例样本 ({i+1}/{total_kbs})...",
                 progress=progress,
             )
-            _add_log(f"生成知识库「{kb['name']}」的样本...")
+            _add_log(f"生成知识库「{kb['name']}」的正例样本...")
 
             doc_context = kb_docs.get(kb["name"], "")
             samples = await _generate_kb_samples_with_docs(
                 vllm_client, kb["name"], doc_context, samples_per_kb, lora_name
             )
             kb_samples[kb["name"]] = samples
-            _add_log(f"知识库「{kb['name']}」: 生成 {len(samples)} 条样本")
+            _add_log(f"知识库「{kb['name']}」: 生成 {len(samples)} 条正例")
 
-        # ── 5. 生成负例 ──
+        # ── 5. 生成通用负例（日常闲聊） ──
         _check_cancelled()
-        _generation_status.update(stage="generate_neg", message="生成负例样本...", progress=70)
-        _add_log("生成负例样本...")
-        negative_samples = await _generate_negative_samples(vllm_client, negative_count, lora_name)
-        _add_log(f"负例生成完成: {len(negative_samples)} 条")
+        _generation_status.update(stage="generate_neg", message="生成通用负例样本...", progress=60)
+        _add_log("生成通用负例样本...")
+        general_negative_count = max(negative_count // 2, 50)
+        negative_samples = await _generate_negative_samples(vllm_client, general_negative_count, lora_name)
+        _add_log(f"通用负例生成完成: {len(negative_samples)} 条")
 
-        # ── 6. 保存样本 ──
-        kb_samples["none"] = negative_samples
+        # ── 6. 为每个KB生成硬负例（跨域混淆问题） ──
+        _check_cancelled()
+        _generation_status.update(stage="generate_hard_neg", message="生成跨KB硬负例...", progress=70)
+        _add_log("生成跨KB硬负例样本...")
+        hard_neg_per_kb = max(negative_count // (total_kbs * 2), 10)
+        hard_negatives = await _generate_hard_negatives_per_kb(
+            vllm_client, selected_kbs, kb_docs, hard_neg_per_kb, lora_name
+        )
+        for kb_name, hard_negs in hard_negatives.items():
+            # 硬负例归入对应KB的负例池（标签为"none"，但内容是与该KB混淆的跨域问题）
+            negative_samples.extend(hard_negs)
+            _add_log(f"知识库「{kb_name}」: 生成 {len(hard_negs)} 条硬负例")
+
+        # ── 7. 保存样本 ──
+        kb_samples["none"] = list(set(negative_samples))
         save_samples(kb_samples)
 
         total = sum(len(v) for v in kb_samples.values())
-        _add_log(f"样本生成完成，共 {total} 条")
+        _add_log(f"样本生成完成，共 {total} 条（含硬负例）")
 
         _generation_status.update(
             running=False, stage="done", message="样本生成完成", progress=100,
@@ -434,6 +453,80 @@ async def _generate_negative_samples(
     return list(set(all_samples))[:count]
 
 
+async def _generate_hard_negatives_per_kb(
+    client,
+    selected_kbs: List[Dict[str, Any]],
+    kb_docs: Dict[str, str],
+    count_per_kb: int,
+    lora_name: Optional[str] = None,
+) -> Dict[str, List[str]]:
+    """为每个KB生成硬负例：看起来像该KB但实际属于其他KB的跨域混淆问题
+
+    策略：对每个KB-A，告知LLM「这是KB-A的领域，同时存在其他KB-B/C...」，
+    让LLM生成「提到KB-A的内容但问题实际属于其他KB」的混淆问题。
+    这些问题标签为"none"（不需要检索KB-A），用于强化多分类边界。
+
+    Args:
+        client: vLLM客户端
+        selected_kbs: 所有选中的知识库列表
+        kb_docs: KB名→文档内容
+        count_per_kb: 每个KB生成的硬负例数量
+        lora_name: 可选LoRA名称
+
+    Returns:
+        {kb_name: [硬负例问题列表]}
+    """
+    result: Dict[str, List[str]] = {}
+    total_kbs = len(selected_kbs)
+
+    for i, kb in enumerate(selected_kbs):
+        _check_cancelled()
+        kb_name = kb["name"]
+        kb_doc = kb_docs.get(kb_name, "")
+
+        # 其他KB的名称和领域摘要
+        other_kbs = [k for k in selected_kbs if k["name"] != kb_name]
+        if not other_kbs:
+            # 只有一个KB时，生成"看起来像知识查询但实际是闲聊"的伪硬负例
+            other_desc = "日常闲聊、社交对话"
+        else:
+            other_parts = []
+            for okb in other_kbs:
+                other_doc = kb_docs.get(okb["name"], "")[:200]
+                other_parts.append(f"「{okb['name']}」: {other_doc}")
+            other_desc = "\n".join(other_parts)
+
+        # 构造提示：生成跨域混淆问题
+        if kb_doc:
+            prompt = (
+                f"以下是知识库「{kb_name}」的文档内容：\n\n{kb_doc[:1500]}\n\n"
+                f"同时存在其他知识库：\n{other_desc}\n\n"
+                f"请生成{count_per_kb}条「看起来像属于「{kb_name}」但实际应该检索其他知识库」的混淆问题。\n"
+                f"这些问题应该提到「{kb_name}」领域的内容（如角色名、术语），"
+                f"但问题核心实际属于其他知识库的范畴。\n"
+                f"例如：如果「{kb_name}」是角色库、其他是武器库，"
+                f"生成「胡桃的护摩之杖属性怎么样」「钟离用什么圣遗物」这类跨域问题。\n"
+                f"每条一行，用自然中文口语，不要编号。"
+            )
+        else:
+            prompt = (
+                f"假设有一个关于「{kb_name}」的知识库，"
+                f"同时存在其他知识库：{', '.join(k['name'] for k in other_kbs)}。\n"
+                f"请生成{count_per_kb}条「提到「{kb_name}」相关内容但实际属于其他知识库」的混淆问题。\n"
+                f"每条一行，用自然中文口语，不要编号。"
+            )
+
+        try:
+            reply = await _generate_with_vllm(client, prompt, lora_name)
+            samples = _parse_samples(reply)
+            result[kb_name] = samples
+        except Exception as e:
+            logger.warning(f"知识库「{kb_name}」硬负例生成失败: {e}")
+            result[kb_name] = []
+
+    return result
+
+
 # ═══════════════════════════════════════════════════════════
 # 训练（使用已审查的样本）
 # ═══════════════════════════════════════════════════════════
@@ -488,6 +581,11 @@ async def train_intent_classifier(
         negative_samples = all_samples.get("none", [])
         kb_samples = {k: v for k, v in all_samples.items() if k != "none"}
 
+        # 构建 KB名称→ID 映射（供预测时RAG过滤使用）
+        from db.adapter import db
+        all_bases = db.get_knowledge_bases()
+        kb_name_to_id = {b["name"]: b["id"] for b in all_bases if b["name"] in kb_names}
+
         total = sum(len(v) for v in all_samples.values())
         _add_log(f"样本统计: 总计 {total} 条, 知识库 {kb_names}, 负例 {len(negative_samples)} 条")
 
@@ -497,7 +595,7 @@ async def train_intent_classifier(
         # ── 2. 编码 + 训练 ──
         _training_status.update(stage="train", message="编码文本 + 训练多分类模型...", progress=15)
         _add_log("开始编码和训练...")
-        result = await asyncio.to_thread(_train_multiclass_model, kb_samples, negative_samples)
+        result = await asyncio.to_thread(_train_multiclass_model, kb_samples, negative_samples, kb_name_to_id)
 
         if not result.get("success"):
             raise RuntimeError(result.get("error", "训练失败"))
@@ -534,6 +632,7 @@ async def train_intent_classifier(
 def _train_multiclass_model(
     kb_samples: Dict[str, List[str]],
     negative_samples: List[str],
+    kb_name_to_id: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
     try:
         from sentence_transformers import SentenceTransformer
@@ -612,13 +711,14 @@ def _train_multiclass_model(
         "embedding_model": "paraphrase-multilingual-MiniLM-L12-v2",
         "label_names": label_names,
         "label_map": label_map,
-        "version": "4.0-multiclass",
+        "kb_name_to_id": kb_name_to_id or {},
+        "version": "4.1-multiclass-routed",
         "training_samples": len(texts),
         "samples_per_class": {name: labels.count(i) for name, i in label_map.items()},
         "cv_accuracy_mean": cv_acc,
         "cv_accuracy_std": cv_std,
         "train_accuracy": train_acc,
-        "sample_source": "llm+vllm+docs",
+        "sample_source": "llm+vllm+docs+hard_negatives",
         "trained_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     with open(MODEL_DIR / "config.json", "w", encoding="utf-8") as f:

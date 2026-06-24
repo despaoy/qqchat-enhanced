@@ -341,17 +341,41 @@ def _load_ml_model():
         logger.warning(f"ML 分类器加载失败，使用规则引擎: {e}")
 
 
-def _ml_predict(message: str) -> Tuple[bool, str, float]:
+def _ml_predict(message: str) -> Tuple[bool, str, float, Optional[str]]:
+    """多分类预测：返回 (是否需要RAG, 原因, 置信度, 预测的KB名称)
+
+    使用多分类模型预测消息应路由到哪个知识库。
+    - 预测类别为 "none" 时不需要RAG
+    - 预测类别为某个KB名称时需要RAG，并返回该KB名称供RAG过滤使用
+    """
     global _ml_encoder, _ml_classifier, _ml_config
     threshold = _ml_config.get("threshold", 0.5)
     embedding = _ml_encoder.encode([message])
     scaler = _ml_config.get("_scaler")
     if scaler is not None:
         embedding = scaler.transform(embedding)
+
+    # 多分类预测：取概率最高的类别
     proba = _ml_classifier.predict_proba(embedding)[0]
-    score = proba[1]
-    pred = score >= threshold
-    return pred, f"ML分类器 (置信度: {score:.2%})", score
+    label_names = _ml_config.get("label_names", [])
+    if not label_names:
+        # 兼容旧版二分类模型
+        score = proba[1] if len(proba) > 1 else proba[0]
+        pred = score >= threshold
+        return pred, f"ML分类器(旧版二分类, 置信度: {score:.2%})", score, None
+
+    best_idx = int(proba.argmax())
+    best_label = label_names[best_idx]
+    best_score = float(proba[best_idx])
+
+    # 预测为 "none" 或置信度不足时不需要RAG
+    if best_label == "none":
+        return False, f"ML分类器: 不需要RAG (置信度: {best_score:.2%})", best_score, None
+
+    if best_score < threshold:
+        return False, f"ML分类器: 置信度不足 ({best_score:.2%} < {threshold})", best_score, None
+
+    return True, f"ML分类器: 路由到「{best_label}」(置信度: {best_score:.2%})", best_score, best_label
 
 
 def get_intent_detector() -> RAGIntentDetector:
@@ -362,7 +386,7 @@ def get_intent_detector() -> RAGIntentDetector:
     return _intent_detector
 
 
-def needs_rag(message: str, context: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
+def needs_rag(message: str, context: Optional[Dict[str, Any]] = None) -> Tuple[bool, str, Optional[str]]:
     """
     便捷函数：判断消息是否需要RAG（ML模型优先 + 低置信度规则兜底）
 
@@ -371,7 +395,8 @@ def needs_rag(message: str, context: Optional[Dict[str, Any]] = None) -> Tuple[b
         context: 可选上下文
 
     Returns:
-        Tuple[是否需要RAG, 判断原因]
+        Tuple[是否需要RAG, 判断原因, 预测的KB名称(无则为None)]
+        KB名称可用于RAG检索时按知识库过滤，提升检索精度
     """
     global _ML_AVAILABLE, _ml_config
 
@@ -380,31 +405,32 @@ def needs_rag(message: str, context: Optional[Dict[str, Any]] = None) -> Tuple[b
 
     if _ML_AVAILABLE:
         try:
-            pred, reason, confidence = _ml_predict(message)
+            pred, reason, confidence, kb_name = _ml_predict(message)
             fallback_threshold = _ml_config.get("confidence_fallback", 0.3)
             detector = get_intent_detector()
             rule_pred, rule_reason = detector.needs_rag(message, context)
 
             if pred and confidence >= fallback_threshold:
-                return pred, reason
+                return pred, reason, kb_name
 
             if not pred and not rule_pred:
-                return False, f"{reason} (规则一致)"
+                return False, f"{reason} (规则一致)", None
 
             if pred != rule_pred:
                 logger.info(f"ML({confidence:.2%}→{pred})与规则({rule_pred})冲突, 采用规则: {rule_reason}")
-                return rule_pred, f"规则兜底({rule_reason[:40]}...)"
+                return rule_pred, f"规则兜底({rule_reason[:40]}...)", None
 
             if not pred and rule_pred and confidence < 0.8:
                 logger.info(f"ML判不需要RAG({confidence:.2%})但规则认为需要, 采用规则: {rule_reason}")
-                return True, f"规则兜底({rule_reason[:40]}...)"
+                return True, f"规则兜底({rule_reason[:40]}...)", None
 
-            return pred, reason
+            return pred, reason, kb_name
         except Exception as e:
             logger.warning(f"ML 预测失败，回退规则引擎: {e}")
 
     detector = get_intent_detector()
-    return detector.needs_rag(message, context)
+    pred, reason = detector.needs_rag(message, context)
+    return pred, reason, None
 
 
 def analyze_message(message: str) -> Dict[str, Any]:
@@ -455,12 +481,13 @@ if __name__ == "__main__":
     print("=" * 80)
     
     for msg in test_messages:
-        needs, reason = detector.needs_rag(msg)
-        analysis = detector.analyze_message(msg)
-        
+        needs, reason, kb_name = needs_rag(msg)
+        analysis = analyze_message(msg)
+
         print(f"消息: {msg}")
         print(f"长度: {len(msg)}字符")
         print(f"需要RAG: {'是' if needs else '否'}")
+        print(f"路由KB: {kb_name or '无'}")
         print(f"原因: {reason}")
         print(f"特征: {analysis['features']}")
         print("-" * 80)
