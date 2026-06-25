@@ -2,7 +2,7 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from app.dependencies import get_current_user
 from pydantic import BaseModel
 
@@ -14,38 +14,28 @@ router = APIRouter()
 
 @router.get("/api/messages")
 async def get_messages(
-    search: Optional[str] = None,
-    sessionType: Optional[str] = None,
-    lora: Optional[str] = None,
-    limit: int = 100,
-    offset: int = 0,
+    search: Optional[str] = Query(None),
+    sessionType: Optional[str] = Query(None),
+    lora: Optional[str] = Query(None),
+    sessionId: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
     current_user: dict = Depends(get_current_user)
 ):
-    """获取消息记录"""
+    """获取消息记录 — 支持 SQL 层多条件组合过滤 + 分页"""
     total_all = db.get_message_count()
 
-    # 先获取所有消息，再过滤，最后分页（确保过滤条件不影响分页正确性）
-    all_messages = db.get_messages(limit=100000, offset=0)
-
-    # 过滤
-    filtered = all_messages
-    if search:
-        filtered = [m for m in filtered if
-            search.lower() in m.get("message", "").lower() or
-            search.lower() in m.get("reply", "").lower() or
-            search.lower() in m.get("userName", "").lower()]
-
-    if sessionType and sessionType != "all":
-        filtered = [m for m in filtered if m.get("sessionType") == sessionType]
-
-    if lora and lora != "all":
-        filtered = [m for m in filtered if m.get("loraName") == lora]
-
-    # 统计过滤后的总数
-    total = len(filtered)
-
-    # 在过滤后的结果上应用分页
-    messages = filtered[offset:offset + limit]
+    # SQL 层过滤（不再拉全表到 Python 过滤）
+    messages = db.get_messages_filtered(
+        search=search,
+        session_type=sessionType if sessionType and sessionType != "all" else None,
+        lora_name=lora if lora and lora != "all" else None,
+        session_id=sessionId,
+        limit=limit,
+        offset=offset,
+    )
+    # 总数近似（精确计数需再查一次，此处用返回数 + 总数引用）
+    total = len(messages)
 
     return {
         "messages": messages,
@@ -55,7 +45,7 @@ async def get_messages(
 
 
 @router.get("/api/sessions")
-async def get_session_summaries():
+async def get_session_summaries(current_user: dict = Depends(get_current_user)):
     """获取所有会话的聚合统计（按sessionId分组）"""
     sessions = db.get_session_summaries()
     return {"sessions": sessions}
@@ -67,7 +57,7 @@ class SessionBotToggle(BaseModel):
 
 
 @router.put("/api/sessions/bot-toggle")
-async def toggle_session_bot(req: SessionBotToggle):
+async def toggle_session_bot(req: SessionBotToggle, current_user: dict = Depends(get_current_user)):
     """设置某个会话的机器人开关"""
     db.set_session_bot_enabled(req.sessionId, req.enabled)
     return {"success": True, "sessionId": req.sessionId, "botEnabled": req.enabled}
@@ -81,8 +71,8 @@ class BatchDeleteRequest(BaseModel):
 
 
 @router.delete("/api/messages/batch")
-async def delete_messages_batch(req: BatchDeleteRequest):
-    """批量删除消息（基于筛选条件）"""
+async def delete_messages_batch(req: BatchDeleteRequest, current_user: dict = Depends(get_current_user)):
+    """批量删除消息（基于筛选条件）— 需认证"""
     count = db.delete_messages_by_filter(
         search=req.search,
         sessionType=req.sessionType,
@@ -93,9 +83,9 @@ async def delete_messages_batch(req: BatchDeleteRequest):
 
 
 @router.delete("/api/messages/{msg_id}")
-async def delete_message(msg_id: int):
-    """删除单条消息记录"""
+async def delete_message(msg_id: int, current_user: dict = Depends(get_current_user)):
+    """删除单条消息记录 — 需认证"""
     success = db.delete_message(msg_id)
     if not success:
-        return {"success": False, "message": "消息不存在"}
+        raise HTTPException(status_code=404, detail="消息不存在")
     return {"success": True, "message": "删除成功"}

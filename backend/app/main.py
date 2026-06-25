@@ -30,7 +30,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -205,11 +205,11 @@ if _SECURITY_ENABLED:
         )
         # 注意：Starlette 中间件按添加顺序的逆序执行，先添加的最后执行
         # 所以最外层（最先执行）的中间件最后添加
-        app.add_middleware(AuditLogMiddleware)           # 最外层：审计日志
-        app.add_middleware(InputValidationMiddleware)     # 输入验证
-        app.add_middleware(RateLimitMiddleware)            # 限流
-        app.add_middleware(SecurityMiddleware)             # 认证
-        app.add_middleware(SecurityHeadersMiddleware)      # 安全头（最内层）
+        app.add_middleware(AuditLogMiddleware)               # 最外层：审计日志
+        app.add_middleware(InputValidationMiddleware)         # 输入验证
+        app.add_middleware(RateLimitMiddleware)               # 限流
+        app.add_middleware(SecurityMiddleware)                # 认证
+        app.add_middleware(SecurityHeadersMiddleware)         # 安全头（最内层）
         logger.info("✅ 安全中间件已启用（认证+限流+输入验证+审计+安全头）")
     except ImportError as e:
         logger.warning(f"安全中间件导入失败，跳过: {e}")
@@ -249,6 +249,11 @@ async def health_check():
 
 @app.get("/ready")
 async def readiness_check():
+    """就绪探针 — 检查数据库和向量索引可用性。外部服务（vLLM/Redis）不在探针中同步检查（避免超时阻塞）。"""
+    deps = {"database": False, "faiss": False}
+    details: dict[str, str] = {}
+
+    # 1. 数据库（必须成功）
     try:
         from db.adapter import is_pg_mode
         if is_pg_mode():
@@ -256,11 +261,25 @@ async def readiness_check():
         else:
             conn = db.get_connection()
             conn.execute("SELECT 1")
-            conn.close()
-        return {"status": "ready"}
-    except Exception:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=503, detail="database not ready")
+            # 注意：不要 conn.close()——SQLiteDB 使用线程本地连接复用，
+            # 直接 close 会导致连接对象存在但已关闭，后续所有 DB 操作失败。
+        deps["database"] = True
+    except Exception as e:
+        details["database"] = str(e)[:120]
+
+    # 2. Faiss
+    try:
+        from knowledge.vector_db import get_vector_db
+        vb = get_vector_db()
+        deps["faiss"] = vb is not None
+        details["faiss"] = "ok" if deps["faiss"] else "not_initialized"
+    except Exception as e:
+        details["faiss"] = str(e)[:80]
+
+    ready = deps["database"] and deps["faiss"]
+    if not ready:
+        raise HTTPException(status_code=503, detail={"ready": False, "deps": deps, "details": details})
+    return {"status": "ready", "deps": deps}
 
 
 # ═══════════════════════════════════════════

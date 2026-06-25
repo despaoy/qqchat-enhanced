@@ -8,6 +8,10 @@ async def get_current_user(request: Request) -> dict:
     # 1. 如果安全中间件已验证，直接使用
     if hasattr(request.state, "jwt_payload") and request.state.jwt_payload:
         payload = request.state.jwt_payload
+        # 检查 Token 是否已被注销
+        from api.auth import is_token_revoked
+        if is_token_revoked(payload.get("jti", "")):
+            raise HTTPException(status_code=401, detail="Token 已注销，请重新登录")
         return {
             "user_id": payload.get("user_id"),
             "username": payload.get("sub", "unknown"),
@@ -26,4 +30,12 @@ async def get_current_user(request: Request) -> dict:
 
     if not token:
         raise HTTPException(status_code=401, detail="缺少认证 Token")
-    return verify_token(token)
+
+    payload = verify_token(token)
+
+    # 检查 Token 是否已被注销
+    from api.auth import is_token_revoked
+    if is_token_revoked(payload.get("jti", "")):
+        raise HTTPException(status_code=401, detail="Token 已注销，请重新登录")
+
+    return payload

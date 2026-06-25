@@ -544,8 +544,17 @@ class InputValidationMiddleware(BaseHTTPMiddleware):
         if request.method not in ("POST", "PUT", "PATCH"):
             return await call_next(request)
 
+        # 安全：BaseHTTPMiddleware 消费 body 后下游端点（Pydantic）无法再读取。
+        # 仅对 /api/generate 等需要 Prompt 注入检测的端点预先读取 body 并缓存回 request。
+        # 其他 POST 端点（知识库/训练/LoRA等）有独立 Pydantic 校验，跳过此处 body 读取。
+        _body_guard_paths = ("/api/generate",)
+        if not request.url.path.startswith(_body_guard_paths):
+            return await call_next(request)
+
         # 读取请求体
         body = await request.body()
+        # 缓存 body 到 request，使下游 Request.body() 命中缓存
+        request._body = body
 
         # 请求体大小检查
         if len(body) > self._max_body_size:
@@ -727,3 +736,45 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
         )
 
         return response
+
+
+# ═══════════════════════════════════════════════════════════════
+# 6. 请求 ID 中间件（链路追踪）
+# ═══════════════════════════════════════════════════════════════
+
+import uuid
+import contextvars
+
+# 上下文变量：同一次请求内所有日志自动携带 request_id
+_request_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "request_id", default="-"
+)
+
+
+def get_request_id() -> str:
+    """获取当前请求的 request_id（供日志/业务代码使用）。"""
+    return _request_id_ctx.get()
+
+
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    """请求 ID 注入中间件。
+
+    为每个请求生成唯一 UUID，注入到：
+    - X-Request-Id 响应头（客户端可记录）
+    - contextvars（日志自动携带）
+    - request.state.request_id（业务代码可读取）
+
+    优先级：客户端传入 > 服务端生成
+    """
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        # 优先使用客户端传入的 X-Request-Id，否则生成
+        req_id = request.headers.get("X-Request-Id") or str(uuid.uuid4())
+        token = _request_id_ctx.set(req_id)
+        request.state.request_id = req_id
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-Id"] = req_id
+            return response
+        finally:
+            _request_id_ctx.reset(token)

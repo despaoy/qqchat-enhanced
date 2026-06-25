@@ -574,6 +574,53 @@ class SQLiteDB:
             messages.append(dict(row))
         return messages
     
+    def get_messages_filtered(
+        self,
+        search: str | None = None,
+        session_type: str | None = None,
+        lora_name: str | None = None,
+        session_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ):
+        """获取消息记录 — SQL 层多条件过滤 + 分页，避免全表拉取。
+        
+        Args:
+            search: 模糊搜索 message/reply/userName
+            session_type: 会话类型（private/group）
+            lora_name: LoRA 名称
+            session_id: 会话 ID
+            limit: 返回条数上限（最大 1000）
+            offset: 偏移量
+        """
+        limit = min(limit, 1000)
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        conditions: list[str] = []
+        params: list = []
+
+        if search:
+            conditions.append("(message LIKE ? OR reply LIKE ? OR userName LIKE ?)")
+            params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+        if session_type:
+            conditions.append("sessionType = ?")
+            params.append(session_type)
+        if lora_name:
+            conditions.append("loraName = ?")
+            params.append(lora_name)
+        if session_id:
+            conditions.append("sessionId = ?")
+            params.append(session_id)
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.extend([limit, offset])
+        cursor.execute(
+            f"SELECT * FROM messages {where} ORDER BY createdAt DESC LIMIT ? OFFSET ?",
+            params,
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
     def get_message_count(self) -> int:
         """获取消息总数"""
         conn = self._get_connection()
@@ -772,22 +819,22 @@ class SQLiteDB:
             return None
 
     def get_knowledge_bases(self):
-        """获取所有知识库"""
+        """获取所有知识库（单次 JOIN 查询，避免 N+1）"""
         conn = self._get_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM knowledge_bases ORDER BY updated_at DESC')
+        cursor.execute('''
+            SELECT
+                kb.*,
+                COUNT(DISTINCT kd.id) AS documentCount,
+                COUNT(DISTINCT kf.id) AS folderCount
+            FROM knowledge_bases kb
+            LEFT JOIN knowledge_documents kd ON kd.knowledge_base_id = kb.id
+            LEFT JOIN knowledge_folders kf ON kf.knowledge_base_id = kb.id
+            GROUP BY kb.id
+            ORDER BY kb.updated_at DESC
+        ''')
         rows = cursor.fetchall()
-        result = []
-        for row in rows:
-            kb = dict(row)
-            # 统计文档数
-            cursor.execute('SELECT COUNT(*) as cnt FROM knowledge_documents WHERE knowledge_base_id = ?', (kb["id"],))
-            kb["documentCount"] = cursor.fetchone()["cnt"]
-            # 统计文件夹数
-            cursor.execute('SELECT COUNT(*) as cnt FROM knowledge_folders WHERE knowledge_base_id = ?', (kb["id"],))
-            kb["folderCount"] = cursor.fetchone()["cnt"]
-            result.append(kb)
-        return result
+        return [dict(row) for row in rows]
 
     def get_knowledge_base(self, kb_id: int):
         """获取单个知识库"""
@@ -1159,9 +1206,23 @@ class SQLiteDB:
             ON CONFLICT(sessionId) DO UPDATE SET bot_enabled = ?, updated_at = ?
         ''', (session_id, session_id, int(enabled), now, int(enabled), now))
         conn.commit()
+        # 变更后主动失效缓存
+        self._bot_enabled_cache.pop(session_id, None)
 
+    # session bot 开关内存缓存（减少高频读库）
+    # TTL 60s，变更时主动失效
     def is_session_bot_enabled(self, session_id: str) -> bool:
-        """检查某个会话的机器人是否启用（默认启用）"""
+        """检查某个会话的机器人是否启用（默认启用，内存 TTL 缓存）"""
+        import time as _time
+        now = _time.time()
+        # 延迟初始化缓存字典（避免模块级全局变量）
+        if not hasattr(self, '_bot_enabled_cache'):
+            self._bot_enabled_cache: dict = {}
+        cached = self._bot_enabled_cache.get(session_id)
+        if cached is not None:
+            val, expiry = cached
+            if now < expiry:
+                return val
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute(
@@ -1169,9 +1230,9 @@ class SQLiteDB:
             (session_id,)
         )
         row = cursor.fetchone()
-        if row is None:
-            return True  # 默认启用
-        return bool(row['bot_enabled'])
+        result = True if row is None else bool(row['bot_enabled'])
+        self._bot_enabled_cache[session_id] = (result, now + 60)
+        return result
 
     # ── Claw 工具 CRUD ──
 

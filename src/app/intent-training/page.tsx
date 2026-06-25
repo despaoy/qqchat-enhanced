@@ -75,7 +75,7 @@ function IntentTrainingContent() {
     samples_per_class?: Record<string, number>;
   } | null>(null);
 
-  // 加载数据
+  // 加载数据（仅在挂载时执行一次，避免依赖循环导致无限重渲染/compiling）
   const loadKnowledgeBases = useCallback(async () => {
     try {
       const res = await api.getKnowledgeBases();
@@ -86,12 +86,12 @@ function IntentTrainingContent() {
   const loadActiveKbs = useCallback(async () => {
     try {
       const res = await api.getActiveKnowledgeBases();
-      const activeNames = (res.active_kbs || []).filter(kb => kb.isActive).map(kb => kb.kbName);
-      const ids = knowledgeBases.filter(kb => activeNames.includes(kb.name)).map(kb => kb.id);
-      setActiveKbIds(ids);
-      if (selectedKbIds.length === 0) setSelectedKbIds(ids);
+      setActiveKbIds(res.active_kbs?.filter((kb: Record<string, unknown>) => kb.isActive).map((kb: Record<string, unknown>) => {
+        const match = knowledgeBases.find(b => b.name === kb.kbName);
+        return match ? match.id : -1;
+      }).filter((id: number) => id > 0) || []);
     } catch { /* ignore */ }
-  }, [selectedKbIds.length, knowledgeBases]);
+  }, [knowledgeBases]);
 
   const loadModelInfo = useCallback(async () => {
     try {
@@ -108,12 +108,20 @@ function IntentTrainingContent() {
     } catch { /* ignore */ }
   }, []);
 
+  // 仅挂载时加载一次数据，selectedKbIds 通过用户点击 toggleKb 管理，
+  // 不再由 loadActiveKbs 自动覆盖（避免选中后立即被 API 返回值清空）
   useEffect(() => {
     loadKnowledgeBases();
-    loadActiveKbs();
     loadModelInfo();
     loadSamples();
-  }, [loadKnowledgeBases, loadActiveKbs, loadModelInfo, loadSamples]);
+  }, [loadKnowledgeBases, loadModelInfo, loadSamples]);
+
+  // knowledgeBases 加载完成后，异步获取活跃 KB 列表（不影响 selectedKbIds）
+  useEffect(() => {
+    if (knowledgeBases.length > 0) {
+      loadActiveKbs();
+    }
+  }, [knowledgeBases, loadActiveKbs]);
 
   // 轮询生成进度
   useEffect(() => {

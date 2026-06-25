@@ -156,7 +156,7 @@ class SimpleLoRATrainer:
                     detail=f"已有运行中的训练任务使用lora_name='{lora_name}'，请等待完成或取消后再试"
                 )
 
-        task_id = str(uuid.uuid4())[:8]
+        task_id = str(uuid.uuid4())  # 完整 UUID，避免 8 位截断碰撞
 
         task = {
             "task_id": task_id,
