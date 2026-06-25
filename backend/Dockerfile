@@ -4,7 +4,7 @@
 #   INSTALL_GPU_DEPS=false 仅安装 CPU 版 PyTorch，跳过 vLLM（CI / 无 GPU 环境）
 ARG INSTALL_GPU_DEPS=true
 
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -20,16 +20,16 @@ COPY requirements.txt .
 
 # Conditional dependency installation based on GPU availability
 RUN if [ "$INSTALL_GPU_DEPS" = "true" ]; then \
-        echo "Installing GPU dependencies (PyTorch CUDA + vLLM)..." && \
-        pip install --no-cache-dir torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
-            --index-url https://download.pytorch.org/whl/cu121 && \
-        pip install --no-cache-dir vllm==0.7.2; \
+        echo "Installing GPU dependencies (PyTorch CUDA 13.0 + vLLM)..." && \
+        pip install --no-cache-dir torch torchvision torchaudio \
+            --index-url https://download.pytorch.org/whl/cu130 && \
+        pip install --no-cache-dir vllm==0.22.1; \
     else \
         echo "Installing CPU-only dependencies (skipping vLLM)..." && \
-        pip install --no-cache-dir torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
+        pip install --no-cache-dir torch torchvision torchaudio \
             --index-url https://download.pytorch.org/whl/cpu; \
     fi && \
-    grep -v -E "^(torch==|torchvision==|torchaudio==|vllm==)" requirements.txt > requirements-filtered.txt && \
+    grep -v -E "^(torch|torchvision|torchaudio|vllm)" requirements.txt > requirements-filtered.txt && \
     pip install --no-cache-dir -r requirements-filtered.txt
 
 # Copy application code

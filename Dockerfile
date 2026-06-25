@@ -1,18 +1,18 @@
 # Next.js Frontend - Multi-stage build
-FROM node:20.18-alpine AS deps
+FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
 # 使用 npmjs.org 官方源，避免镜像源在 CI/海外环境不可用
 RUN corepack enable && pnpm config set registry https://registry.npmjs.org/ && pnpm install --frozen-lockfile
 
-FROM node:20.18-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN corepack enable && pnpm build
 
-FROM node:20.18-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
