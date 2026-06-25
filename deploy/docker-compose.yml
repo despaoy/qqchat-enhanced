@@ -9,8 +9,6 @@ services:
       POSTGRES_DB: ${PG_DATABASE:-qqassistant}
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-qqassistant}"]
       interval: 10s
@@ -26,8 +24,6 @@ services:
     command: redis-server --appendonly yes --appendfsync everysec --maxmemory 512mb --maxmemory-policy volatile-lru
     volumes:
       - redisdata:/data
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -36,7 +32,7 @@ services:
     networks:
       - internal
 
-  # vLLM Inference Engine (RTX 3090 优化配置 - Qwen2.5-7B-Instruct FP16)
+  # vLLM Inference Engine
   vllm:
     image: vllm/vllm-openai:v0.7.2
     restart: unless-stopped
@@ -52,17 +48,21 @@ services:
       --enable-lora
       --max-loras 4
       --max-lora-rank 64
-      --gpu-memory-utilization 0.90
+      --gpu-memory-utilization 0.80
       --max-model-len 4096
       --dtype float16
       --host 0.0.0.0
       --port 8001
       --lora-modules-dir /loras
     volumes:
-      - /root/autodl-tmp/Qwen2.5-7B-Instruct:/models/Qwen2.5-7B-Instruct
-      - /root/autodl-tmp/qqchat-enhanced/backend/loras:/loras
-    ports:
-      - "8001:8001"
+      - ./data/models/Qwen2.5-7B-Instruct:/models/Qwen2.5-7B-Instruct
+      - ./data/loras:/loras
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
     networks:
       - internal
 
@@ -77,6 +77,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      vllm:
+        condition: service_started
     environment:
       USE_POSTGRESQL: "true"
       PG_HOST: postgres
@@ -87,11 +89,18 @@ services:
       REDIS_URL: redis://redis:6379/0
       VLLM_ENABLED: "true"
       VLLM_BASE_URL: http://vllm:8001
+      VLLM_BASE_URLS: http://vllm:8001
+      ENVIRONMENT: ${ENVIRONMENT:-production}
     volumes:
-      - ../backend/knowledge_bases:/app/knowledge_bases
-      - ../backend/loras:/app/loras
-    ports:
-      - "8000:8000"
+      - backend_data:/app/data
+      - ./data/knowledge_bases:/app/knowledge_bases
+      - ./data/loras:/app/loras
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks:
       - internal
 
@@ -102,11 +111,16 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     environment:
       BACKEND_URL: http://backend:8000
-    ports:
-      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks:
       - internal
 
@@ -115,18 +129,26 @@ services:
     image: nginx:1.27-alpine
     restart: unless-stopped
     depends_on:
-      - frontend
-      - backend
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_healthy
     ports:
       - "80:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     networks:
       - internal
 
 volumes:
   pgdata:
   redisdata:
+  backend_data:
 
 networks:
   internal:

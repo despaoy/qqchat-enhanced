@@ -106,7 +106,7 @@ start_vllm() {
     export CUDA_VISIBLE_DEVICES="${GPU_ID}"
 
     # 启动 vLLM OpenAI 兼容 API 服务器
-    python -m vllm.entrypoints.openai.api_server \
+    python3 -m vllm.entrypoints.openai.api_server \
         --model "${MODEL_PATH}" \
         --enable-lora \
         --max-loras 8 \

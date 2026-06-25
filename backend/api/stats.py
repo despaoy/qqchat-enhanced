@@ -66,20 +66,16 @@ def get_system_stats():
     memory_used = round(memory.used / (1024 ** 3), 1)
     memory_total = round(memory.total / (1024 ** 3), 1)
 
-    # 磁盘使用
+    # 磁盘使用（跨平台：Linux/macOS 用 '/'，Windows 用 'C:'）
+    import platform as _platform
     try:
-        disk = psutil.disk_usage('C:')  # Windows使用C盘
+        path = 'C:' if _platform.system() == 'Windows' else '/'
+        disk = psutil.disk_usage(path)
         disk_used = round(disk.used / (1024 ** 3), 1)
         disk_total = round(disk.total / (1024 ** 3), 1)
     except Exception:
-        # 如果C盘不可用，使用根目录
-        try:
-            disk = psutil.disk_usage('/')
-            disk_used = round(disk.used / (1024 ** 3), 1)
-            disk_total = round(disk.total / (1024 ** 3), 1)
-        except Exception:
-            disk_used = 0.0
-            disk_total = 0.0
+        disk_used = 0.0
+        disk_total = 0.0
 
     return {
         'cpu_usage': cpu_usage,

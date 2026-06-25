@@ -28,7 +28,9 @@ def register_tool(name: str, description: str, handler: Callable):
 async def _status_handler(bot: Bot, event: MessageEvent) ->str:
     cpu = psutil.cpu_percent(interval=1)
     mem = psutil.virtual_memory()
-    disk = psutil.disk_usage("C:\\")
+    import platform as _platform
+    path = 'C:\\' if _platform.system() == 'Windows' else '/'
+    disk = psutil.disk_usage(path)
     logger.info(f"[status] CPU: {cpu}%, MEM: {mem.percent}%, DISK: {disk.percent}%")
     return f"CPU: {cpu}%, MEM: {mem.percent}%, DISK: {disk.percent}%"
 register_tool("status", "获取系统状态，包括CPU、内存、磁盘占用率", _status_handler)
@@ -44,8 +46,13 @@ register_tool("show_tools", "显示所有可使用工具", _show_tools_handler)
 
 async def _send_file_handler(filename: str,bot: Bot, event: MessageEvent) -> str:
     """发送文件"""
-    desktop=Path.home()/"Desktop"
-    all_files=[f for f in os.listdir(desktop) if Path(desktop/f).is_file()]
+    import platform as _platform
+    base = Path.home() / "Desktop" if _platform.system() == "Windows" else Path.home()
+    # 支持通过环境变量自定义发送目录
+    send_dir = Path(os.getenv("SEND_FILE_DIR", str(base)))
+    if not send_dir.exists():
+        return f"发送目录不存在: {send_dir}"
+    all_files=[f for f in os.listdir(send_dir) if Path(send_dir/f).is_file()]
     
     from difflib import get_close_matches
     matchs=get_close_matches(filename,all_files,n=5,cutoff=0.3)
