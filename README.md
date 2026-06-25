@@ -6,274 +6,346 @@
 
 | 层级 | 技术 | 版本 |
 |------|------|------|
-| 前端 | Next.js (App Router) + React + TypeScript + shadcn/ui + Tailwind CSS | 16.1.1 / 19.2.3 / 5.x / 4.x |
-| 后端 | Python FastAPI + Pydantic + SQLAlchemy | 0.115.x / 2.10.x / 2.0.x |
-| 推理引擎 | vLLM（OpenAI 兼容 API） | 0.7.2 |
-| 训练框架 | PyTorch + PEFT + TRL + bitsandbytes | 2.4.1 / 0.14.0 / 0.12.2 / 0.44.1 |
+| 前端 | Next.js (App Router) + React + TypeScript + shadcn/ui + Tailwind CSS | 16.2.9 / 19.2.3 / 5.9 / 4.x |
+| 后端 | Python FastAPI + Pydantic + SQLAlchemy | 0.136.x / 2.13.x / 2.0.x |
+| 推理引擎 | vLLM（OpenAI 兼容 API） | 0.22.1 |
+| 训练框架 | PyTorch + PEFT + TRL + bitsandbytes | 2.11.0+cu130 / 0.14+ / 0.45+ |
 | 数据库 | SQLite（开发）/ PostgreSQL + pgvector（生产） | 14 |
-| 缓存 | Redis | 7.4 |
-| 向量检索 | Faiss + sentence-transformers | 1.9.x / 3.3.x |
-| 模型 | Qwen2.5-7B-Instruct（支持 AWQ 4bit 量化） | - |
-| 包管理 | pnpm（前端）/ pip（后端） | 9.x |
+| 缓存 | Redis（可选，未配置时自动降级为 DB 直连） | 7.4+ |
+| 向量检索 | Faiss + sentence-transformers | 1.9+ / 5.0+ |
+| 模型 | Qwen2.5-7B-Instruct-AWQ（4bit 量化，单卡 3090 即可运行） | - |
+| 包管理 | pnpm（前端）/ pip（后端） | 11.9 / 24+ |
 
 ## 环境要求
 
-- **Python** 3.11+
-- **Node.js** 20+
-- **pnpm** 9+
-- **NVIDIA GPU**（推荐 RTX 3090 24GB，单卡即可运行 Qwen2.5-7B-Instruct FP16）
-- **CUDA** 12.1
+| 组件 | 最低版本 | 推荐版本 | 说明 |
+|------|---------|---------|------|
+| Python | 3.12 | 3.12.3 | vLLM 0.22.1 + transformers v5 要求 |
+| Node.js | 22 LTS | 22.23.1 | 前端构建，通过 nvm 安装 |
+| pnpm | 11 | 11.9.0 | 通过 corepack 启用 |
+| CUDA 驱动 | 525+ | 595.58.03 | RTX 3090 推荐 |
+| CUDA Runtime | 12.1+ | 13.0 | torch 2.11.0+cu130 内置 |
+| GPU 显存 | 16GB | 24GB (3090) | AWQ 4bit 需 ~14GB |
+| 磁盘空间 | 20GB | 40GB | 含模型 10GB + 依赖 5GB + 缓存 |
 
-CPU 模式运行：将 vLLM 替换为 Ollama 即可（见下文）。
+> CPU-only 模式：将 vLLM 替换为 Ollama，设置 `MODEL_PROVIDER=ollama`。
 
-## 快速开始
+## 服务架构
 
-### 1. 克隆项目
+```
+浏览器 ──HTTP:5000──> Next.js 前端 ──/api/*──> FastAPI 后端 ──HTTP:8001──> vLLM 推理
+                         (Next.js)              (FastAPI)                  (Qwen2.5-7B-AWQ)
+                         端口 5000               端口 8000                  端口 8001
+                                                  │
+                                                  ├── SQLite (qq_assistant.db)
+                                                  ├── Faiss 向量库 (vector_db/)
+                                                  └── Redis [可选]
+```
+
+- **vLLM (8001)**: 加载 Qwen2.5-7B-Instruct-AWQ，提供 OpenAI 兼容的 `/v1/chat/completions` API
+- **FastAPI (8000)**: 业务后端，管理认证/对话/训练/知识库，代理 vLLM 推理请求
+- **Next.js (5000)**: 前端管理面板，`/api/*` 路由反向代理到 FastAPI
+
+## 快速部署（AutoDL / 裸机，已验证）
+
+以下命令在 AutoDL RTX 3090 容器（Ubuntu 22.04 / CUDA 驱动 595 / miniconda3）上验证通过。
+
+### 0. 前置条件
 
 ```bash
+# SSH 免密登录（本地执行，~/.ssh/config）
+Host seetacloud
+    HostName connect.nmb2.seetacloud.com
+    Port 16389
+    User root
+    IdentityFile ~/.ssh/id_rsa
+
+# 服务器上确认 GPU 和驱动
+nvidia-smi  # 应显示 RTX 3090, 驱动 525+, CUDA 13.0+
+```
+
+### 1. 克隆代码
+
+```bash
+cd /root/autodl-tmp
 git clone https://github.com/despaoy/qqchat-enhanced.git
 cd qqchat-enhanced
 ```
 
-### 2. 安装前端依赖
+### 2. 安装 Python 依赖（严格按顺序）
 
 ```bash
-pnpm install
-```
+source /root/miniconda3/etc/profile.d/conda.sh
+conda activate base
 
-### 3. 安装后端依赖
+# ① PyTorch CUDA 13.0（vllm 0.22.1 硬性依赖 torch==2.11.0）
+pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
+    --index-url https://download.pytorch.org/whl/cu130
 
-```bash
+# ② vLLM 0.22.1（勿用 0.23.0+，有 pip 元数据解析 bug）
+pip install vllm==0.22.1
+
+# ③ 其余依赖
 cd backend
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# venv\Scripts\activate   # Windows
-
-# 先安装 PyTorch (CUDA 12.1)
-pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
-    --index-url https://download.pytorch.org/whl/cu121
-
-# 再安装 vLLM
-pip install vllm==0.7.2
-
-# 最后安装其余依赖
 pip install -r requirements.txt
 ```
 
-### 4. 下载模型
+### 3. 安装 Node.js + pnpm
 
 ```bash
-pip install huggingface_hub
+# Node.js 22 LTS（通过 nvm）
+export NVM_DIR=/root/.nvm
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+source /root/.nvm/nvm.sh
+nvm install 22
+nvm alias default 22
 
-# 下载 Qwen2.5-7B-Instruct（原版 FP16，约 15GB，3090 单卡可运行）
-huggingface-cli download Qwen/Qwen2.5-7B-Instruct \
-    --local-dir /root/autodl-tmp/Qwen2.5-7B-Instruct
-
-# 或下载 AWQ 4bit 量化版（约 5GB，显存占用更小，适合多 LoRA 并存）
-huggingface-cli download Qwen/Qwen2.5-7B-Instruct-AWQ \
-    --local-dir /root/autodl-tmp/Qwen2.5-7B-Instruct-AWQ
+# pnpm 11（通过 corepack，Node 22 内置）
+corepack enable
+corepack prepare pnpm@latest --activate
+pnpm --version  # 应显示 11.x
 ```
 
-LoRA 适配器模型放入 `backend/loras/` 下（可选）。
+### 4. 构建前端
 
-### 5. 配置环境变量
+```bash
+cd /root/autodl-tmp/qqchat-enhanced
+pnpm install
+pnpm build    # 输出 .next/standalone/
+```
+
+### 5. 下载模型
+
+模型应放在项目目录外（如 `/root/autodl-tmp/models/`），避免重新克隆时丢失，然后符号链接到 `backend/models`：
+
+```bash
+# 创建稳定存储目录
+mkdir -p /root/autodl-tmp/models
+
+# 下载 Qwen2.5-7B-Instruct-AWQ（约 5.2GB，国内用 hf-mirror 加速）
+export HF_ENDPOINT=https://hf-mirror.com
+pip install huggingface_hub
+huggingface-cli download Qwen/Qwen2.5-7B-Instruct-AWQ \
+    --local-dir /root/autodl-tmp/models/Qwen2.5-7B-Instruct-AWQ
+
+# 下载嵌入模型（约 4.4GB，知识库检索用）
+huggingface-cli download sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 \
+    --local-dir /root/autodl-tmp/models/paraphrase-multilingual-MiniLM-L12-v2
+
+# 符号链接到项目目录（如已存在 backend/models 目录，先删除）
+rmdir /root/autodl-tmp/qqchat-enhanced/backend/models 2>/dev/null || true
+ln -s /root/autodl-tmp/models /root/autodl-tmp/qqchat-enhanced/backend/models
+```
+
+### 6. 配置环境变量
 
 ```bash
 cp .env.example backend/.env
 ```
 
-关键配置项：
+编辑 `backend/.env`，关键配置项（AWQ 量化版）：
 
 ```env
-# vLLM 推理服务地址
+ENVIRONMENT=production
 VLLM_BASE_URLS=http://localhost:8001
-VLLM_MODEL=Qwen/Qwen2.5-7B-Instruct
-VLLM_TIMEOUT=120
-VLLM_MAX_RETRIES=3
-
-# 数据库路径
+VLLM_MODEL=/root/autodl-tmp/models/Qwen2.5-7B-Instruct-AWQ
+VLLM_ENABLED=true
+MODEL_PROVIDER=vllm
+HF_ENDPOINT=https://hf-mirror.com
+MODEL_PATH=./models/Qwen2.5-7B-Instruct-AWQ
+LORA_PATH=./loras
 DATABASE_PATH=./qq_assistant.db
-
-# 向量数据库路径
 VECTOR_DB_PATH=./vector_db
-
-# CORS 允许的前端地址
-CORS_ORIGINS=http://localhost:5000
+CORS_ORIGINS=http://localhost:5000,http://localhost:3000
 ```
 
-### 6. 启动推理服务
+创建必要目录：
 
 ```bash
-# 单卡 3090 FP16 模式（推荐）
-python -m vllm.entrypoints.openai.api_server \
-    --model /root/autodl-tmp/Qwen2.5-7B-Instruct \
-    --enable-lora \
-    --max-loras 4 \
-    --max-lora-rank 64 \
-    --gpu-memory-utilization 0.90 \
-    --max-model-len 4096 \
-    --dtype float16 \
-    --host 0.0.0.0 \
-    --port 8001
-
-# AWQ 4bit 量化模式
-python -m vllm.entrypoints.openai.api_server \
-    --model /root/autodl-tmp/Qwen2.5-7B-Instruct-AWQ \
-    --quantization awq \
-    --enable-lora \
-    --max-loras 8 \
-    --max-lora-rank 64 \
-    --gpu-memory-utilization 0.85 \
-    --max-model-len 4096 \
-    --dtype half \
-    --host 0.0.0.0 \
-    --port 8001
-
-# 或使用启动脚本
-python backend/scripts/launch_vllm.py                    # FP16 默认
-python backend/scripts/launch_vllm.py --quant awq       # AWQ 量化
-python backend/scripts/launch_vllm.py --tensor-parallel 2  # 双卡并行
-
-# 或 CPU 模式（Ollama）
-ollama pull qwen2.5:7b
-ollama serve
-# 然后设置环境变量 MODEL_PROVIDER=ollama
+mkdir -p backend/loras backend/data
 ```
 
-### 7. 启动后端
+### 7. 启动服务（三个 nohup 后台进程）
 
 ```bash
-cd backend
-python run.py --port 8000 --reload
-```
+source /root/miniconda3/etc/profile.d/conda.sh && conda activate base
 
-### 8. 启动前端
-
-```bash
-pnpm dev --port 5000
-```
-
-访问 http://localhost:5000 进入管理界面。
-
-## AutoDL 一键部署（RTX 3090）
-
-```bash
-# 1. 选择镜像：PyTorch 2.4.0 / CUDA 12.1 / Python 3.11
-# 2. 执行初始化
-cd /root/autodl-tmp
-git clone https://github.com/despaoy/qqchat-enhanced.git
-cd qqchat-enhanced/backend
-
-python -m venv /root/autodl-tmp/qqchat-env
-source /root/autodl-tmp/qqchat-env/bin/activate
-
-pip install torch==2.4.1+cu121 torchvision==0.19.1+cu121 torchaudio==2.4.1+cu121 \
-    --index-url https://download.pytorch.org/whl/cu121
-pip install vllm==0.7.2
-pip install -r requirements.txt
-
-# 3. 下载模型
-huggingface-cli download Qwen/Qwen2.5-7B-Instruct \
-    --local-dir /root/autodl-tmp/Qwen2.5-7B-Instruct
-
-# 4. 启动 vLLM（后台）
+# ① vLLM（加载模型约 3 分钟，AWQ 用 float16，勿用 bfloat16）
+cd /root/autodl-tmp/qqchat-enhanced/backend
 nohup python -m vllm.entrypoints.openai.api_server \
-    --model /root/autodl-tmp/Qwen2.5-7B-Instruct \
-    --dtype float16 --max-model-len 4096 \
-    --gpu-memory-utilization 0.90 --enable-lora \
-    --max-loras 4 --max-lora-rank 64 \
+    --model /root/autodl-tmp/models/Qwen2.5-7B-Instruct-AWQ \
+    --enable-lora --max-loras 8 --max-lora-rank 64 \
+    --gpu-memory-utilization 0.9 --max-model-len 4096 \
+    --dtype float16 --tensor-parallel-size 1 \
     --host 0.0.0.0 --port 8001 \
-    > /root/autodl-tmp/vllm.log 2>&1 &
+    --enable-prefix-caching --trust-remote-code \
+    > /root/vllm.log 2>&1 < /dev/null &
 
-# 5. 启动后端
-export VLLM_BASE_URLS=http://localhost:8001
-python run.py --port 8000
+# 等待 vLLM 健康（约 175 秒）
+until curl -sf http://localhost:8001/health; do sleep 5; done && echo "vLLM ready"
+
+# ② FastAPI 后端
+nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 \
+    > /root/backend.log 2>&1 < /dev/null &
+sleep 5 && curl -s http://localhost:8000/health
+
+# ③ Next.js 前端（生产模式）
+export NVM_DIR=/root/.nvm && source /root/.nvm/nvm.sh && nvm use 22 >/dev/null
+cd /root/autodl-tmp/qqchat-enhanced
+nohup pnpm start > /root/frontend.log 2>&1 < /dev/null &
+sleep 3 && curl -s -o /dev/null -w "Frontend: %{http_code}\n" http://localhost:5000
+```
+
+### 8. 本地访问（SSH 端口转发）
+
+在本地终端执行：
+
+```bash
+ssh -N -L 5000:localhost:5000 -L 8000:localhost:8000 seetacloud
+```
+
+浏览器访问 http://localhost:5000 即可进入管理面板。
+
+## 一键启动脚本
+
+项目内置 `deploy/scripts/start_all.sh` 支持裸机/Docker 两种模式：
+
+```bash
+# 裸机模式（注意：默认启动 2 个 vLLM 实例，单 GPU 环境需手动修改为 1 个）
+bash deploy/scripts/start_all.sh bare
+
+# Docker 模式（需 NVIDIA Container Toolkit）
+bash deploy/scripts/start_all.sh docker
+```
+
+> ⚠️ `start_all.sh` 默认启动 2 个 vLLM 实例（双 GPU），单卡环境请参考上方手动启动命令。
+
+## 日志与进程管理
+
+```bash
+# 查看日志
+tail -f /root/vllm.log       # vLLM
+tail -f /root/backend.log    # FastAPI
+tail -f /root/frontend.log   # Next.js
+
+# 查看进程
+ps aux | grep -E "vllm.entrypoints|uvicorn|next start" | grep -v grep
+
+# 停止服务
+pkill -f vllm.entrypoints
+pkill -f "uvicorn app.main"
+pkill -f "next start"
 ```
 
 ## 目录结构
 
 ```
-src/                         # 前端（Next.js 16）
-├── app/                    # 页面路由 + API 代理
-├── components/             # React 组件 (shadcn/ui)
-├── contexts/               # 认证/设置上下文
-├── hooks/                  # 自定义 Hooks
-└── lib/                    # API 客户端 + 类型
-
-backend/                     # 后端（FastAPI）
-├── app/                    # 应用核心（配置/依赖注入/模块管理）
-├── api/                    # API 路由（auth/knowledge/training/loras/stats...）
-├── db/                     # 数据库层（SQLite + PostgreSQL + Pydantic 模型）
-├── inference/              # 推理引擎（vLLM 客户端/模型管理/优化器）
-├── knowledge/              # 知识检索（Faiss/RAG/重排序/文本分块）
-├── training/               # 训练模块（LoRA 训练器/数据预处理）
-├── bot/                    # QQ 机器人（NoneBot2）
-├── cache/                  # 缓存层（Redis/语义缓存/消息队列）
-├── middleware/              # 安全中间件（限流/认证/审计）
-├── infra/                  # 基础设施（负载均衡/熔断/备份/故障转移）
-├── scripts/                # 部署与启动脚本
-└── tests/                  # 测试
-
-deploy/                      # 部署配置
-├── docker-compose.yml      # Docker Compose（PostgreSQL + Redis + vLLM + Nginx）
-└── nginx/                  # Nginx 反向代理配置
+qqchat-enhanced/
+├── src/                         # 前端（Next.js 16）
+│   ├── app/                      # 页面路由 + API 代理
+│   ├── components/               # React 组件 (shadcn/ui)
+│   ├── contexts/                 # 认证/设置上下文
+│   ├── hooks/                    # 自定义 Hooks
+│   └── lib/                      # API 客户端 + 类型
+├── backend/                      # 后端（FastAPI）
+│   ├── app/                      # 应用核心（配置/依赖注入/模块管理）
+│   ├── api/                      # API 路由
+│   ├── db/                       # 数据库层（SQLite + PostgreSQL）
+│   ├── inference/                # 推理引擎（vLLM 客户端）
+│   ├── knowledge/                # 知识检索（Faiss/RAG）
+│   ├── training/                 # LoRA 训练
+│   ├── bot/                      # QQ 机器人（NoneBot2）
+│   ├── cache/                    # 缓存层（Redis/语义缓存）
+│   ├── infra/                    # 基础设施（熔断/备份/故障转移）
+│   ├── models -> /root/autodl-tmp/models  # 符号链接（模型）
+│   └── requirements.txt
+├── deploy/
+│   ├── scripts/
+│   │   ├── start_all.sh          # 一键启动（Docker/Bare-metal）
+│   │   └── start_vllm.sh         # vLLM 单实例启动
+│   └── docker-compose.yml
+├── Dockerfile                    # 前端 Docker 镜像
+├── .env.example                  # 环境变量模板
+└── package.json
 ```
 
 ## Docker 部署
 
 ```bash
 cd deploy
-
-# 配置环境变量
 cp ../.env.example .env
 # 编辑 .env 设置 PG_PASSWORD 等敏感信息
 
-# 下载模型
-huggingface-cli download Qwen/Qwen2.5-7B-Instruct \
-    --local-dir /root/autodl-tmp/Qwen2.5-7B-Instruct
-
-# 启动
 docker compose up -d
 ```
 
 ## RTX 3090 性能参考
 
-| 模式 | 显存占用 | 首 token 延迟 | 输出速度 | 最大并发 |
-|------|---------|--------------|---------|---------|
-| FP16 全量 | ~21GB | ~1.8s | ~115 tok/s | 3 |
-| AWQ 4bit | ~14GB | ~1.2s | ~78 tok/s | 5-6 |
+| 模式 | 显存占用 | 模型加载 | 首 token 延迟 | 输出速度 | 最大并发 |
+|------|---------|---------|--------------|---------|---------|
+| AWQ 4bit (float16) | ~14GB | ~175s | ~1.2s | ~78 tok/s | 5-6 |
+| FP16 全量 | ~21GB | ~120s | ~1.8s | ~115 tok/s | 3 |
+
+## 常见问题
+
+### vLLM 安装报 `TypeError: expected string or bytes-like object, got 'NoneType'`
+
+vLLM 0.23.0+ 在 pip 依赖解析阶段有元数据解析 bug。**必须使用 `vllm==0.22.1`**：
+
+```bash
+pip install vllm==0.22.1  # 不要用 pip install vllm（会装 0.23.0）
+```
+
+### vLLM 报 `unrecognized arguments: --lora-modules-dir`
+
+vLLM 0.22.1 已移除 `--lora-modules-dir` 参数。LoRA 适配器通过 API 动态加载，只需 `--enable-lora` 即可，无需指定目录。
+
+### vLLM 启动报 CUDA / dtype 相关错误
+
+AWQ 量化模型必须使用 `--dtype float16`（或 `auto`），**不要用 `--dtype bfloat16`**。RTX 3090 的 Ampere 架构对 bfloat16 + AWQ 组合支持有限。
+
+### `pnpm start` 报 `output: standalone` 警告
+
+Next.js 16 在 `output: 'standalone'` 模式下推荐用 `node .next/standalone/server.js` 启动。`pnpm start` 仍可工作，但会有警告。生产环境可用：
+
+```bash
+PORT=5000 HOSTNAME=0.0.0.0 node .next/standalone/server.js
+```
+
+### Redis 连接失败
+
+后端启动时显示 `Redis 缓存连接失败，将使用数据库直连模式` 是正常的——未配置 Redis 时自动降级。如需启用：
+
+```bash
+# .env 中添加
+REDIS_URL=redis://localhost:6379/0
+```
+
+### JWT_SECRET 自动生成
+
+首次启动后端会自动生成 JWT 密钥并写入 `.env`。多实例部署时需手动统一 `JWT_SECRET` 值。
+
+### 前端端口冲突
+
+修改 `package.json` 中 `"start": "next start -p 5000"` 的端口号，并同步更新后端 `.env` 的 `CORS_ORIGINS`。
+
+### 显存不足
+
+- 使用 AWQ 4bit 量化模型（默认推荐）
+- 降低 `--gpu-memory-utilization`（如 0.85）
+- 降低 `--max-model-len`（如 2048）
+- 减少 `--max-loras` 数量
 
 ## 知识库初始化
 
 ```bash
-mkdir -p backend/knowledge_bases
+# 嵌入模型已通过符号链接包含在 backend/models/ 中
+# 首次使用知识库功能时自动加载
 
-# 下载嵌入模型（首次启动自动下载）
-pip install sentence-transformers
-python -c "from sentence_transformers import SentenceTransformer; \
-    SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')"
-
-# 下载重排序模型
-huggingface-cli download BAAI/bge-reranker-base \
-    --local-dir backend/bge-reranker-base
+# 如需重新下载嵌入模型
+huggingface-cli download sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 \
+    --local-dir /root/autodl-tmp/models/paraphrase-multilingual-MiniLM-L12-v2
 ```
-
-## 常见问题
-
-**Q: 显存不足？**
-使用 AWQ 量化模型，或降低 `--gpu-memory-utilization` 和 `--max-model-len`。
-
-**Q: 纯 CPU 运行？**
-安装 Ollama 替代 vLLM，设置 `MODEL_PROVIDER=ollama`。
-
-**Q: 前端端口冲突？**
-修改 `pnpm dev --port 5000` 中的端口号，并同步更新后端的 `CORS_ORIGINS`。
-
-**Q: 知识库搜索无结果？**
-确保嵌入模型已下载，向量库已建好索引。
-
-**Q: RTX 3090 不支持 bfloat16？**
-正确，请使用 `--dtype float16` 或 `--dtype half`，不要使用 `--dtype bfloat16`。
 
 ## License
 

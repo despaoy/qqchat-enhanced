@@ -19,9 +19,10 @@ ARG INSTALL_GPU_DEPS=true
 COPY requirements.txt .
 
 # Conditional dependency installation based on GPU availability
+# vllm 0.22.1 严格依赖 torch==2.11.0，必须先装 torch 再装 vllm
 RUN if [ "$INSTALL_GPU_DEPS" = "true" ]; then \
         echo "Installing GPU dependencies (PyTorch CUDA 13.0 + vLLM)..." && \
-        pip install --no-cache-dir torch torchvision torchaudio \
+        pip install --no-cache-dir torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
             --index-url https://download.pytorch.org/whl/cu130 && \
         pip install --no-cache-dir vllm==0.22.1; \
     else \
