@@ -165,8 +165,11 @@ class VectorDatabase:
 
     _LOCAL_MODEL_SEARCH_PATHS = [
         Path(__file__).parent.parent / "RAG" / "paraphrase-multilingual-MiniLM-L12-v2",
-        Path(__file__).parent / "models" / "paraphrase-multilingual-MiniLM-L12-v2",
+        Path(__file__).parent.parent / "models" / "paraphrase-multilingual-MiniLM-L12-v2",
         Path.home() / ".cache" / "huggingface" / "hub" / "models--sentence-transformers--paraphrase-multilingual-MiniLM-L12-v2",
+        # 国内镜像/ModelScope 缓存路径
+        Path.home() / ".cache" / "modelscope" / "hub" / "iic" / "nlp_corom_sentence-embedding_chinese-base",
+        Path("/root/autodl-tmp/models/paraphrase-multilingual-MiniLM-L12-v2"),
     ]
 
     @classmethod
