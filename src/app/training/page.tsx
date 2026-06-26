@@ -10,7 +10,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import {
   Database,
-  Play,
   Pause,
   Settings,
   BrainCircuit,
@@ -1031,7 +1030,7 @@ function TrainingContent() {
                           <span>{genGeneratedCount} / {genTotal} 组 ({genProgress.toFixed(0)}%)</span>
                         </div>
                         <p className="text-xs text-muted-foreground text-center">
-                          正在分批调用大模型生成对话（每批20组，覆盖8个维度场景）
+                          正在分批调用大模型生成对话（每批6组，覆盖12种场景类型，1-8轮多轮对话）
                         </p>
                       </div>
                     )}
@@ -1702,24 +1701,14 @@ function TrainingContent() {
                         <span>{dataset.stats.eval || 0}</span>
                       </div>
                     </CardContent>
-                    <CardFooter className="border-t pt-4 gap-2">
-                      <Button
-                        className="flex-1"
-                        onClick={() => {
-                          setSelectedDataset(dataset.name);
-                          setStartTrainingOpen(true);
-                        }}
-                      >
-                        <Play className="mr-2 h-4 w-4" />
-                        训练
-                      </Button>
+                    <CardFooter className="border-t pt-4">
                       <Button
                         variant="outline"
-                        className="flex-1"
+                        className="w-full"
                         onClick={() => handleExportDataset(dataset.name)}
                       >
                         <Download className="mr-2 h-4 w-4" />
-                        导出
+                        导出数据集
                       </Button>
                     </CardFooter>
                   </Card>

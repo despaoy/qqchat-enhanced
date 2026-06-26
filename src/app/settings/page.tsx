@@ -340,7 +340,9 @@ function SettingsContent() {
                           <SelectValue placeholder={t('settings.model.provider')} />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="vllm">vLLM (本地GPU推理)</SelectItem>
                           <SelectItem value="openai_compat">DeepSeek / OpenAI 兼容 API</SelectItem>
+                          <SelectItem value="transformers_peft">Transformers + PEFT (本地)</SelectItem>
                           <SelectItem value="ollama">Ollama (本地)</SelectItem>
                           <SelectItem value="llama_cpp">llama.cpp (本地)</SelectItem>
                           <SelectItem value="mock">Mock (测试)</SelectItem>
@@ -377,6 +379,39 @@ function SettingsContent() {
                             placeholder="deepseek-chat"
                           />
                         </div>
+                      </div>
+                    )}
+                    {getStr('modelProvider', 'mock') === 'vllm' && (
+                      <div className="space-y-3 rounded-lg border p-4 bg-muted/30">
+                        <div className="space-y-1">
+                          <Label>vLLM 推理服务</Label>
+                          <p className="text-sm text-muted-foreground">
+                            vLLM 通过环境变量配置 (VLLM_ENABLED, VLLM_BASE_URLS)。
+                            请确保 vLLM 服务已启动并正常运行。
+                          </p>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            try {
+                              const res = await fetch('/api/vllm/status');
+                              const data = await res.json();
+                              if (data.enabled && data.summary?.all_healthy) {
+                                toast.success(`vLLM 运行正常 (${data.summary.healthy}/${data.summary.total} 实例健康)`);
+                              } else if (data.enabled) {
+                                toast.warning(`vLLM 已启用但有实例不健康 (${data.summary?.healthy}/${data.summary?.total})`);
+                              } else {
+                                toast.error('vLLM 未启用，请检查环境变量 VLLM_ENABLED 和 VLLM_BASE_URLS');
+                              }
+                            } catch {
+                              toast.error('无法获取 vLLM 状态');
+                            }
+                          }}
+                        >
+                          <Zap className="mr-2 h-4 w-4" />
+                          检查 vLLM 连接状态
+                        </Button>
                       </div>
                     )}
                     <div className="space-y-2">
