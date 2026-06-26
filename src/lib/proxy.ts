@@ -79,9 +79,8 @@ export async function proxyRequest(
 
   // 安全：禁止转发到未授权的后端路径，防止把整张后端 API 表面开放成代理
   if (!isProxyPathAllowed(path)) {
-    console.error(`[proxy] BLOCKED path: "${path}"`);
     return new Response(
-      JSON.stringify({ detail: `禁止访问该路径: ${path}` }),
+      JSON.stringify({ detail: '禁止访问该路径' }),
       { status: 403, headers: { 'Content-Type': 'application/json' } }
     );
   }
