@@ -24,6 +24,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     DataCollatorForSeq2Seq,
+    BitsAndBytesConfig,
 )
 from peft import (
     LoraConfig,
@@ -193,6 +194,8 @@ class LoRATrainingConfig:
     gradient_checkpointing: bool = True
     use_8bit_adam: bool = False
     use_deepspeed: bool = False
+    load_in_4bit: bool = False
+    load_in_8bit: bool = False
 
     logging_steps: int = 10
     report_to: str = "none"
@@ -465,12 +468,27 @@ class LoRATrainer:
         logger.info("加载基础模型...")
 
         torch_dtype = torch.bfloat16 if self.config.bf16 else torch.float16
+        load_kwargs: Dict[str, Any] = {
+            "torch_dtype": torch_dtype,
+            "device_map": "auto",
+            "low_cpu_mem_usage": True,
+        }
+
+        if self.config.load_in_4bit:
+            logger.info("启用 4-bit 量化加载 (NF4)")
+            load_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch_dtype,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+            )
+        elif self.config.load_in_8bit:
+            logger.info("启用 8-bit 量化加载")
+            load_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
 
         model = AutoModelForCausalLM.from_pretrained(
             str(self.config.base_model_path),
-            torch_dtype=torch_dtype,
-            device_map="auto",
-            low_cpu_mem_usage=True,
+            **load_kwargs,
         )
         model = prepare_model_for_kbit_training(model)
         self.print_gpu_memory("基础模型加载后")
