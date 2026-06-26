@@ -30,7 +30,6 @@ const PROXY_ALLOWED_PREFIXES = [
   '/api/stats',
   '/api/services',
   '/api/claw',
-  '/api/module',
   '/api/enhanced',
   '/health',
   '/ready',

@@ -1,9 +1,6 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
-/* 限制 Tailwind 只扫描 src 目录，避免扫描 backend 目录中的大文件导致 OOM */
-@source "../../**/*.{ts,tsx,js,jsx}";
-
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

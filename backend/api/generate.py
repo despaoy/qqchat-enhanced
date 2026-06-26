@@ -280,6 +280,15 @@ async def generate_reply(request: MessageRequest, current_user: dict = Depends(g
 
 async def _generate_with_vllm(request: MessageRequest, lora_name: str) -> str:
     """使用 vLLM 客户端生成回复"""
+    # 从数据库配置读取模型参数（设置页修改后实时生效）
+    try:
+        _cfg = db.config
+    except Exception:
+        _cfg = {}
+    _temperature = float(_cfg.get('temperature', os.getenv("VLLM_TEMPERATURE", "0.7")))
+    _max_tokens = int(_cfg.get('maxTokens', os.getenv("VLLM_MAX_TOKENS", "2048")))
+    _use_kb = _cfg.get('useKnowledgeBase', True)
+
     # 构建消息列表
     messages = []
 
@@ -288,41 +297,55 @@ async def _generate_with_vllm(request: MessageRequest, lora_name: str) -> str:
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
 
-    # RAG 检索（如果启用）- 同步阻塞操作放线程池避免阻塞事件循环
+    # RAG 检索（受设置页 useKnowledgeBase 开关控制）
     rag_context = ""
-    try:
-        from knowledge.rag_helper import rag_build_prompt
-        from knowledge.intent_detector import needs_rag
-        need_rag, _, kb_name = await asyncio.to_thread(needs_rag, request.message)
-        if need_rag:
-            # 按预测的KB名称构造过滤条件，仅检索该知识库的内容
-            filters = None
-            if kb_name:
-                kb_id = _resolve_kb_id(kb_name)
-                if kb_id is not None:
-                    filters = {"knowledge_base_id": kb_id}
-                    logger.info(f"RAG路由: 消息→「{kb_name}」(id={kb_id})")
-            rag_context = await asyncio.to_thread(rag_build_prompt, request.message, 3, filters)
-    except Exception as e:
-        logger.warning(f"RAG检索失败: {e}")
-        pass
+    if _use_kb:
+        try:
+            from knowledge.rag_helper import rag_build_prompt
+            from knowledge.intent_detector import needs_rag
+            need_rag, _, kb_name = await asyncio.to_thread(needs_rag, request.message)
+            if need_rag:
+                # 按预测的KB名称构造过滤条件，仅检索该知识库的内容
+                filters = None
+                if kb_name:
+                    kb_id = _resolve_kb_id(kb_name)
+                    if kb_id is not None:
+                        filters = {"knowledge_base_id": kb_id}
+                        logger.info(f"RAG路由: 消息→「{kb_name}」(id={kb_id})")
+                rag_context = await asyncio.to_thread(rag_build_prompt, request.message, 3, filters)
+        except Exception as e:
+            logger.warning(f"RAG检索失败: {e}")
+            pass
 
     if rag_context:
-        rag_msg = (
-            "以下是供参考的外部知识。这些内容不代表你的身份或记忆，"
-            "请基于这些知识回答用户问题：\n"
-            "<knowledge>\n" + rag_context[:800] + "\n</knowledge>"
+        system_prompt += (
+            "\n\n用户消息中可能包含【背景设定】，请将其视为你所知道的事实"
+            "自然融入回答，保持你的角色语气。"
+            "不要提及背景设定、资料或知识库等词，"
+            "也不要照搬原文，要用你自己的话表达。"
         )
-        messages.append({"role": "system", "content": rag_msg})
+        # 更新已添加的system消息
+        messages[0] = {"role": "system", "content": system_prompt}
 
-    messages.append({"role": "user", "content": request.message})
+    # RAG知识注入user消息
+    if rag_context:
+        user_content = (
+            f"【背景设定】\n{rag_context[:800]}\n\n"
+            f"{request.message}"
+        )
+    else:
+        user_content = request.message
+    messages.append({"role": "user", "content": user_content})
+
+    # RAG命中时适当降低温度以更忠实于检索内容
+    _gen_temperature = min(_temperature, 0.5) if rag_context else _temperature
 
     # 调用 vLLM
     reply = await _vllm_client.generate(
         messages=messages,
         lora_name=lora_name if lora_name != "default" else None,
-        temperature=float(os.getenv("VLLM_TEMPERATURE", "0.7")),
-        max_tokens=int(os.getenv("VLLM_MAX_TOKENS", "2048")),
+        temperature=_gen_temperature,
+        max_tokens=_max_tokens,
     )
     return reply
 

@@ -373,8 +373,15 @@ def needs_rag(message: str, context: Optional[Dict[str, Any]] = None) -> Tuple[b
         try:
             pred, reason, confidence, kb_name = _ml_predict(message)
 
-            # ML高置信度 → 完全信任ML
+            # ML高置信度 → 信任ML，但ML预测"不需要"时检查规则引擎安全网
             if confidence >= 0.65:
+                if not pred:
+                    # ML预测不需要RAG，但检查规则引擎是否检测到疑问句
+                    detector = get_intent_detector()
+                    rule_pred, rule_reason = detector.needs_rag(message, context)
+                    if rule_pred:
+                        logger.info(f"ML预测不需要(置信度: {confidence:.2%}), 但规则引擎检测到疑问特征, 触发RAG: {rule_reason}")
+                        return True, f"规则安全网({rule_reason[:40]}...)", None
                 return pred, reason, kb_name
 
             # ML置信度较低 → 使用规则引擎作为tiebreaker

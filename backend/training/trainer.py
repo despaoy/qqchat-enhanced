@@ -150,6 +150,18 @@ class GpuTemperatureCallback(TrainerCallback):
         logger.info(f"训练完成。GPU最高温度记录: {self._max_observed:.0f}°C, 散热暂停次数: {self._cooldown_count}")
 
 
+class ProgressCallback(TrainerCallback):
+    """训练进度报告回调，将训练进度实时更新到任务管理器（基于 global_step/max_steps 计算 0-100 百分比）。"""
+
+    def __init__(self, progress_fn=None):
+        self.progress_fn = progress_fn
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if self.progress_fn and state.max_steps > 0:
+            progress = min(100, int(state.global_step / state.max_steps * 100))
+            self.progress_fn(progress, state.global_step, state.max_steps)
+        return control
+
 
 @dataclass
 class LoRATrainingConfig:
@@ -270,15 +282,17 @@ class LoRATrainer:
     支持早停、GPU温度保护、检查点恢复、最佳模型自动选择。
     """
 
-    def __init__(self, config: Optional[LoRATrainingConfig] = None):
+    def __init__(self, config: Optional[LoRATrainingConfig] = None, progress_fn=None):
         """初始化训练器。
 
         Args:
             config: 训练配置，默认使用LoRATrainingConfig()
+            progress_fn: 训练进度回调函数，签名 (progress:int, current_step:int, total_steps:int) -> None
         """
         self.config = config or LoRATrainingConfig()
         self._tokenizer = None
         self._model = None
+        self.progress_fn = progress_fn
 
     def print_gpu_memory(self, stage: str = ""):
         if torch.cuda.is_available():
@@ -668,6 +682,10 @@ class LoRATrainer:
             )
             callbacks.append(gpu_temp_callback)
             logger.info("已启用GPU温度保护: max=82°C, cooldown=72°C, interval=20步")
+
+            if self.progress_fn:
+                callbacks.append(ProgressCallback(self.progress_fn))
+                logger.info("已启用训练进度报告回调")
 
             training_args = SFTConfig(
                 output_dir=str(output_dir),

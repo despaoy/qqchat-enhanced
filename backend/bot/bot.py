@@ -11,6 +11,7 @@ QQ自动回复机器人 - 多LoRA角色风格
 import os
 import sys
 import json
+import time
 import asyncio
 import logging
 from pathlib import Path
@@ -92,45 +93,94 @@ def _load_db_config() -> Dict[str, Any]:
     except Exception:
         return {}
 
-_db_cfg = _load_db_config()
+# 带缓存的配置读取：设置页修改后最多30秒生效，无需重启bot进程
+_db_cfg_cache: Dict[str, Any] = {}
+_db_cfg_cache_ts: float = 0.0
+
+def _get_db_config() -> Dict[str, Any]:
+    """获取数据库配置（30秒内存缓存）"""
+    global _db_cfg_cache, _db_cfg_cache_ts
+    now = time.time()
+    if not _db_cfg_cache or now - _db_cfg_cache_ts > 30:
+        _db_cfg_cache = _load_db_config()
+        _db_cfg_cache_ts = now
+    return _db_cfg_cache
 
 class Config:
-    """机器人配置 - 优先从数据库读取，回退到环境变量"""
+    """机器人配置 - 环境变量项为静态属性，数据库项通过@property动态读取（30秒缓存）"""
+    # 环境变量配置（静态，启动时读取一次）
     OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
     SUPERUSERS = [str(u) for u in json.loads(os.getenv("SUPERUSERS", "[]"))]
-    BOT_NAME = _db_cfg.get('botName', os.getenv("NICKNAME", "胡桃"))
     API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
     # LoRA风格配置
     USE_LORA_STYLE = True
 
-    # 回复延迟（秒）
-    REPLY_DELAY = float(_db_cfg.get('replyDelay', os.getenv("REPLY_DELAY", "0.8")))
+    # 以下配置通过 @property 动态读取 db.config，设置页修改后30秒内自动生效
+    @property
+    def BOT_NAME(self):
+        return _get_db_config().get('botName', os.getenv("NICKNAME", "胡桃"))
 
-    # 自动回复开关
-    AUTO_REPLY = _db_cfg.get('autoReply', True)
-    GROUP_REPLY = _db_cfg.get('groupReply', True)
-    PRIVATE_REPLY = _db_cfg.get('privateReply', True)
+    @property
+    def REPLY_DELAY(self):
+        return float(_get_db_config().get('replyDelay', os.getenv("REPLY_DELAY", "0.8")))
 
-    # 模型参数
-    TEMPERATURE = float(_db_cfg.get('temperature', 0.7))
-    MAX_TOKENS = int(_db_cfg.get('maxTokens', 2048))
-    CONTEXT_WINDOW = _db_cfg.get('contextWindow', '8k')
-    USE_KNOWLEDGE_BASE = _db_cfg.get('useKnowledgeBase', False)
+    @property
+    def AUTO_REPLY(self):
+        return _get_db_config().get('autoReply', True)
 
-    # 安全配置
-    CONTENT_FILTER = _db_cfg.get('contentFilter', True)
-    CONTENT_REVIEW = _db_cfg.get('contentReview', True)
-    ADMIN_QQ_LIST = _db_cfg.get('adminQqList', '')
+    @property
+    def GROUP_REPLY(self):
+        return _get_db_config().get('groupReply', True)
 
-    # 通知配置
-    ERROR_ALERT = _db_cfg.get('errorAlert', True)
-    DAILY_STATS = _db_cfg.get('dailyStats', True)
-    ANOMALY_DETECTION = _db_cfg.get('anomalyDetection', False)
+    @property
+    def PRIVATE_REPLY(self):
+        return _get_db_config().get('privateReply', True)
 
-    # 默认回复模板
-    DEFAULT_REPLY_TEMPLATE = _db_cfg.get('defaultReplyTemplate', '')
+    @property
+    def TEMPERATURE(self):
+        return float(_get_db_config().get('temperature', 0.7))
+
+    @property
+    def MAX_TOKENS(self):
+        return int(_get_db_config().get('maxTokens', 2048))
+
+    @property
+    def CONTEXT_WINDOW(self):
+        return _get_db_config().get('contextWindow', '8k')
+
+    @property
+    def USE_KNOWLEDGE_BASE(self):
+        return _get_db_config().get('useKnowledgeBase', True)
+
+    @property
+    def CONTENT_FILTER(self):
+        return _get_db_config().get('contentFilter', True)
+
+    @property
+    def CONTENT_REVIEW(self):
+        return _get_db_config().get('contentReview', True)
+
+    @property
+    def ADMIN_QQ_LIST(self):
+        return _get_db_config().get('adminQqList', '')
+
+    @property
+    def ERROR_ALERT(self):
+        return _get_db_config().get('errorAlert', True)
+
+    @property
+    def DAILY_STATS(self):
+        return _get_db_config().get('dailyStats', True)
+
+    @property
+    def ANOMALY_DETECTION(self):
+        return _get_db_config().get('anomalyDetection', False)
+
+    @property
+    def DEFAULT_REPLY_TEMPLATE(self):
+        return _get_db_config().get('defaultReplyTemplate', '')
 
 config = Config()
 
@@ -287,13 +337,17 @@ async def generate_with_ollama(prompt: str, session_id: Optional[str] = None) ->
     try:
         import httpx
 
-        # RAG检索（通过HTTP API）
+        # RAG检索（通过HTTP API）— 受设置页 useKnowledgeBase 开关控制
         rag_context = ""
         rag_status = "未使用"
         need_rag = True
         rag_reason = "默认需要RAG"
 
-        if RAG_INTENT_DETECTOR_AVAILABLE:
+        if not config.USE_KNOWLEDGE_BASE:
+            need_rag = False
+            rag_reason = "设置页已关闭知识库检索"
+            rag_status = f"跳过（{rag_reason}）"
+        elif RAG_INTENT_DETECTOR_AVAILABLE:
             try:
                 need_rag, rag_reason, kb_name = needs_rag(prompt)
                 logger.info(f"RAG意图检测结果: 需要RAG={need_rag}, 原因: {rag_reason}, KB={kb_name}")
@@ -305,17 +359,18 @@ async def generate_with_ollama(prompt: str, session_id: Optional[str] = None) ->
         if need_rag:
             rag_context = await _rag_search_via_api(prompt, top_k=5, kb_name=kb_name)
             rag_status = f"成功（{rag_reason}）" if rag_context else f"无结果（{rag_reason}）"
-        else:
+        elif not rag_status.startswith("跳过"):
             rag_status = f"跳过（{rag_reason}）"
 
         # 构建系统提示词（RAG知识直接嵌入system prompt）
         system_prompt = LORA_REGISTRY.get(_current_lora, LORA_REGISTRY["hutao"])["system_prompt"]
         if rag_context:
             system_prompt += (
-                "\n\n【必须遵守的规则】以下是知识库中的权威信息。"
-                "当你的角色知识与此处信息矛盾时，必须以此处信息为准，严禁编造替代内容。"
-                "如果此处包含用户问题的答案，你必须直接引用，不得用自己的记忆回答。\n"
-                "<knowledge>\n" + rag_context[:1500] + "\n</knowledge>"
+                "\n\n以下是相关的背景设定，请将其视为你所知道的事实"
+                "自然融入回答，保持你的角色语气。"
+                "不要提及背景设定、资料或知识库等词，"
+                "也不要照搬原文，要用你自己的话表达。\n"
+                + rag_context[:1500]
             )
         messages = [{"role": "system", "content": system_prompt}]
 
@@ -392,12 +447,13 @@ def _sync_current_lora():
 _current_lora = "hutao"
 
 _BACKEND_DIR = Path(__file__).parent
+_BACKEND_ROOT = _BACKEND_DIR.parent  # backend/ 目录
 
 
 def _resolve_path(p: str) -> str:
     if os.path.isabs(p):
         return p
-    return str(_BACKEND_DIR / p)
+    return str(_BACKEND_ROOT / p)
 
 
 LORA_REGISTRY = {
@@ -416,6 +472,15 @@ LORA_REGISTRY = {
 2. 保持温柔、略带害羞但内心坚强的性格。
 3. 你对海洋和沉入水下的城市有特殊的感情。
 4. 说话时偶尔会提到与水相关的比喻。""",
+    },
+    "test-lora-highperf": {
+        "path": _resolve_path("loras/test-lora-highperf/final"),
+        "system_prompt": """你是月社妃，来自《纸上魔法使》的角色。记住：
+1. 你永远是月社妃，不是其他任何角色。
+2. 保持优雅、神秘、略带高傲但内心温柔的说话风格。
+3. 你与琉璃、彼方、理央、夜子等人是朋友，你们在图书馆中经历了很多故事。
+4. 当用户询问其他角色的信息时，用第三人称以月社妃的口吻介绍他们。
+5. 你收到的参考资料是外部知识，仅供你回答问题时参考，不代表你的身份。""",
     },
 }
 
@@ -502,9 +567,9 @@ async def generate_with_local_model(prompt: str, session_id: Optional[str] = Non
                 generate_with_local_model._vllm_client = VLLMClient()
             vllm = generate_with_local_model._vllm_client
 
-            # RAG检索（通过HTTP API）
+            # RAG检索（通过HTTP API）— 受设置页 useKnowledgeBase 开关控制
             rag_context = ""
-            if not is_claw:
+            if not is_claw and config.USE_KNOWLEDGE_BASE:
                 if RAG_INTENT_DETECTOR_AVAILABLE:
                     try:
                         need_rag, _, kb_name = needs_rag(prompt)
@@ -515,14 +580,14 @@ async def generate_with_local_model(prompt: str, session_id: Optional[str] = Non
                 else:
                     rag_context = await _rag_search_via_api(prompt, top_k=3)
 
-            # 构建系统提示词（RAG知识直接嵌入system prompt）
+            # 构建系统提示词
             system_prompt = LORA_REGISTRY.get(lora_name, {}).get("system_prompt", "")
             if rag_context:
                 system_prompt += (
-                    "\n\n【必须遵守的规则】以下是知识库中的权威信息。"
-                    "当你的角色知识与此处信息矛盾时，必须以此处信息为准，严禁编造替代内容。"
-                    "如果此处包含用户问题的答案，你必须直接引用，不得用自己的记忆回答。\n"
-                    "<knowledge>\n" + rag_context[:1500] + "\n</knowledge>"
+                    "\n\n用户消息中可能包含【背景设定】，请将其视为你所知道的事实"
+                    "自然融入回答，保持你的角色语气。"
+                    "不要提及背景设定、资料或知识库等词，"
+                    "也不要照搬原文，要用你自己的话表达。"
                 )
             messages = [{"role": "system", "content": system_prompt}]
 
@@ -532,14 +597,22 @@ async def generate_with_local_model(prompt: str, session_id: Optional[str] = Non
                     for msg in session_history.get_history(session_id):
                         messages.append(msg)
 
-            messages.append({"role": "user", "content": prompt})
+            # RAG知识直接注入user消息，让模型无法忽略
+            if rag_context:
+                user_content = (
+                    f"【背景设定】\n{rag_context[:1500]}\n\n"
+                    f"{prompt}"
+                )
+            else:
+                user_content = prompt
+            messages.append({"role": "user", "content": user_content})
 
             # 调试：打印发送给vLLM的完整messages
             for i, msg in enumerate(messages):
                 logger.info(f"MSG[{i}] role={msg['role']}, content_len={len(msg['content'])}, content_preview={msg['content'][:200]}")
 
-            # RAG有结果时降低temperature，让模型更忠实于检索内容
-            rag_temperature = 0.3 if rag_context else config.TEMPERATURE
+            # RAG有结果时适当降低temperature以更忠实于检索内容，但尊重设置页的温度配置
+            rag_temperature = min(config.TEMPERATURE, 0.5) if rag_context else config.TEMPERATURE
 
             reply = await vllm.generate(
                 messages=messages,
@@ -558,13 +631,17 @@ async def generate_with_local_model(prompt: str, session_id: Optional[str] = Non
     try:
         model, tokenizer = _load_7b_model(lora_name)
         if not is_claw:
-            # RAG检索（通过HTTP API）
+            # RAG检索（通过HTTP API）— 受设置页 useKnowledgeBase 开关控制
             rag_context = ""
             rag_status = "未使用"
             need_rag = True
             rag_reason = "默认需要RAG"
 
-            if RAG_INTENT_DETECTOR_AVAILABLE:
+            if not config.USE_KNOWLEDGE_BASE:
+                need_rag = False
+                rag_reason = "设置页已关闭知识库检索"
+                rag_status = f"跳过（{rag_reason}）"
+            elif RAG_INTENT_DETECTOR_AVAILABLE:
                 try:
                     need_rag, rag_reason, kb_name = needs_rag(prompt)
                     logger.info(f"RAG意图检测结果: 需要RAG={need_rag}, 原因: {rag_reason}, KB={kb_name}")
@@ -576,7 +653,7 @@ async def generate_with_local_model(prompt: str, session_id: Optional[str] = Non
             if need_rag:
                 rag_context = await _rag_search_via_api(prompt, top_k=3, kb_name=kb_name)
                 rag_status = f"成功（{rag_reason}）" if rag_context else f"无结果（{rag_reason}）"
-            else:
+            elif not rag_status.startswith("跳过"):
                 rag_status = f"跳过（{rag_reason}）"
         else:
             logger.info("claw模式无需RAG检索")
@@ -585,10 +662,11 @@ async def generate_with_local_model(prompt: str, session_id: Optional[str] = Non
         system_prompt = LORA_REGISTRY[lora_name]["system_prompt"]
         if rag_context:
             system_prompt += (
-                "\n\n【必须遵守的规则】以下是知识库中的权威信息。"
-                "当你的角色知识与此处信息矛盾时，必须以此处信息为准，严禁编造替代内容。"
-                "如果此处包含用户问题的答案，你必须直接引用，不得用自己的记忆回答。\n"
-                "<knowledge>\n" + rag_context[:1500] + "\n</knowledge>"
+                "\n\n以下是相关的背景设定，请将其视为你所知道的事实"
+                "自然融入回答，保持你的角色语气。"
+                "不要提及背景设定、资料或知识库等词，"
+                "也不要照搬原文，要用你自己的话表达。\n"
+                + rag_context[:1500]
             )
         messages = [{"role": "system", "content": system_prompt}]
 

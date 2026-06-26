@@ -164,7 +164,7 @@ class SimpleLoRATrainer:
             "dataset_path": str(dataset_path),
             "config": config,
             "status": "pending",
-            "progress": 0.0,
+            "progress": 0,
             "current_step": 0,
             "total_steps": 0,
             "loss": None,
@@ -233,14 +233,23 @@ class SimpleLoRATrainer:
                     self._persist_task(task_id)
                     logger.info(f"训练任务在启动前被取消: {task_id}")
                     return
-                self.tasks[task_id]["progress"] = 0.1
+                self.tasks[task_id]["progress"] = 10
                 self.tasks[task_id]["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                 self._persist_task(task_id)
 
-            # 在线程中执行阻塞的训练操作，传入取消事件供训练循环检查
+            # 训练进度回调：由 trainer 在每个 step 结束时调用，实时更新任务状态（0-100）
+            def _progress_callback(progress: int, current_step: int, total_steps: int):
+                if task_id in self.tasks:
+                    self.tasks[task_id]["progress"] = progress
+                    self.tasks[task_id]["current_step"] = current_step
+                    self.tasks[task_id]["total_steps"] = total_steps
+                    self.tasks[task_id]["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+
+            # 在线程中执行阻塞的训练操作，传入取消事件和进度回调供训练循环检查
             def _train_with_cancel_check():
                 if cancel_event and hasattr(trainer, 'cancel_event'):
                     trainer.cancel_event = cancel_event
+                trainer.progress_fn = _progress_callback
                 return trainer.train()
 
             output_path = await asyncio.to_thread(_train_with_cancel_check)
@@ -262,7 +271,7 @@ class SimpleLoRATrainer:
                     logger.info(f"训练任务完成后发现已被取消: {task_id}")
                     return
                 self.tasks[task_id]["status"] = "completed"
-                self.tasks[task_id]["progress"] = 1.0
+                self.tasks[task_id]["progress"] = 100
                 self.tasks[task_id]["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                 self.tasks[task_id]["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                 self.tasks[task_id]["output_dir"] = str(output_path)

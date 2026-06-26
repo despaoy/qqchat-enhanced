@@ -527,7 +527,7 @@ class SQLiteDB:
             "temperature": "0.7",
             "maxTokens": "2048",
             "contextWindow": "8k",
-            "useKnowledgeBase": "false",
+            "useKnowledgeBase": "true",
             "language": "zh-CN",
             "timezone": "Asia/Shanghai",
             "defaultReplyTemplate": "",
