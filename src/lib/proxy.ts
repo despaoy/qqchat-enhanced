@@ -24,6 +24,7 @@ const PROXY_ALLOWED_PREFIXES = [
   '/api/knowledge',
   '/api/vector/',
   '/api/model',
+  '/api/models',
   '/api/config',
   '/api/user/',
   '/api/stats',
