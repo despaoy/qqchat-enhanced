@@ -14,6 +14,31 @@ from cache.config_cache import get_cached_config, set_cached_config, invalidate_
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# 敏感字段关键词（匹配任一即脱敏）
+_SENSITIVE_KEYWORDS = ("apikey", "api_key", "secret", "password", "token")
+# 脱敏标记，用于PUT时识别并跳过未修改的字段
+_MASK_MARKER = "****"
+
+
+def _mask_value(value: str) -> str:
+    """对敏感值脱敏：长度>8显示前4+****+后4，否则整体替换为****"""
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return _MASK_MARKER
+    return value[:4] + _MASK_MARKER + value[-4:]
+
+
+def _mask_config(config: dict) -> dict:
+    """返回脱敏后的配置副本（不影响缓存中的原始值）"""
+    masked = {}
+    for k, v in config.items():
+        if any(s in k.lower() for s in _SENSITIVE_KEYWORDS) and v:
+            masked[k] = _mask_value(str(v))
+        else:
+            masked[k] = v
+    return masked
+
 
 # ============================================
 # 系统配置
@@ -21,20 +46,23 @@ router = APIRouter()
 
 @router.get("/api/config")
 async def get_config():
-    """获取系统配置（Redis 缓存优先，TTL 60s）"""
+    """获取系统配置（Redis 缓存优先，TTL 60s；敏感字段脱敏后返回）"""
     cached = get_cached_config()
     if cached is not None:
-        return {"config": cached, "cached": True}
+        return {"config": _mask_config(cached), "cached": True}
 
     config = db.config
     set_cached_config(config)
-    return {"config": config}
+    return {"config": _mask_config(config)}
 
 
 @router.put("/api/config")
 async def update_config(request: Request, current_user: dict = Depends(get_current_user)):
-    """更新系统配置"""
+    """更新系统配置（含脱敏标记的字段自动跳过，保留原值）"""
     new_config = await request.json()
+    # 过滤掉含脱敏标记的未修改字段（前端回传的脱敏值不应覆盖真实凭证）
+    new_config = {k: v for k, v in new_config.items()
+                  if not (isinstance(v, str) and _MASK_MARKER in v)}
     # 输入验证 - 逐字段验证键值对
     if INPUT_VALIDATOR_AVAILABLE:
         from infra.input_validator import InputValidator

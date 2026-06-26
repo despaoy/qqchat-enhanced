@@ -125,8 +125,6 @@ class GpuTemperatureCallback(TrainerCallback):
             self._cooldown_count += 1
             logger.warning(f"GPU温度 ({temp:.0f}°C) 超过限制 ({self.max_temp:.0f}°C)，"
                           f"暂停 {self.cooldown_seconds} 秒散热... (第{self._cooldown_count}次)")
-            msg = f"GPU温度 ({temp:.0f}°C) 超过限制 ({self.max_temp:.0f}°C)，暂停 {self.cooldown_seconds} 秒散热... (第{self._cooldown_count}次)"
-            print(msg)
 
             elapsed = 0
             while elapsed < self.cooldown_seconds:
@@ -142,7 +140,6 @@ class GpuTemperatureCallback(TrainerCallback):
 
             if self._cooldown_count >= 10:
                 logger.error("散热次数超过10次，可能是散热系统问题。建议：1) 清理风扇灰尘 2) 使用散热底座 3) 降低室温")
-                print("散热次数超过10次，可能是散热系统问题。建议：1) 清理风扇灰尘 2) 使用散热底座 3) 降低室温")
 
         return control
 

@@ -151,7 +151,6 @@ function HistoryContent() {
       if (sessionNameFilter) filters.sessionName = sessionNameFilter;
       
       const result = await api.deleteMessagesBatch(filters);
-      console.log(`已删除 ${result.deleted} 条记录`);
       await refetch();
     } catch (err) {
       console.error('Failed to batch delete messages:', err);
