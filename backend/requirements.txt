@@ -41,6 +41,14 @@ trl>=0.13.0,<2.0
 sentencepiece>=0.2.0,<1.0
 tqdm>=4.67.0,<5.0
 
+# 量化模型加载后端（按需安装，请根据 CUDA 版本选择预编译 wheel）
+# AWQ 量化模型需要 autoawq；注意：autoawq 安装时可能会固定/transformers 版本，
+# 建议单独安装并检查版本兼容性：pip install autoawq
+# autoawq
+# GPTQ 量化模型需要 gptqmodel（transformers 5.x 推荐）或 auto-gptq，同时需要 optimum>=1.24.0
+# gptqmodel
+# optimum>=1.24.0
+
 # Web 框架
 fastapi>=0.115.0,<1.0
 uvicorn[standard]>=0.34.0,<1.0

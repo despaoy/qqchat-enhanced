@@ -26,7 +26,8 @@ _ML_AVAILABLE = False
 class RAGIntentDetector:
     """RAG意图检测器，通过多维度规则判断用户消息是否需要知识库检索。
 
-    检测逻辑：消息长度检查 -> 特殊字符过滤 -> 社交词与知识词匹配 -> 疑问句检测 -> 原神内容检测。
+    检测逻辑：消息长度检查 -> 特殊字符过滤 -> 社交词与知识词匹配 -> 疑问句检测。
+    通用规则引擎，不绑定特定知识库领域。
     """
     
     def __init__(self):
@@ -118,71 +119,52 @@ class RAGIntentDetector:
     
     def needs_rag(self, message: str, context: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
         """
-        判断消息是否需要RAG检索
-        
+        判断消息是否需要RAG检索（通用规则引擎，不绑定特定知识库领域）
+
         Args:
             message: 用户消息
             context: 可选上下文信息（如对话历史）
-            
+
         Returns:
             Tuple[是否需要RAG, 判断原因]
         """
         message = message.strip()
-        
+
         # 1. 检查消息长度
         if len(message) < self.min_length_for_rag:
             return False, f"消息过短（{len(message)}字符），不需要RAG"
-        
+
         # 2. 检查是否纯特殊字符或表情
         if self._is_mostly_special_chars(message):
             return False, "消息主要为特殊字符或表情，不需要RAG"
-        
+
         # 3. 检查社交关键词和知识关键词的组合
         social_match = self.social_pattern.search(message)
         knowledge_match = self.knowledge_pattern.search(message)
-        
-        # 如果同时包含社交词和知识关键词，需要RAG（例如"胡桃的命座效果是什么？"）
+
+        # 同时包含社交词和知识关键词 → 需要RAG（例如"胡桃的命座效果是什么？"）
         if social_match and knowledge_match:
-            # 原神相关内容即使有社交词也需要RAG；否则不需要
-            if not self._contains_genshin_content(message):
-                return False, f"包含社交词'{social_match.group()}'和知识关键词'{knowledge_match.group()}'，但不是原神相关问题，不需要RAG"
-            return True, f"包含社交词'{social_match.group()}'和知识关键词'{knowledge_match.group()}'，且是原神相关内容，需要RAG"
-        
-        # 如果只有社交词，没有知识关键词
+            return True, f"包含社交词'{social_match.group()}'和知识关键词'{knowledge_match.group()}'，需要RAG"
+
+        # 只有社交词，没有知识关键词 → 纯社交消息，不需要RAG
         if social_match and not knowledge_match:
-            # 检查是否包含原神内容（原神角色名可能被误判为社交词）
-            if self._contains_genshin_content(message):
-                # 原神相关内容，需要RAG
-                return True, f"包含社交词'{social_match.group()}'但是原神相关内容，需要RAG"
-            # 纯社交消息，不需要RAG
             return False, f"包含社交词'{social_match.group()}'且没有知识关键词，不需要RAG"
-        
-        # 4. 检查知识关键词（只有知识关键词，没有社交词）
+
+        # 4. 只有知识关键词，没有社交词 → 需要RAG
         if not social_match and knowledge_match:
-            # 必须同时包含原神相关内容才触发RAG（知识库只有原神内容）
-            if not self._contains_genshin_content(message):
-                return False, f"包含知识关键词'{knowledge_match.group()}'但不是原神相关问题，不需要RAG"
             return True, f"包含知识关键词'{knowledge_match.group()}'，需要RAG"
-        
+
         # 5. 检查是否疑问句
         if self._is_question(message):
-            # 疑问句且长度适中 → 必须包含原神内容才RAG
             if len(message) > 5 and len(message) < 100:
-                if not self._contains_genshin_content(message):
-                    return False, "是疑问句但不是原神相关问题，不需要RAG"
-                return True, "是原神相关的疑问句，需要RAG"
+                return True, "是疑问句，需要RAG"
             elif len(message) >= 100:
                 return True, "是长疑问句，需要RAG"
-        
+
         # 6. 检查消息长度
         if len(message) > self.max_length_for_no_rag:
-            # 长消息更可能需要RAG
             return True, f"消息较长（{len(message)}字符），可能需要RAG"
-        
-        # 7. 检查是否包含原神特定内容
-        if self._contains_genshin_content(message):
-            return True, "包含原神相关内容，需要RAG"
-        
+
         # 默认情况：不需要RAG
         return False, "未检测到明确需要RAG的特征"
     
@@ -216,27 +198,7 @@ class RAGIntentDetector:
         return bool(self.question_pattern.match(message))
     
     def _contains_genshin_content(self, message: str) -> bool:
-        """检查是否包含原神相关内容"""
-        genshin_terms = [
-            '原神', 'Genshin', '角色', '武器', '圣遗物', '天赋', '命座', '命之座',
-            '蒙德', '璃月', '稻妻', '须弥', '枫丹', '纳塔', '至冬', '天空岛',
-            '胡桃', '钟离', '七七', '甘雨', '刻晴', '夜兰', '云堇',
-            '雷电将军', '纳西妲', '神里绫华', '八重神子',
-            '温迪', '魈', '达达利亚', '公子', '女士', '散兵', '斯卡拉姆齐',
-            '凝光', '荒泷一斗', '托马', '艾尔海森', '赛诺', '迪希雅',
-            '深渊', '教团', '愚人众', '七神', '魔神', '执政', '眷属',
-            '元素', '反应', '火', '水', '风', '雷', '草', '冰', '岩',
-            '副本', '秘境', '世界任务', '传说任务', '每日委托', '活动',
-            '抽卡', '祈愿', '保底', '定轨', '武器池', '角色池',
-            '往生堂', '堂主', '岩王帝君', '摩拉克斯', '巴巴托斯',
-            '旅行者', '派蒙', '千岩军', '西风骑士团', '群玉阁',
-            '戴因斯雷布', '奥赛尔', '跋掣', '特瓦林', '层岩巨渊',
-        ]
-        
-        message_lower = message.lower()
-        for term in genshin_terms:
-            if term.lower() in message_lower:
-                return True
+        """[已弃用] 检查是否包含原神相关内容 - 仅为向后兼容保留，规则引擎不再依赖此方法"""
         return False
     
     def analyze_message(self, message: str) -> Dict[str, Any]:
@@ -260,7 +222,6 @@ class RAGIntentDetector:
                 "is_question": self._is_question(message),
                 "contains_knowledge_keywords": bool(self.knowledge_pattern.search(message)),
                 "contains_social_keywords": bool(self.social_pattern.search(message)),
-                "contains_genshin_content": self._contains_genshin_content(message),
                 "has_special_chars": bool(self.special_chars_pattern.search(message)),
             },
             "matches": {
@@ -296,11 +257,11 @@ def _load_ml_model():
         return
     try:
         base = Path(__file__).parent
-        model_dir = base / "intent_classifier_model"
+        model_dir = base.parent / "intent_classifier_model"
         config_path = model_dir / "config.json"
         classifier_path = model_dir / "classifier.joblib"
-        legacy_model_path = base / "intent_classifier_model.pkl"
-        legacy_config_path = base / "intent_classifier_config.json"
+        legacy_model_path = base.parent / "intent_classifier_model.pkl"
+        legacy_config_path = base.parent / "intent_classifier_config.json"
 
         if model_dir.exists() and classifier_path.exists() and config_path.exists():
             import joblib
@@ -322,7 +283,7 @@ def _load_ml_model():
         embed_model_name = _ml_config.get("embedding_model", "paraphrase-multilingual-MiniLM-L12-v2")
         local_candidates = [
             base.parent / "RAG" / embed_model_name,
-            base / "models" / embed_model_name,
+            base.parent / "models" / embed_model_name,
         ]
         _ml_encoder = None
         for candidate in local_candidates:
@@ -390,6 +351,11 @@ def needs_rag(message: str, context: Optional[Dict[str, Any]] = None) -> Tuple[b
     """
     便捷函数：判断消息是否需要RAG（ML模型优先 + 低置信度规则兜底）
 
+    策略：
+    - ML分类器可用且高置信度（>=0.65）→ 完全信任ML预测
+    - ML置信度较低 → 使用规则引擎作为tiebreaker，冲突时优先ML的正例判断
+    - ML不可用 → 回退到规则引擎
+
     Args:
         message: 用户消息
         context: 可选上下文
@@ -406,25 +372,25 @@ def needs_rag(message: str, context: Optional[Dict[str, Any]] = None) -> Tuple[b
     if _ML_AVAILABLE:
         try:
             pred, reason, confidence, kb_name = _ml_predict(message)
-            fallback_threshold = _ml_config.get("confidence_fallback", 0.3)
+
+            # ML高置信度 → 完全信任ML
+            if confidence >= 0.65:
+                return pred, reason, kb_name
+
+            # ML置信度较低 → 使用规则引擎作为tiebreaker
             detector = get_intent_detector()
             rule_pred, rule_reason = detector.needs_rag(message, context)
 
-            if pred and confidence >= fallback_threshold:
-                return pred, reason, kb_name
+            # ML与规则一致 → 信任预测
+            if pred == rule_pred:
+                return pred, f"{reason} (规则一致)", kb_name
 
-            if not pred and not rule_pred:
-                return False, f"{reason} (规则一致)", None
-
-            if pred != rule_pred:
-                logger.info(f"ML({confidence:.2%}→{pred})与规则({rule_pred})冲突, 采用规则: {rule_reason}")
-                return rule_pred, f"规则兜底({rule_reason[:40]}...)", None
-
-            if not pred and rule_pred and confidence < 0.8:
-                logger.info(f"ML判不需要RAG({confidence:.2%})但规则认为需要, 采用规则: {rule_reason}")
-                return True, f"规则兜底({rule_reason[:40]}...)", None
-
-            return pred, reason, kb_name
+            # 冲突时：ML预测需要RAG则优先ML（高召回），ML预测不需要则信任规则（安全网）
+            if pred:
+                logger.info(f"ML({confidence:.2%}→{pred})与规则({rule_pred})冲突, 采用ML正例: {reason}")
+                return pred, f"{reason} (ML优先)", kb_name
+            logger.info(f"ML({confidence:.2%}→{pred})与规则({rule_pred})冲突, 采用规则: {rule_reason}")
+            return rule_pred, f"规则兜底({rule_reason[:40]}...)", None
         except Exception as e:
             logger.warning(f"ML 预测失败，回退规则引擎: {e}")
 

@@ -303,7 +303,7 @@ def _load_kb_documents(kbs: list) -> Dict[str, str]:
     result = {}
     for kb in kbs:
         try:
-            docs = db.get_documents(kb_id=kb["id"])
+            docs = db.get_knowledge_documents(knowledge_base_id=kb["id"], limit=200)
             parts = []
             for doc in docs[:30]:  # 最多30篇文档
                 title = doc.get("title", "")
@@ -685,7 +685,7 @@ def _train_multiclass_model(
     _add_log("交叉验证中...")
     clf = LogisticRegression(
         C=1.0, max_iter=1000, class_weight="balanced",
-        multi_class="multinomial", solver="lbfgs",
+        solver="lbfgs",
     )
     try:
         scores = cross_val_score(clf, X_scaled, y, cv=min(5, len(set(labels))), scoring="accuracy")

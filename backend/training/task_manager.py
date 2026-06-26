@@ -333,6 +333,8 @@ class SimpleLoRATrainer:
             "gradient_accumulation_steps", "max_seq_length", "fp16", "bf16",
             "use_gradient_checkpointing", "warmup_ratio", "weight_decay",
             "max_grad_norm", "early_stopping_patience",
+            # 前端冗余字段，后端已由 fp16/bf16 表达，无需透传
+            "mixed_precision",
         } | extra_keys
         for key, value in config.items():
             if key not in known and key not in kwargs:
