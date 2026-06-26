@@ -9,7 +9,8 @@ function buildPath(segments: string[], search: string): string {
 
 async function parseJsonBody(request: Request): Promise<{ ok: true; data: unknown } | { ok: false; response: Response }> {
   try {
-    const data = await request.json();
+    const text = await request.text();
+    const data = JSON.parse(text);
     return { ok: true, data };
   } catch {
     return {

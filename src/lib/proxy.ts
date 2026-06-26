@@ -162,7 +162,8 @@ export async function proxyGet(request: Request, path: string): Promise<Response
 export async function proxyPost(request: Request, path: string): Promise<Response> {
   let body: unknown;
   try {
-    body = await request.json();
+    const text = await request.text();
+    body = JSON.parse(text);
   } catch {
     return new Response(JSON.stringify({ detail: '请求体不是有效的 JSON' }), {
       status: 400,
