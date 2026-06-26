@@ -49,6 +49,11 @@ export async function POST(request: Request, { params }: RouteContext) {
     });
   }
 
+  const contentLength = request.headers.get('content-length');
+  if (!contentLength || contentLength === '0') {
+    return proxyRequest(request, backendPath, { method: 'POST' });
+  }
+
   const parsed = await parseJsonBody(request);
   if (!parsed.ok) return parsed.response;
   return proxyRequest(request, backendPath, {
