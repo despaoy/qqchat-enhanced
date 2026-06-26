@@ -200,7 +200,7 @@ class SimpleLoRATrainer:
         self._persist_task(task_id)
 
         try:
-            from train_lora import LoRATrainingConfig, LoRATrainer
+            from training.trainer import LoRATrainingConfig, LoRATrainer
 
             train_config = self._build_config(lora_name, dataset_path, config)
             errors = train_config.validate()
@@ -287,7 +287,7 @@ class SimpleLoRATrainer:
             self._persist_task(task_id)
 
     def _build_config(self, lora_name: str, dataset_path: Path, config: Dict[str, Any]) -> "LoRATrainingConfig":
-        from train_lora import LoRATrainingConfig
+        from training.trainer import LoRATrainingConfig
 
         dataset_file = self._find_dataset_file(dataset_path)
 
