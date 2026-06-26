@@ -142,10 +142,12 @@ async def logout(request: Request, response: Response):
 @router.get("/api/auth/me")
 async def get_current_user_info(current_user: dict = Depends(get_current_user)):
     """获取当前用户信息"""
+    user_row = db.get_user_by_username(current_user["username"])
     return {
         "success": True,
         "user": {
             "id": current_user["user_id"],
             "username": current_user["username"],
+            "created_at": user_row["created_at"] if user_row else "",
         }
     }

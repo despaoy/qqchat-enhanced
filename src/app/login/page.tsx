@@ -31,8 +31,8 @@ export default function LoginPage() {
       await login(loginUsername, loginPassword);
       toast.success('登录成功');
       router.push('/');
-    } catch {
-      toast.error('用户名或密码错误');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '登录失败');
     } finally {
       setSubmitting(false);
     }
@@ -43,12 +43,16 @@ export default function LoginPage() {
       toast.error('请输入用户名和密码');
       return;
     }
+    if (regUsername.length < 2 || regUsername.length > 50) {
+      toast.error('用户名长度需为2-50个字符');
+      return;
+    }
     if (regPassword !== regConfirm) {
       toast.error('两次密码不一致');
       return;
     }
-    if (regPassword.length < 4) {
-      toast.error('密码至少4位');
+    if (regPassword.length < 8) {
+      toast.error('密码至少8位');
       return;
     }
     try {
@@ -56,8 +60,8 @@ export default function LoginPage() {
       await register(regUsername, regPassword);
       toast.success('注册成功');
       router.push('/');
-    } catch {
-      toast.error('注册失败，用户名可能已存在');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '注册失败，用户名可能已存在');
     } finally {
       setSubmitting(false);
     }

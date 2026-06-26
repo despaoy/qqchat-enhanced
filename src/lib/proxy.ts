@@ -44,8 +44,14 @@ export function isProxyPathAllowed(backendPath: string): boolean {
   // 仅取 path 部分（剥离 query）
   const pathOnly = backendPath.split('?')[0];
   if (pathOnly.includes('..') || pathOnly.includes('//')) return false;
-  // 必须命中白名单前缀
-  return PROXY_ALLOWED_PREFIXES.some((p) => pathOnly === p || pathOnly.startsWith(p + '/') || pathOnly.startsWith(p));
+  // 必须命中白名单前缀：精确匹配或子路径匹配
+  // 对于以 / 结尾的前缀（如 /api/vllm/），直接用 startsWith
+  // 对于不以 / 结尾的前缀（如 /api/auth），用精确匹配或 path + '/'，避免 /api/model 误匹配 /api/modelxyz
+  return PROXY_ALLOWED_PREFIXES.some((p) => {
+    if (pathOnly === p) return true;
+    if (p.endsWith('/')) return pathOnly.startsWith(p);
+    return pathOnly.startsWith(p + '/');
+  });
 }
 
 interface ProxyOptions {
@@ -153,7 +159,15 @@ export async function proxyGet(request: Request, path: string): Promise<Response
  * 代理 POST 请求，自动读取请求体
  */
 export async function proxyPost(request: Request, path: string): Promise<Response> {
-  const body = await request.json();
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response(JSON.stringify({ detail: '请求体不是有效的 JSON' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
   return proxyRequest(request, path, {
     method: 'POST',
     body,

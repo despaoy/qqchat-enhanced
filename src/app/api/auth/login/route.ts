@@ -4,7 +4,12 @@ import { NextResponse } from 'next/server';
 export async function POST(request: Request) {
   const response = await proxyPost(request, '/api/auth/login');
 
-  const data = await response.json();
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch {
+    data = { detail: '服务器返回了非 JSON 响应' };
+  }
 
   const nextResponse = NextResponse.json(data, { status: response.status });
 
