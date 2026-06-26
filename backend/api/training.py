@@ -15,7 +15,6 @@ from typing import Optional
 from db.adapter import db
 from db.models import DatasetUploadRequest, TrainingStartRequest, DialogueGenerateRequest
 from app.config import INPUT_VALIDATOR_AVAILABLE, TRAINING_SCHEMA, generation_state, generation_state_lock, _search_character_info
-from app.module_manager import get_module_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -442,29 +441,6 @@ async def generate_dialogues(request: DialogueGenerateRequest, current_user: dic
     try:
         from inference.model_manager import get_model_manager
         manager = get_model_manager()
-
-        # 双模块架构：训练模式下优先使用API生成，避免加载本地模型
-        module_mgr = await get_module_manager()
-        if module_mgr.is_training_mode:
-            # 训练模式：强制使用API提供商（不加载本地模型）
-            from inference.model_manager import ModelProvider
-            api_providers = [ModelProvider.OPENAI_COMPAT, ModelProvider.OLLAMA, ModelProvider.VLLM]
-            current = manager._current_provider
-            if current not in api_providers:
-                # 尝试切换到API提供商
-                switched = False
-                for p in api_providers:
-                    provider = manager._providers.get(p)
-                    if provider and hasattr(provider, '_loaded') and provider._loaded:
-                        manager.set_provider(p)
-                        logger.info(f"训练模式：自动切换到API提供商 {p.value}")
-                        switched = True
-                        break
-                if not switched:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="训练模式下需要API模型提供商来生成对话。请在设置中配置 DeepSeek API 或其他 OpenAI 兼容 API。"
-                    )
 
         # 检查模型提供商是否可用
         if manager._current_provider.value == "mock":

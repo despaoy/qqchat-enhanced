@@ -514,57 +514,6 @@ export interface SaveDialoguesRequest {
   scene_stats?: Record<string, number>;
 }
 
-// ============================================
-// 模块管理类型
-// ============================================
-
-export interface ModuleMemoryInfo {
-  total_gb: number;
-  available_gb: number;
-  used_gb: number;
-  percent: number;
-}
-
-export interface ModuleGpuInfo {
-  total_gb: number;
-  used_gb: number;
-  available_gb: number;
-  percent: number;
-}
-
-export interface ModuleStatusResponse {
-  mode: 'training' | 'inference';
-  memory: ModuleMemoryInfo & { gpu_total_gb: number; gpu_used_gb: number; gpu_available_gb: number; gpu_percent: number };
-  inference_model_loaded: boolean;
-  inference_model_name: string;
-  active_lora: string;
-  training_active: boolean;
-  generation_active: boolean;
-  uptime_seconds: number;
-  can_switch_to_inference: boolean;
-  can_switch_reason: string;
-}
-
-export interface SwitchModeResponse {
-  success: boolean;
-  from_mode: string;
-  to_mode: string;
-  switch_time_ms: number;
-  memory_freed_gb: number;
-  message: string;
-  errors: string[];
-}
-
-export interface MemoryInfoResponse {
-  system: ModuleMemoryInfo;
-  gpu: ModuleGpuInfo | null;
-  safety: {
-    is_safe: boolean;
-    can_load_inference_model: boolean;
-    reason: string;
-  };
-}
-
 /**
  * API 客户端类
  *
@@ -1225,33 +1174,6 @@ class ApiClient {
     return this.request<{ success: boolean; dataset: Record<string, unknown> }>(`/training/saved-dialogues/${id}/create-dataset?${params.toString()}`, {
       method: 'POST',
     });
-  }
-
-  // ============================================
-  // 模块管理 API
-  // ============================================
-
-  /** 获取模块状态 */
-  async getModuleStatus(): Promise<ModuleStatusResponse> {
-    return this.request<ModuleStatusResponse>('/module/status');
-  }
-
-  /** 切换系统模式 */
-  async switchModuleMode(targetMode: 'training' | 'inference'): Promise<SwitchModeResponse> {
-    return this.request('/module/switch', {
-      method: 'POST',
-      body: JSON.stringify({ target_mode: targetMode }),
-    });
-  }
-
-  /** 获取内存信息 */
-  async getMemoryInfo(): Promise<MemoryInfoResponse> {
-    return this.request('/module/memory');
-  }
-
-  /** 强制垃圾回收 */
-  async forceGC(): Promise<{ success: boolean; memory_freed_gb: number; before: { used_gb: number; percent: number }; after: { used_gb: number; percent: number } }> {
-    return this.request('/module/gc', { method: 'POST' });
   }
 
   /** 删除样本 */

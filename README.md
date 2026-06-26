@@ -90,7 +90,18 @@ cd backend
 pip install -r requirements.txt
 ```
 
-### 3. 安装 Node.js + pnpm
+### 3. 安装 Redis（推荐，缓存加速）
+
+```bash
+# AutoDL 等无 apt 环境的机器，用 conda 安装
+conda install -y -c conda-forge redis-server
+redis-server --daemonize yes
+redis-cli ping  # 应返回 PONG
+```
+
+> Redis 为可选组件，未安装时后端自动降级为数据库直连模式，功能不受影响但性能略低。
+
+### 4. 安装 Node.js + pnpm
 
 ```bash
 # Node.js 22 LTS（通过 nvm）
@@ -106,7 +117,7 @@ corepack prepare pnpm@latest --activate
 pnpm --version  # 应显示 11.x
 ```
 
-### 4. 构建前端
+### 5. 构建前端
 
 ```bash
 cd /root/autodl-tmp/qqchat-enhanced
@@ -114,7 +125,7 @@ pnpm install
 pnpm build    # 输出 .next/standalone/
 ```
 
-### 5. 下载模型
+### 6. 下载模型
 
 模型应放在项目目录外（如 `/root/autodl-tmp/models/`），避免重新克隆时丢失，然后符号链接到 `backend/models`：
 
@@ -137,7 +148,7 @@ rmdir /root/autodl-tmp/qqchat-enhanced/backend/models 2>/dev/null || true
 ln -s /root/autodl-tmp/models /root/autodl-tmp/qqchat-enhanced/backend/models
 ```
 
-### 6. 配置环境变量
+### 7. 配置环境变量
 
 ```bash
 cp .env.example backend/.env
@@ -165,7 +176,7 @@ CORS_ORIGINS=http://localhost:5000,http://localhost:3000
 mkdir -p backend/loras backend/data
 ```
 
-### 7. 启动服务（三个 nohup 后台进程）
+### 8. 启动服务（三个 nohup 后台进程）
 
 ```bash
 source /root/miniconda3/etc/profile.d/conda.sh && conda activate base
@@ -184,8 +195,11 @@ nohup python -m vllm.entrypoints.openai.api_server \
 # 等待 vLLM 健康（约 175 秒）
 until curl -sf http://localhost:8001/health; do sleep 5; done && echo "vLLM ready"
 
-# ② FastAPI 后端
-nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 \
+# ② FastAPI 后端（必须 --workers 1，训练状态为模块级变量）
+# 设置 CUDA 13 库路径（解决 libnvJitLink.so.13 找不到的问题）
+export LD_LIBRARY_PATH="/root/miniconda3/lib/python3.12/site-packages/nvidia/cu13/lib:/root/miniconda3/lib/python3.12/site-packages/nvidia/nvjitlink/lib:/root/miniconda3/lib/python3.12/site-packages/nvidia/cublas/lib:/root/miniconda3/lib/python3.12/site-packages/nvidia/cudnn/lib:$LD_LIBRARY_PATH"
+export PYTHONDONTWRITEBYTECODE=1
+nohup python run.py --host 0.0.0.0 --port 8000 --workers 1 \
     > /root/backend.log 2>&1 < /dev/null &
 sleep 5 && curl -s http://localhost:8000/health
 
@@ -196,7 +210,7 @@ nohup pnpm start > /root/frontend.log 2>&1 < /dev/null &
 sleep 3 && curl -s -o /dev/null -w "Frontend: %{http_code}\n" http://localhost:5000
 ```
 
-### 8. 本地访问（SSH 端口转发）
+### 9. 本地访问（SSH 端口转发）
 
 在本地终端执行：
 
@@ -248,7 +262,7 @@ qqchat-enhanced/
 │   ├── hooks/                    # 自定义 Hooks
 │   └── lib/                      # API 客户端 + 类型
 ├── backend/                      # 后端（FastAPI）
-│   ├── app/                      # 应用核心（配置/依赖注入/模块管理）
+│   ├── app/                      # 应用核心（配置/依赖注入）
 │   ├── api/                      # API 路由
 │   ├── db/                       # 数据库层（SQLite + PostgreSQL）
 │   ├── inference/                # 推理引擎（vLLM 客户端）
@@ -304,6 +318,50 @@ vLLM 0.22.1 已移除 `--lora-modules-dir` 参数。LoRA 适配器通过 API 动
 
 AWQ 量化模型必须使用 `--dtype float16`（或 `auto`），**不要用 `--dtype bfloat16`**。RTX 3090 的 Ampere 架构对 bfloat16 + AWQ 组合支持有限。
 
+### bitsandbytes 报 `libnvJitLink.so.13: cannot open shared object file`
+
+PyTorch 2.11.0+cu130 需要 CUDA 13 运行时库，但系统可能只安装了 CUDA 12。CUDA 13 库已随 pip 包安装，需手动加入 `LD_LIBRARY_PATH`：
+
+```bash
+# 查找 CUDA 13 库路径
+CUDA13_LIB=$(python -c "import nvidia.cuda13; print(nvidia.cuda13.lib_dir)" 2>/dev/null || \
+    echo "/root/miniconda3/lib/python3.12/site-packages/nvidia/cu13/lib")
+NVJITLINK_LIB=$(python -c "import nvidia.nvjitlink; print(nvidia.nvjitlink.lib_dir)" 2>/dev/null || \
+    echo "/root/miniconda3/lib/python3.12/site-packages/nvidia/nvjitlink/lib")
+CUBLAS_LIB=$(python -c "import nvidia.cublas; print(nvidia.cublas.lib_dir)" 2>/dev/null || \
+    echo "/root/miniconda3/lib/python3.12/site-packages/nvidia/cublas/lib")
+CUDNN_LIB=$(python -c "import nvidia.cudnn; print(nvidia.cudnn.lib_dir)" 2>/dev/null || \
+    echo "/root/miniconda3/lib/python3.12/site-packages/nvidia/cudnn/lib")
+export LD_LIBRARY_PATH="$CUDA13_LIB:$NVJITLINK_LIB:$CUBLAS_LIB:$CUDNN_LIB:$LD_LIBRARY_PATH"
+```
+
+> 建议将上述路径写入 `~/.bashrc` 或后端启动脚本中。
+
+### 后端多 worker 导致训练状态丢失
+
+训练状态（`_training_status`、`_generation_status`）是模块级变量，多 worker 间不共享。**必须以 `--workers 1` 启动后端**：
+
+```bash
+python run.py --host 0.0.0.0 --port 8000 --workers 1
+```
+
+### scikit-learn 1.9.0 报 `multi_class` 参数不支持
+
+scikit-learn 1.9.0 移除了 `LogisticRegression` 的 `multi_class` 参数。已修复，无需手动处理。
+
+### gptqmodel >=7.x 报 `AwqGEMMQuantLinear` 不存在
+
+gptqmodel 7.x 将 `AwqGEMMQuantLinear` 重命名为 `AwqGEMMLinear`。已内置兼容性补丁，无需手动处理。
+
+### .pyc 缓存导致代码修改不生效
+
+Python 缓存的 `.pyc` 文件可能导致修改不生效。清除缓存并禁止写入：
+
+```bash
+find backend -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null
+export PYTHONDONTWRITEBYTECODE=1
+```
+
 ### `pnpm start` 报 `output: standalone` 警告
 
 Next.js 16 在 `output: 'standalone'` 模式下推荐用 `node .next/standalone/server.js` 启动。`pnpm start` 仍可工作，但会有警告。生产环境可用：
@@ -317,6 +375,10 @@ PORT=5000 HOSTNAME=0.0.0.0 node .next/standalone/server.js
 后端启动时显示 `Redis 缓存连接失败，将使用数据库直连模式` 是正常的——未配置 Redis 时自动降级。如需启用：
 
 ```bash
+# AutoDL 等无 apt 环境的机器，用 conda 安装 Redis
+conda install -y -c conda-forge redis-server
+redis-server --daemonize yes
+
 # .env 中添加
 REDIS_URL=redis://localhost:6379/0
 ```
@@ -335,6 +397,26 @@ REDIS_URL=redis://localhost:6379/0
 - 降低 `--gpu-memory-utilization`（如 0.85）
 - 降低 `--max-model-len`（如 2048）
 - 减少 `--max-loras` 数量
+
+### vLLM LoRA 多适配器加载
+
+vLLM 启动时通过 `--lora-modules` 预注册 LoRA 适配器，格式为 `名称=路径`：
+
+```bash
+nohup python -m vllm.entrypoints.openai.api_server \
+    --model /root/autodl-tmp/models/Qwen2.5-7B-Instruct-AWQ \
+    --enable-lora --max-loras 4 --max-lora-rank 32 \
+    --lora-modules \
+        hutao=/path/to/hutao_lora/final \
+        minamo=/path/to/minamo_lora \
+    --gpu-memory-utilization 0.85 --max-model-len 4096 \
+    --quantization awq --tensor-parallel-size 1 \
+    --host 0.0.0.0 --port 8001 \
+    --enable-prefix-caching --trust-remote-code \
+    > /root/vllm.log 2>&1 &
+```
+
+后端 `/api/loras/scan` 扫描 `backend/loras/` 目录自动注册到数据库，vLLM 侧通过 `--lora-modules` 预加载。
 
 ## 知识库初始化
 

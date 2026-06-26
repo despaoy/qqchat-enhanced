@@ -192,26 +192,6 @@ async def generate_reply(request: MessageRequest, current_user: dict = Depends(g
         from inference.model_manager import get_model_manager, ModelProvider
         model_manager = get_model_manager()
 
-        from app.module_manager import get_module_manager
-        module_mgr = await get_module_manager()
-
-        if module_mgr.is_training_mode:
-            api_providers = [ModelProvider.OPENAI_COMPAT, ModelProvider.OLLAMA, ModelProvider.VLLM]
-            if model_manager._current_provider not in api_providers:
-                for p in api_providers:
-                    provider = model_manager._providers.get(p)
-                    if provider and hasattr(provider, '_loaded') and provider._loaded:
-                        model_manager.set_provider(p)
-                        break
-
-        if module_mgr.is_inference_mode:
-            from app.module_manager import MemoryMonitor
-            if not MemoryMonitor.is_memory_safe():
-                logger.warning("内存使用超过安全阈值，尝试GC...")
-                MemoryMonitor.force_gc()
-                if not MemoryMonitor.is_memory_safe():
-                    raise HTTPException(status_code=503, detail="系统内存不足")
-
         if active_lora and active_lora["id"] in LORA_PATH_MAP:
             lora_path = LORA_PATH_MAP[active_lora["id"]]
             if ModelProvider.TRANSFORMERS_PEFT in model_manager._providers:
