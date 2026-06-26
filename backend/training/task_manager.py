@@ -338,7 +338,11 @@ class SimpleLoRATrainer:
             if key not in known and key not in kwargs:
                 kwargs[key] = value
 
-        train_config = LoRATrainingConfig(**kwargs)
+        # 过滤掉 LoRATrainingConfig 不支持的字段，避免未知参数报错
+        valid_fields = set(LoRATrainingConfig.__dataclass_fields__.keys())
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_fields}
+
+        train_config = LoRATrainingConfig(**filtered_kwargs)
 
         return train_config
 
