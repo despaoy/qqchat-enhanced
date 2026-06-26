@@ -191,6 +191,8 @@ class LoRATrainingConfig:
     bf16: bool = False
     optim: str = "paged_adamw_32bit"
     gradient_checkpointing: bool = True
+    use_8bit_adam: bool = False
+    use_deepspeed: bool = False
 
     logging_steps: int = 10
     report_to: str = "none"
@@ -200,6 +202,8 @@ class LoRATrainingConfig:
     train_test_split: float = 0.9
     seed: int = 42
     resume_from_checkpoint: Optional[str] = None
+    truncation_direction: str = "right"
+    chat_template: bool = True
 
     def validate(self):
         """校验配置参数合法性。
@@ -328,23 +332,35 @@ class LoRATrainer:
                     if prompt_messages and prompt_messages[-1]["role"] == "assistant":
                         prompt_messages = prompt_messages[:-1]
 
-                    prompt_text = tokenizer.apply_chat_template(
-                        prompt_messages,
-                        tokenize=False,
-                        add_generation_prompt=True
-                    )
-                    full_text = tokenizer.apply_chat_template(
-                        messages,
-                        tokenize=False,
-                        add_generation_prompt=False
-                    )
+                    if self.config.chat_template:
+                        prompt_text = tokenizer.apply_chat_template(
+                            prompt_messages,
+                            tokenize=False,
+                            add_generation_prompt=True
+                        )
+                        full_text = tokenizer.apply_chat_template(
+                            messages,
+                            tokenize=False,
+                            add_generation_prompt=False
+                        )
+                    else:
+                        prompt_text = "\n".join(
+                            f"{m['role']}: {m['content']}" for m in prompt_messages
+                        ) + "\nassistant:"
+                        full_text = "\n".join(
+                            f"{m['role']}: {m['content']}" for m in messages
+                        )
 
                     prompt_ids = tokenizer.encode(prompt_text, add_special_tokens=False)
                     full_ids = tokenizer.encode(full_text, add_special_tokens=False)
 
                     if len(full_ids) > self.config.max_seq_length:
-                        full_ids = full_ids[:self.config.max_seq_length]
-                        prompt_len = min(len(prompt_ids), self.config.max_seq_length)
+                        if self.config.truncation_direction == "left":
+                            full_ids = full_ids[-self.config.max_seq_length:]
+                            prompt_len = max(0, len(prompt_ids) - (len(full_ids) - self.config.max_seq_length))
+                        else:
+                            full_ids = full_ids[:self.config.max_seq_length]
+                            prompt_len = min(len(prompt_ids), self.config.max_seq_length)
                     else:
                         prompt_len = len(prompt_ids)
 
@@ -374,23 +390,31 @@ class LoRATrainer:
                     user_msg = {"role": "user", "content": user_content}
                     assistant_msg = {"role": "assistant", "content": assistant_content}
 
-                    prompt_text = tokenizer.apply_chat_template(
-                        [system_msg, user_msg],
-                        tokenize=False,
-                        add_generation_prompt=True
-                    )
-                    full_text = tokenizer.apply_chat_template(
-                        [system_msg, user_msg, assistant_msg],
-                        tokenize=False,
-                        add_generation_prompt=False
-                    )
+                    if self.config.chat_template:
+                        prompt_text = tokenizer.apply_chat_template(
+                            [system_msg, user_msg],
+                            tokenize=False,
+                            add_generation_prompt=True
+                        )
+                        full_text = tokenizer.apply_chat_template(
+                            [system_msg, user_msg, assistant_msg],
+                            tokenize=False,
+                            add_generation_prompt=False
+                        )
+                    else:
+                        prompt_text = f"system: {self.config.system_prompt}\nuser: {user_content}\nassistant:"
+                        full_text = f"system: {self.config.system_prompt}\nuser: {user_content}\nassistant: {assistant_content}"
 
                     prompt_ids = tokenizer.encode(prompt_text, add_special_tokens=False)
                     full_ids = tokenizer.encode(full_text, add_special_tokens=False)
 
                     if len(full_ids) > self.config.max_seq_length:
-                        full_ids = full_ids[:self.config.max_seq_length]
-                        prompt_len = min(len(prompt_ids), self.config.max_seq_length)
+                        if self.config.truncation_direction == "left":
+                            full_ids = full_ids[-self.config.max_seq_length:]
+                            prompt_len = max(0, len(prompt_ids) - (len(full_ids) - self.config.max_seq_length))
+                        else:
+                            full_ids = full_ids[:self.config.max_seq_length]
+                            prompt_len = min(len(prompt_ids), self.config.max_seq_length)
                     else:
                         prompt_len = len(prompt_ids)
 
@@ -454,10 +478,13 @@ class LoRATrainer:
         return model
 
     def _create_lora_config(self) -> LoraConfig:
+        target_modules = self.config.target_modules
+        if target_modules is None:
+            target_modules = "all-linear"
         return LoraConfig(
             r=self.config.lora_r,
             lora_alpha=self.config.lora_alpha,
-            target_modules=self.config.target_modules,
+            target_modules=target_modules,
             lora_dropout=self.config.lora_dropout,
             bias=self.config.lora_bias,
             task_type=TaskType.CAUSAL_LM,

@@ -338,11 +338,24 @@ class SimpleLoRATrainer:
             if key not in known and key not in kwargs:
                 kwargs[key] = value
 
-        # 过滤掉 LoRATrainingConfig 不支持的字段，避免未知参数报错
-        valid_fields = set(LoRATrainingConfig.__dataclass_fields__.keys())
-        filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_fields}
+        # 处理 target_modules：前端可能传字符串 "all-linear" 或 "q_proj,v_proj"
+        if "target_modules" in kwargs:
+            tm = kwargs["target_modules"]
+            if isinstance(tm, str):
+                if tm.lower() == "all-linear":
+                    kwargs["target_modules"] = None  # PEFT 的 inference_mode=False 时会自动推导
+                else:
+                    kwargs["target_modules"] = [m.strip() for m in tm.split(",") if m.strip()]
 
-        train_config = LoRATrainingConfig(**filtered_kwargs)
+        # 处理 use_8bit_adam：切换优化器
+        if kwargs.get("use_8bit_adam"):
+            kwargs["optim"] = "adamw_8bit"
+
+        # 处理 use_deepspeed：当前仅记录，未配置 ds_config 时保持普通训练
+        if kwargs.get("use_deepspeed"):
+            logger.warning("use_deepspeed=true 已设置，但当前未提供 DeepSpeed 配置文件，将按普通训练执行")
+
+        train_config = LoRATrainingConfig(**kwargs)
 
         return train_config
 
