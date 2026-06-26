@@ -5,7 +5,6 @@
   "scripts": {
     "build": "next build",
     "dev": "next dev -p 5000",
-    "preinstall": "npx only-allow pnpm",
     "lint": "eslint",
     "start": "next start -p 5000",
     "ts-check": "tsc -p tsconfig.json"
@@ -50,9 +49,5 @@
     "tailwindcss": "^4",
     "typescript": "^5"
   },
-  "packageManager": "pnpm@11.9.0",
-  "engines": {
-    "node": ">=22.0.0",
-    "pnpm": ">=11.0.0"
-  }
+  "packageManager": "pnpm@9.15.0"
 }
