@@ -21,7 +21,7 @@ DEFAULT_VLLM_PORT2=8002
 DEFAULT_BACKEND_PORT=8000
 DEFAULT_FRONTEND_PORT=5000
 DEFAULT_NGINX_PORT=80
-DEFAULT_MODEL_PATH="${PROJECT_DIR}/backend/models/Qwen2.5-7B-Instruct"
+DEFAULT_MODEL_PATH="${PROJECT_DIR}/backend/models/Qwen2.5-7B-Instruct-AWQ"
 DEFAULT_LORA_PATH="${PROJECT_DIR}/backend/loras"
 DEFAULT_DATA_DIR="${PROJECT_DIR}/backend/data"
 
@@ -168,11 +168,11 @@ FRONTEND_PORT=${DEFAULT_FRONTEND_PORT}
 NGINX_PORT=${DEFAULT_NGINX_PORT}
 
 # ---- vLLM 配置 ----
-VLLM_GPU_MEMORY_UTILIZATION=0.9
+VLLM_GPU_MEMORY_UTILIZATION=0.82
 VLLM_MAX_MODEL_LEN=4096
 VLLM_MAX_LORAS=4
 VLLM_MAX_LORA_RANK=64
-VLLM_DTYPE=bfloat16
+VLLM_DTYPE=float16
 
 # ---- 后端配置 ----
 DATABASE_PATH=${DEFAULT_DATA_DIR}/qq_assistant.db
@@ -231,7 +231,7 @@ start_docker() {
     # 如果模型目录为空，提示用户
     if [[ -z "$(ls -A "${DEPLOY_DIR}/data/models/" 2>/dev/null)" ]]; then
         log_warn "模型目录为空，请将模型文件放入: ${DEPLOY_DIR}/data/models/"
-        log_warn "或创建软链接: ln -s ${MODEL_PATH} ${DEPLOY_DIR}/data/models/Qwen2.5-7B-Instruct"
+        log_warn "或创建软链接: ln -s ${MODEL_PATH} ${DEPLOY_DIR}/data/models/Qwen2.5-7B-Instruct-AWQ"
     fi
 
     log_step "启动 Docker Compose..."

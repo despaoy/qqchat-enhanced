@@ -17,11 +17,11 @@ BACKEND_DIR="$(cd "$(dirname "$0")/../../backend" && pwd)"
 MODELS_DIR="${BACKEND_DIR}/models"
 
 download_base() {
-    echo -e "${GREEN}[1/3] 下载基础模型 Qwen2.5-7B-Instruct (约15GB)...${NC}"
-    mkdir -p "${MODELS_DIR}/Qwen2.5-7B-Instruct"
+    echo -e "${GREEN}[1/3] 下载基础模型 Qwen2.5-7B-Instruct-AWQ (约5.2GB)...${NC}"
+    mkdir -p "${MODELS_DIR}/Qwen2.5-7B-Instruct-AWQ"
     pip install huggingface_hub -q
-    huggingface-cli download Qwen/Qwen2.5-7B-Instruct \
-        --local-dir "${MODELS_DIR}/Qwen2.5-7B-Instruct" \
+    huggingface-cli download Qwen/Qwen2.5-7B-Instruct-AWQ \
+        --local-dir "${MODELS_DIR}/Qwen2.5-7B-Instruct-AWQ" \
         --resume-download
     echo -e "${GREEN}基础模型下载完成${NC}"
 }
@@ -79,7 +79,7 @@ case "${1:-all}" in
     *)
         echo "用法: bash download_models.sh [all|base|embed|rerank|modelscope]"
         echo "  all      - 下载全部模型（推荐）"
-        echo "  base     - 仅下载基础模型 Qwen2.5-7B (15GB)"
+        echo "  base     - 仅下载基础模型 Qwen2.5-7B-AWQ (5.2GB)"
         echo "  embed    - 仅下载嵌入模型 (420MB)"
         echo "  rerank   - 仅下载重排序模型 (1.1GB)"
         echo "  modelscope - 使用 ModelScope 源下载嵌入模型（备选）"

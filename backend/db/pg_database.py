@@ -293,6 +293,8 @@ class PgDatabase:
 
     def __init__(self, database_url: Optional[str] = None):
         self.database_url = database_url or os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
+        if not self.database_url:
+            raise ValueError("DATABASE_URL is required when USE_POSTGRESQL=true")
         self.engine = create_async_engine(
             self.database_url,
             echo=False,
@@ -402,6 +404,52 @@ class PgDatabase:
             result = await session.execute(stmt)
             return result.scalar()
 
+
+    def _message_filter_conditions(
+        self,
+        search: Optional[str] = None,
+        session_type: Optional[str] = None,
+        lora_name: Optional[str] = None,
+        session_id: Optional[str] = None,
+        platform: Optional[str] = None,
+    ):
+        conditions = []
+        if search:
+            pattern = f"%{search}%"
+            conditions.append(
+                (messages_table.c.message.like(pattern))
+                | (messages_table.c.reply.like(pattern))
+                | (messages_table.c.userName.like(pattern))
+            )
+        if session_type:
+            conditions.append(messages_table.c.sessionType == session_type)
+        if lora_name:
+            conditions.append(messages_table.c.loraName == lora_name)
+        if session_id:
+            conditions.append(messages_table.c.sessionId == session_id)
+        if platform:
+            conditions.append(messages_table.c.platform == platform)
+        return conditions
+
+    async def get_message_count_filtered(
+        self,
+        search: Optional[str] = None,
+        session_type: Optional[str] = None,
+        lora_name: Optional[str] = None,
+        session_id: Optional[str] = None,
+        platform: Optional[str] = None,
+    ) -> int:
+        """Return the exact count for the same filters used by get_messages_filtered."""
+        async with self.async_session() as session:
+            from sqlalchemy import and_, func, select
+
+            stmt = select(func.count()).select_from(messages_table)
+            conditions = self._message_filter_conditions(search, session_type, lora_name, session_id, platform)
+            if conditions:
+                stmt = stmt.where(and_(*conditions))
+            result = await session.execute(stmt)
+            return int(result.scalar() or 0)
+
     async def get_messages_filtered(
         self,
         search: Optional[str] = None,
@@ -416,22 +464,13 @@ class PgDatabase:
         async with self.async_session() as session:
             from sqlalchemy import and_
 
-            conditions = []
-            if search:
-                pattern = f"%{search}%"
-                conditions.append(
-                    (messages_table.c.message.like(pattern))
-                    | (messages_table.c.reply.like(pattern))
-                    | (messages_table.c.userName.like(pattern))
-                )
-            if session_type:
-                conditions.append(messages_table.c.sessionType == session_type)
-            if lora_name:
-                conditions.append(messages_table.c.loraName == lora_name)
-            if session_id:
-                conditions.append(messages_table.c.sessionId == session_id)
-            if platform:
-                conditions.append(messages_table.c.platform == platform)
+            conditions = self._message_filter_conditions(
+                search=search,
+                session_type=session_type,
+                lora_name=lora_name,
+                session_id=session_id,
+                platform=platform,
+            )
 
             stmt = messages_table.select()
             if conditions:
@@ -1555,6 +1594,9 @@ class SyncPgAdapter:
 
     def get_messages_filtered(self, **kwargs):
         return self._run(self._pg.get_messages_filtered(**kwargs))
+
+    def get_message_count_filtered(self, **kwargs):
+        return self._run(self._pg.get_message_count_filtered(**kwargs))
 
     def get_message_count(self, **kwargs):
         return self._run(self._pg.get_message_count(**kwargs))

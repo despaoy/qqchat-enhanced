@@ -54,7 +54,8 @@ start_vllm() {
 
     python -m vllm.entrypoints.openai.api_server \
         --model "${MODEL_PATH}" \
-        --quantization awq \
+        --served-model-name qwen2.5-7b-awq \
+        --quantization awq_marlin \
         --enable-lora \
         --max-loras 4 \
         --max-lora-rank 64 \
@@ -64,7 +65,6 @@ start_vllm() {
         --tensor-parallel-size 1 \
         --host 0.0.0.0 \
         --port "${PORT}" \
-        --lora-modules-dir "${LORA_PATH}" \
         --trust-remote-code \
         &
     VLLM_PID=$!

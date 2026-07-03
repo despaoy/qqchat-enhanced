@@ -393,6 +393,28 @@ class TestMultiPlatformStorage:
         assert len(tg_rows) == 1
         assert qq_rows[0]["sessionId"] != tg_rows[0]["sessionId"]
 
+    def test_message_count_filtered_matches_platform_filters(self):
+        db = self._make_db()
+        for platform, session_id in (("qq", "qq:group:10001"), ("telegram", "telegram:group:10001")):
+            db.add_message({
+                "sessionType": "group",
+                "sessionId": session_id,
+                "sessionName": platform,
+                "platform": platform,
+                "adapter": platform,
+                "conversationId": "10001",
+                "senderId": "u1",
+                "sourceMessageId": f"{platform}-m1",
+                "userId": "u1",
+                "userName": "Alice",
+                "message": "same text",
+                "reply": "reply",
+            })
+
+        assert db.get_message_count_filtered(platform="qq") == 1
+        assert db.get_message_count_filtered(platform="telegram") == 1
+        assert db.get_message_count_filtered(search="same text") == 2
+
     def test_integration_dedup_uses_platform_adapter_message(self):
         db = self._make_db()
         assert db.mark_integration_message_processed("qq", "napcat", "same-id") is True

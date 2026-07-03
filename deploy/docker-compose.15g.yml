@@ -31,7 +31,7 @@ services:
   # 显存占用：模型 ~4.5G + KV Cache ~3G = ~7.5G（15G内充足）
   # ============================================
   vllm:
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.10.2
     container_name: qq-assistant-vllm
     restart: unless-stopped
     ports:
@@ -44,7 +44,8 @@ services:
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
     command: >
       --model /models/Qwen2.5-7B-Instruct-AWQ
-      --quantization awq
+      --served-model-name qwen2.5-7b-awq
+      --quantization awq_marlin
       --enable-lora
       --max-loras 4
       --max-lora-rank 64
@@ -87,7 +88,7 @@ services:
       - models:/app/models:ro
     environment:
       - VLLM_BASE_URLS=http://vllm:8000
-      - VLLM_MODEL=Qwen/Qwen2.5-7B-Instruct-AWQ
+      - VLLM_MODEL=qwen2.5-7b-awq
       - VLLM_TIMEOUT=120
       - VLLM_MAX_RETRIES=3
       - DATABASE_PATH=/app/data/qq_assistant.db

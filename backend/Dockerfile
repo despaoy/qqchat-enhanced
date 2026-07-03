@@ -19,12 +19,12 @@ ARG INSTALL_GPU_DEPS=true
 COPY requirements.txt .
 
 # Conditional dependency installation based on GPU availability
-# vllm 0.22.1 严格依赖 torch==2.11.0，必须先装 torch 再装 vllm
+# AutoDL 3090 baseline: install PyTorch CUDA 12.8 before vLLM 0.10.2
 RUN if [ "$INSTALL_GPU_DEPS" = "true" ]; then \
-        echo "Installing GPU dependencies (PyTorch CUDA 13.0 + vLLM)..." && \
-        pip install --no-cache-dir torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
-            --index-url https://download.pytorch.org/whl/cu130 && \
-        pip install --no-cache-dir vllm==0.22.1; \
+        echo "Installing GPU dependencies (PyTorch CUDA 12.8 + vLLM 0.10.2)..." && \
+        pip install --no-cache-dir torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 \
+            --index-url https://download.pytorch.org/whl/cu128 && \
+        pip install --no-cache-dir vllm==0.10.2; \
     else \
         echo "Installing CPU-only dependencies (skipping vLLM)..." && \
         pip install --no-cache-dir torch torchvision torchaudio \

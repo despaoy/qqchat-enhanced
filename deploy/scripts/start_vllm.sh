@@ -1,23 +1,23 @@
 #!/bin/bash
-# ============================================
-# vLLM 启动脚本
-# 用法: ./start_vllm.sh <GPU_ID> <PORT> <MODEL_PATH> [LORA_PATH]
-# 示例: ./start_vllm.sh 0 8001 /models/Qwen2.5-7B-Instruct /loras
-# ============================================
+# vLLM startup script for the verified AutoDL RTX 3090 baseline.
+# Usage: ./start_vllm.sh <GPU_ID> <PORT> <MODEL_PATH> [LORA_PATH]
+# Example: ./start_vllm.sh 0 8001 /models/Qwen2.5-7B-Instruct-AWQ /loras
 
 set -euo pipefail
 
-# ------------------------------------------
-# 参数解析
-# ------------------------------------------
-GPU_ID="${1:?错误: 缺少 GPU ID 参数}"
-PORT="${2:?错误: 缺少端口参数}"
-MODEL_PATH="${3:?错误: 缺少模型路径参数}"
+GPU_ID="${1:?missing GPU ID}"
+PORT="${2:?missing port}"
+MODEL_PATH="${3:?missing model path}"
 LORA_PATH="${4:-/loras}"
 
-# ------------------------------------------
-# 颜色输出
-# ------------------------------------------
+SERVED_MODEL_NAME="${VLLM_SERVED_MODEL_NAME:-qwen2.5-7b-awq}"
+QUANTIZATION="${VLLM_QUANTIZATION:-awq_marlin}"
+GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-0.82}"
+MAX_LORAS="${VLLM_MAX_LORAS:-4}"
+MAX_LORA_RANK="${VLLM_MAX_LORA_RANK:-64}"
+MAX_MODEL_LEN="${VLLM_MAX_MODEL_LEN:-4096}"
+DTYPE="${VLLM_DTYPE:-float16}"
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -27,183 +27,121 @@ log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
-# ------------------------------------------
-# 检查 GPU 可用性
-# ------------------------------------------
 check_gpu() {
-    log_info "检查 GPU ${GPU_ID} 可用性..."
-
+    log_info "Checking GPU ${GPU_ID}..."
     if ! command -v nvidia-smi &>/dev/null; then
-        log_error "nvidia-smi 未找到，请确认 NVIDIA 驱动已安装"
+        log_error "nvidia-smi not found; install NVIDIA driver first."
         exit 1
     fi
 
     local gpu_count
     gpu_count=$(nvidia-smi --list-gpus 2>/dev/null | wc -l)
-
     if [[ ${GPU_ID} -ge ${gpu_count} ]]; then
-        log_error "GPU ID ${GPU_ID} 不存在，系统共有 ${gpu_count} 块 GPU"
+        log_error "GPU ID ${GPU_ID} does not exist; system has ${gpu_count} GPU(s)."
         exit 1
     fi
 
-    # 检查 GPU 显存
     local gpu_mem
     gpu_mem=$(nvidia-smi -i "${GPU_ID}" --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
-
-    if [[ -n "${gpu_mem}" && ${gpu_mem} -lt 6000 ]]; then
-        log_warn "GPU ${GPU_ID} 可用显存仅 ${gpu_mem}MB，可能不足以运行 7B 模型"
+    if [[ -n "${gpu_mem}" && ${gpu_mem} -lt 12000 ]]; then
+        log_warn "GPU ${GPU_ID} free memory is ${gpu_mem}MB; Qwen2.5-7B-AWQ may fail to load."
     else
-        log_info "GPU ${GPU_ID} 可用显存: ${gpu_mem}MB"
+        log_info "GPU ${GPU_ID} free memory: ${gpu_mem}MB"
     fi
-
-    log_info "GPU ${GPU_ID} 检查通过"
 }
 
-# ------------------------------------------
-# 检查模型文件
-# ------------------------------------------
 check_model() {
-    log_info "检查模型文件: ${MODEL_PATH}"
-
+    log_info "Checking model files: ${MODEL_PATH}"
     if [[ ! -d "${MODEL_PATH}" ]]; then
-        log_error "模型目录不存在: ${MODEL_PATH}"
+        log_error "Model directory does not exist: ${MODEL_PATH}"
         exit 1
     fi
 
-    # 检查关键文件
-    local required_files=("config.json" "tokenizer.json")
-    for f in "${required_files[@]}"; do
+    for f in config.json tokenizer.json; do
         if [[ ! -f "${MODEL_PATH}/${f}" ]]; then
-            log_error "模型缺少必要文件: ${MODEL_PATH}/${f}"
+            log_error "Missing required model file: ${MODEL_PATH}/${f}"
             exit 1
         fi
     done
 
-    # 检查模型权重文件（safetensors 或 bin）
-    local has_weights=false
-    if ls "${MODEL_PATH}"/*.safetensors &>/dev/null || ls "${MODEL_PATH}"/model*.bin &>/dev/null; then
-        has_weights=true
-    fi
-
-    if [[ "${has_weights}" == false ]]; then
-        log_error "模型目录中未找到权重文件（.safetensors 或 .bin）"
+    if ! ls "${MODEL_PATH}"/*.safetensors &>/dev/null && ! ls "${MODEL_PATH}"/model*.bin &>/dev/null; then
+        log_error "No model weight files found in ${MODEL_PATH}"
         exit 1
     fi
-
-    log_info "模型文件检查通过"
 }
 
-# ------------------------------------------
-# 启动 vLLM 服务
-# ------------------------------------------
 start_vllm() {
-    log_info "启动 vLLM 服务..."
+    log_info "Starting vLLM..."
     log_info "  GPU: ${GPU_ID}"
-    log_info "  端口: ${PORT}"
-    log_info "  模型: ${MODEL_PATH}"
-    log_info "  LoRA: ${LORA_PATH}"
+    log_info "  Port: ${PORT}"
+    log_info "  Model: ${MODEL_PATH}"
+    log_info "  Served model: ${SERVED_MODEL_NAME}"
+    log_info "  Quantization: ${QUANTIZATION}"
+    log_info "  LoRA directory: ${LORA_PATH}"
 
     export CUDA_VISIBLE_DEVICES="${GPU_ID}"
 
-    # 启动 vLLM OpenAI 兼容 API 服务器
     python3 -m vllm.entrypoints.openai.api_server \
         --model "${MODEL_PATH}" \
+        --served-model-name "${SERVED_MODEL_NAME}" \
+        --quantization "${QUANTIZATION}" \
         --enable-lora \
-        --max-loras 8 \
-        --max-lora-rank 64 \
-        --gpu-memory-utilization 0.9 \
-        --max-model-len 4096 \
-        --dtype bfloat16 \
+        --max-loras "${MAX_LORAS}" \
+        --max-lora-rank "${MAX_LORA_RANK}" \
+        --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
+        --max-model-len "${MAX_MODEL_LEN}" \
+        --dtype "${DTYPE}" \
         --tensor-parallel-size 1 \
         --host 0.0.0.0 \
         --port "${PORT}" \
-        --lora-modules-dir "${LORA_PATH}" \
         --enable-prefix-caching \
-        --trust-remote-code \
-        &
+        --trust-remote-code &
     VLLM_PID=$!
-
-    log_info "vLLM 进程 PID: ${VLLM_PID}"
+    log_info "vLLM PID: ${VLLM_PID}"
 }
 
-# ------------------------------------------
-# 健康检查等待
-# ------------------------------------------
 wait_for_healthy() {
     local max_retries=60
     local retry=0
     local health_url="http://localhost:${PORT}/health"
-
-    log_info "等待 vLLM 服务就绪（最多等待 ${max_retries} x 5s）..."
+    log_info "Waiting for vLLM health check: ${health_url}"
 
     while [[ ${retry} -lt ${max_retries} ]]; do
-        # 检查进程是否存活
         if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
-            log_error "vLLM 进程已退出"
+            log_error "vLLM process exited early."
             exit 1
         fi
-
         if curl -sf "${health_url}" &>/dev/null; then
-            log_info "vLLM 服务已就绪！"
-            log_info "  健康检查: ${health_url}"
-            log_info "  OpenAI API: http://localhost:${PORT}/v1"
+            log_info "vLLM is ready."
             return 0
         fi
-
         retry=$((retry + 1))
-        log_info "等待中... (${retry}/${max_retries})"
         sleep 5
     done
 
-    log_error "vLLM 服务启动超时"
+    log_error "vLLM startup timed out."
     kill "${VLLM_PID}" 2>/dev/null || true
     exit 1
 }
 
-# ------------------------------------------
-# 优雅关闭
-# ------------------------------------------
 cleanup() {
-    log_info "收到终止信号，正在关闭 vLLM 服务..."
-
+    log_info "Stopping vLLM..."
     if [[ -n "${VLLM_PID:-}" ]] && kill -0 "${VLLM_PID}" 2>/dev/null; then
-        # 先发送 SIGTERM，等待进程优雅退出
         kill -TERM "${VLLM_PID}" 2>/dev/null || true
-
         local wait_count=0
         while kill -0 "${VLLM_PID}" 2>/dev/null && [[ ${wait_count} -lt 30 ]]; do
             sleep 1
             wait_count=$((wait_count + 1))
         done
-
-        # 如果进程仍在运行，强制终止
         if kill -0 "${VLLM_PID}" 2>/dev/null; then
-            log_warn "vLLM 进程未在30秒内退出，强制终止"
             kill -KILL "${VLLM_PID}" 2>/dev/null || true
         fi
     fi
-
-    log_info "vLLM 服务已关闭"
-    exit 0
 }
-
-# 注册信号处理
 trap cleanup SIGTERM SIGINT SIGQUIT
 
-# ------------------------------------------
-# 主流程
-# ------------------------------------------
-main() {
-    log_info "===== vLLM 启动脚本 ====="
-
-    check_gpu
-    check_model
-    start_vllm
-    wait_for_healthy
-
-    # 保持脚本运行，等待 vLLM 进程
-    log_info "vLLM 服务运行中，按 Ctrl+C 停止"
-    wait "${VLLM_PID}"
-}
-
-main "$@"
+check_gpu
+check_model
+start_vllm
+wait_for_healthy
+wait "${VLLM_PID}"

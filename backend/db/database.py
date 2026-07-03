@@ -53,11 +53,11 @@ class SQLiteDB:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
         self._init_database()
-    
+
     def _get_connection(self):
         """获取数据库连接 - 线程本地复用 + WAL模式"""
         if not hasattr(self._local, 'conn') or self._local.conn is None:
-            conn = sqlite3.connect(f"file:{self.db_path}?mode=rwc", uri=True, check_same_thread=False)
+            conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
             conn.row_factory = sqlite3.Row
             conn.execute('PRAGMA journal_mode=WAL')
             conn.execute('PRAGMA busy_timeout=5000')
@@ -70,18 +70,18 @@ class SQLiteDB:
     def get_connection(self):
         """获取数据库连接（公开接口）"""
         return self._get_connection()
-    
+
     def close_connection(self):
         """关闭当前线程的数据库连接"""
         if hasattr(self._local, 'conn') and self._local.conn is not None:
             self._local.conn.close()
             self._local.conn = None
-    
+
     def _init_database(self):
         """初始化数据库表结构"""
         conn = self._get_connection()
         cursor = conn.cursor()
-        
+
         # 创建消息表
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS messages (
@@ -105,7 +105,7 @@ class SQLiteDB:
                 createdAt TEXT NOT NULL
             )
         ''')
-        
+
         # 创建LoRA模型表
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS loras (
@@ -120,7 +120,7 @@ class SQLiteDB:
                 createdAt TEXT
             )
         ''')
-        
+
         # 创建配置表
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS config (
@@ -128,7 +128,7 @@ class SQLiteDB:
                 value TEXT NOT NULL
             )
         ''')
-        
+
         # 创建知识库表
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS knowledge_bases (
@@ -193,7 +193,7 @@ class SQLiteDB:
         except sqlite3.OperationalError:
             cursor.execute("ALTER TABLE knowledge_documents ADD COLUMN folder_id INTEGER REFERENCES knowledge_folders(id) ON DELETE SET NULL")
             logger.info("已为 knowledge_documents 表添加 folder_id 字段")
-        
+
         # 创建知识库向量表（用于RAG）
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS knowledge_chunks (
@@ -258,7 +258,7 @@ class SQLiteDB:
                 updated_at TEXT
             )
         ''')
-        
+
         # 创建训练任务表
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS training_tasks (
@@ -369,7 +369,7 @@ class SQLiteDB:
         cursor.execute('PRAGMA synchronous=NORMAL')
         cursor.execute('PRAGMA cache_size=-8000')  # 8MB cache
         cursor.execute('PRAGMA temp_store=MEMORY')
-        
+
         # 为高频查询建索引：按 sessionId 查消息，避免全表扫
         try:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_messages_sessionId_createdAt ON messages(sessionId, createdAt)')
@@ -393,15 +393,15 @@ class SQLiteDB:
             self._cleanup_stale_loras(cursor)
             # 同步：扫描 loras/ 目录，自动注册新增的 LoRA
             self._sync_loras_from_disk(cursor)
-        
+
         # 初始化配置数据（如果表为空）
         cursor.execute('SELECT COUNT(*) FROM config')
         if cursor.fetchone()[0] == 0:
             self._init_default_config(cursor)
-        
+
         conn.commit()
         logger.info(f"✅ 数据库初始化完成: {self.db_path}")
-    
+
     def _ensure_column(self, cursor, table: str, column: str, definition: str):
         cursor.execute(f"PRAGMA table_info({table})")
         columns = {row[1] for row in cursor.fetchall()}
@@ -469,7 +469,7 @@ class SQLiteDB:
         # 如果没有扫描到任何 LoRA，跳过初始化
         if not default_loras:
             return
-        
+
         for lora in default_loras:
             cursor.execute('''
                 INSERT INTO loras (id, name, description, status, style, size, trainedSteps, totalSteps, createdAt)
@@ -646,13 +646,13 @@ class SQLiteDB:
             "openaiCompatApiKey": "",
             "openaiCompatModel": "deepseek-chat"
         }
-        
+
         for key, value in default_config.items():
             cursor.execute('INSERT INTO config (key, value) VALUES (?, ?)', (key, value))
-    
+
     def get_messages(self, limit: int = 100, offset: int = 0, session_id: str | None = None):
         """获取消息记录，支持按会话 ID 筛选。
-        
+
         Args:
             limit: 返回条数上限
             offset: 偏移量
@@ -662,15 +662,15 @@ class SQLiteDB:
         cursor = conn.cursor()
         if session_id:
             cursor.execute('''
-                SELECT * FROM messages 
+                SELECT * FROM messages
                 WHERE sessionId = ?
-                ORDER BY createdAt DESC 
+                ORDER BY createdAt DESC
                 LIMIT ? OFFSET ?
             ''', (session_id, limit, offset))
         else:
             cursor.execute('''
-                SELECT * FROM messages 
-                ORDER BY createdAt DESC 
+                SELECT * FROM messages
+                ORDER BY createdAt DESC
                 LIMIT ? OFFSET ?
             ''', (limit, offset))
         rows = cursor.fetchall()
@@ -678,31 +678,15 @@ class SQLiteDB:
         for row in rows:
             messages.append(dict(row))
         return messages
-    
-    def get_messages_filtered(
+
+    def _build_message_filter(
         self,
         search: str | None = None,
         session_type: str | None = None,
         lora_name: str | None = None,
         session_id: str | None = None,
         platform: str | None = None,
-        limit: int = 100,
-        offset: int = 0,
-    ):
-        """获取消息记录 — SQL 层多条件过滤 + 分页，避免全表拉取。
-        
-        Args:
-            search: 模糊搜索 message/reply/userName
-            session_type: 会话类型（private/group）
-            lora_name: LoRA 名称
-            session_id: 会话 ID
-            limit: 返回条数上限（最大 1000）
-            offset: 偏移量
-        """
-        limit = min(limit, 1000)
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
+    ) -> tuple[str, list]:
         conditions: list[str] = []
         params: list = []
 
@@ -723,6 +707,29 @@ class SQLiteDB:
             params.append(platform)
 
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        return where, params
+
+    def get_messages_filtered(
+        self,
+        search: str | None = None,
+        session_type: str | None = None,
+        lora_name: str | None = None,
+        session_id: str | None = None,
+        platform: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ):
+        """Get messages with SQL-level filtering and pagination."""
+        limit = min(limit, 1000)
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        where, params = self._build_message_filter(
+            search=search,
+            session_type=session_type,
+            lora_name=lora_name,
+            session_id=session_id,
+            platform=platform,
+        )
         params.extend([limit, offset])
         cursor.execute(
             f"SELECT * FROM messages {where} ORDER BY createdAt DESC LIMIT ? OFFSET ?",
@@ -730,13 +737,34 @@ class SQLiteDB:
         )
         return [dict(row) for row in cursor.fetchall()]
 
+    def get_message_count_filtered(
+        self,
+        search: str | None = None,
+        session_type: str | None = None,
+        lora_name: str | None = None,
+        session_id: str | None = None,
+        platform: str | None = None,
+    ) -> int:
+        """Return the exact count for the same filters used by get_messages_filtered."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        where, params = self._build_message_filter(
+            search=search,
+            session_type=session_type,
+            lora_name=lora_name,
+            session_id=session_id,
+            platform=platform,
+        )
+        cursor.execute(f"SELECT COUNT(*) FROM messages {where}", params)
+        return int(cursor.fetchone()[0])
+
     def get_message_count(self) -> int:
         """获取消息总数"""
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute('SELECT COUNT(*) FROM messages')
         return cursor.fetchone()[0]
-    
+
     def add_message(self, message: Dict):
         """Add a message record and keep the conversation index in sync."""
         conn = self._get_connection()
@@ -802,12 +830,12 @@ class SQLiteDB:
         cursor.execute('DELETE FROM messages WHERE id = ?', (msg_id,))
         conn.commit()
         return cursor.rowcount > 0
-    
+
     def delete_messages_by_filter(self, search: str = None, sessionType: str = None, lora: str = None, sessionName: str = None, platform: str = None) -> int:
         """批量删除消息（基于筛选条件），返回删除数量"""
         conn = self._get_connection()
         cursor = conn.cursor()
-        
+
         conditions = []
         params = []
         if search:
@@ -825,37 +853,37 @@ class SQLiteDB:
         if platform and platform != "all":
             conditions.append("platform = ?")
             params.append(platform)
-        
+
         if conditions:
             cursor.execute(f"DELETE FROM messages WHERE {' AND '.join(conditions)}", params)
         else:
             cursor.execute("DELETE FROM messages")
-        
+
         conn.commit()
         return cursor.rowcount
-    
+
     def get_loras(self, status: Optional[str] = None):
         """获取LoRA模型列表"""
         conn = self._get_connection()
         cursor = conn.cursor()
-        
+
         if status and status != "all":
             cursor.execute('SELECT * FROM loras WHERE status = ?', (status,))
         else:
             cursor.execute('SELECT * FROM loras')
-        
+
         rows = cursor.fetchall()
-        
+
         loras = []
         for row in rows:
             loras.append(dict(row))
         return loras
-    
+
     def update_lora_status(self, lora_id: str, status: str):
         """更新LoRA模型状态"""
         conn = self._get_connection()
         cursor = conn.cursor()
-        
+
         if status == "active":
             # 原子操作：用CASE在单条SQL中完成，避免竞态条件
             cursor.execute(
@@ -864,17 +892,17 @@ class SQLiteDB:
             )
         else:
             cursor.execute('UPDATE loras SET status = ? WHERE id = ?', (status, lora_id))
-        
+
         conn.commit()
-        
+
         # 获取更新后的LoRA
         cursor.execute('SELECT * FROM loras WHERE id = ?', (lora_id,))
         row = cursor.fetchone()
-        
+
         if row:
             return dict(row)
         return None
-    
+
     @property
     def config(self):
         """获取配置"""
@@ -882,7 +910,7 @@ class SQLiteDB:
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM config')
         rows = cursor.fetchall()
-        
+
         config_dict = {}
         for row in rows:
             key = row['key']
@@ -906,36 +934,36 @@ class SQLiteDB:
         """获取单个配置项的值"""
         config_dict = self.config
         return config_dict.get(key, default)
-    
+
     def update_config(self, new_config: Dict):
         """更新配置"""
         conn = self._get_connection()
         cursor = conn.cursor()
-        
+
         for key, value in new_config.items():
             # 转换为字符串存储
             if isinstance(value, bool):
                 value_str = str(value).lower()
             else:
                 value_str = str(value)
-            
+
             cursor.execute('''
                 INSERT OR REPLACE INTO config (key, value)
                 VALUES (?, ?)
             ''', (key, value_str))
-        
+
         conn.commit()
-    
+
     @property
     def messages(self):
         """获取所有消息（兼容性）"""
         return self.get_messages(limit=1000)
-    
+
     @property
     def loras(self):
         """获取所有LoRA（兼容性）"""
         return self.get_loras()
-    
+
     # ============================================
     # 知识库管理
     # ============================================
@@ -1096,17 +1124,17 @@ class SQLiteDB:
             now,
             now
         ))
-        
+
         doc_id = cursor.lastrowid
         conn.commit()
-        
+
         return {
             **document,
             "id": doc_id,
             "createdAt": now,
             "updatedAt": now
         }
-    
+
     def get_knowledge_documents(self, limit: int = 100, offset: int = 0, category: Optional[str] = None, knowledge_base_id: Optional[int] = None, folder_id: Optional[int] = None):
         """获取知识库文档列表，支持按分类/知识库/文件夹筛选"""
         conn = self._get_connection()
@@ -1129,18 +1157,18 @@ class SQLiteDB:
         )
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
-    
+
     def get_knowledge_document(self, doc_id: int):
         """获取单个知识库文档"""
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM knowledge_documents WHERE id = ?', (doc_id,))
         row = cursor.fetchone()
-        
+
         if row:
             return dict(row)
         return None
-    
+
     # knowledge_documents 表允许更新的列名白名单
     KNOWLEDGE_DOC_UPDATABLE_COLUMNS = {
         "title", "content", "summary", "folderId", "kbId",
@@ -1168,24 +1196,24 @@ class SQLiteDB:
             if value is not None:
                 set_clauses.append(f"{key} = ?")
                 values.append(value)
-        
+
         values.append(doc_id)
-        
+
         cursor.execute(
             f'UPDATE knowledge_documents SET {", ".join(set_clauses)} WHERE id = ?',
             values
         )
-        
+
         conn.commit()
-        
+
         # 获取更新后的文档
         cursor.execute('SELECT * FROM knowledge_documents WHERE id = ?', (doc_id,))
         row = cursor.fetchone()
-        
+
         if row:
             return dict(row)
         return None
-    
+
     def delete_knowledge_document(self, doc_id: int):
         """删除知识库文档"""
         conn = self._get_connection()
@@ -1196,13 +1224,13 @@ class SQLiteDB:
         conn.commit()
 
         return True
-    
+
     def add_knowledge_chunk(self, chunk: Dict):
         """添加知识库文档片段"""
         conn = self._get_connection()
         cursor = conn.cursor()
         now = datetime.now().isoformat()
-        
+
         cursor.execute('''
             INSERT INTO knowledge_chunks (documentId, chunkIndex, content, embedding, createdAt)
             VALUES (?, ?, ?, ?, ?)
@@ -1213,59 +1241,59 @@ class SQLiteDB:
             chunk.get("embedding"),
             now
         ))
-        
+
         chunk_id = cursor.lastrowid
         conn.commit()
-        
+
         return {
             **chunk,
             "id": chunk_id,
             "createdAt": now
         }
-    
+
     def get_knowledge_chunks(self, doc_id: int):
         """获取文档的所有片段"""
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT * FROM knowledge_chunks 
-            WHERE documentId = ? 
+            SELECT * FROM knowledge_chunks
+            WHERE documentId = ?
             ORDER BY chunkIndex
         ''', (doc_id,))
         rows = cursor.fetchall()
-        
+
         chunks = []
         for row in rows:
             chunks.append(dict(row))
         return chunks
-    
+
     def get_all_knowledge_chunks(self):
         """获取所有知识库片段（用于检索）"""
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM knowledge_chunks ORDER BY documentId, chunkIndex')
         rows = cursor.fetchall()
-        
+
         chunks = []
         for row in rows:
             chunks.append(dict(row))
         return chunks
-    
+
     def get_knowledge_stats(self):
         """获取知识库统计数据"""
         conn = self._get_connection()
         cursor = conn.cursor()
-        
+
         cursor.execute('SELECT COUNT(*) as total FROM knowledge_documents')
         total_docs = cursor.fetchone()['total']
-        
+
         cursor.execute('SELECT COUNT(*) as total FROM knowledge_chunks')
         total_chunks = cursor.fetchone()['total']
-        
+
         cursor.execute('SELECT SUM(LENGTH(content)) as total_chars FROM knowledge_documents')
         total_chars_result = cursor.fetchone()['total_chars']
         total_chars = total_chars_result or 0
-        
+
         return {
             "totalDocuments": total_docs,
             "totalChunks": total_chunks,

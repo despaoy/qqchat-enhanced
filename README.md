@@ -8,8 +8,8 @@
 |------|------|------|
 | 前端 | Next.js (App Router) + React + TypeScript + shadcn/ui + Tailwind CSS | 16.2.9 / 19.2.3 / 5.9 / 4.x |
 | 后端 | Python FastAPI + Pydantic + SQLAlchemy | 0.136.x / 2.13.x / 2.0.x |
-| 推理引擎 | vLLM（OpenAI 兼容 API） | 0.22.1 |
-| 训练框架 | PyTorch + PEFT + TRL + bitsandbytes | 2.11.0+cu130 / 0.14+ / 0.45+ |
+| 推理引擎 | vLLM（OpenAI 兼容 API） | 0.10.2 |
+| 训练框架 | PyTorch + PEFT + TRL + bitsandbytes | 2.8.0+cu128 / 0.14+ / 0.45+ |
 | 数据库 | SQLite（开发）/ PostgreSQL + pgvector（生产） | 14 |
 | 缓存 | Redis（可选，未配置时自动降级为 DB 直连） | 7.4+ |
 | 向量检索 | Faiss + sentence-transformers | 1.9+ / 5.0+ |
@@ -20,11 +20,11 @@
 
 | 组件 | 最低版本 | 推荐版本 | 说明 |
 |------|---------|---------|------|
-| Python | 3.12 | 3.12.3 | vLLM 0.22.1 + transformers v5 要求 |
+| Python | 3.12 | 3.12.3 | vLLM 0.10.2 + transformers 4.56.x 要求 |
 | Node.js | 22 LTS | 22.23.1 | 前端构建，通过 nvm 安装 |
 | pnpm | 11 | 11.9.0 | 通过 corepack 启用 |
 | CUDA 驱动 | 525+ | 595.58.03 | RTX 3090 推荐 |
-| CUDA Runtime | 12.1+ | 13.0 | torch 2.11.0+cu130 内置 |
+| CUDA Runtime | 12.1+ | 12.8 | torch 2.8.0+cu128 内置 |
 | GPU 显存 | 16GB | 24GB (3090) | AWQ 4bit 需 ~14GB |
 | 磁盘空间 | 20GB | 40GB | 含模型 10GB + 依赖 5GB + 缓存 |
 
@@ -61,7 +61,7 @@ Host seetacloud
     IdentityFile ~/.ssh/id_rsa
 
 # 服务器上确认 GPU 和驱动
-nvidia-smi  # 应显示 RTX 3090, 驱动 525+, CUDA 13.0+
+nvidia-smi  # 应显示 RTX 3090, 驱动 525+, CUDA 12.8+
 ```
 
 ### 1. 克隆代码
@@ -78,12 +78,12 @@ cd qqchat-enhanced
 source /root/miniconda3/etc/profile.d/conda.sh
 conda activate base
 
-# ① PyTorch CUDA 13.0（vllm 0.22.1 硬性依赖 torch==2.11.0）
-pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
-    --index-url https://download.pytorch.org/whl/cu130
+# ① PyTorch CUDA 12.8（vllm 0.10.2 硬性依赖 torch==2.8.0）
+pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 \
+    --index-url https://download.pytorch.org/whl/cu128
 
-# ② vLLM 0.22.1（勿用 0.23.0+，有 pip 元数据解析 bug）
-pip install vllm==0.22.1
+# ② vLLM 0.10.2（勿用 0.23.0+，有 pip 元数据解析 bug）
+pip install vllm==0.10.2
 
 # ③ 其余依赖
 cd backend
@@ -185,8 +185,10 @@ source /root/miniconda3/etc/profile.d/conda.sh && conda activate base
 cd /root/autodl-tmp/qqchat-enhanced/backend
 nohup python -m vllm.entrypoints.openai.api_server \
     --model /root/autodl-tmp/models/Qwen2.5-7B-Instruct-AWQ \
-    --enable-lora --max-loras 8 --max-lora-rank 64 \
-    --gpu-memory-utilization 0.9 --max-model-len 4096 \
+    --served-model-name qwen2.5-7b-awq \
+    --quantization awq_marlin \
+    --enable-lora --max-loras 4 --max-lora-rank 64 \
+    --gpu-memory-utilization 0.82 --max-model-len 4096 \
     --dtype float16 --tensor-parallel-size 1 \
     --host 0.0.0.0 --port 8001 \
     --enable-prefix-caching --trust-remote-code \
@@ -196,8 +198,8 @@ nohup python -m vllm.entrypoints.openai.api_server \
 until curl -sf http://localhost:8001/health; do sleep 5; done && echo "vLLM ready"
 
 # ② FastAPI 后端（必须 --workers 1，训练状态为模块级变量）
-# 设置 CUDA 13 库路径（解决 libnvJitLink.so.13 找不到的问题）
-export LD_LIBRARY_PATH="/root/miniconda3/lib/python3.12/site-packages/nvidia/cu13/lib:/root/miniconda3/lib/python3.12/site-packages/nvidia/nvjitlink/lib:/root/miniconda3/lib/python3.12/site-packages/nvidia/cublas/lib:/root/miniconda3/lib/python3.12/site-packages/nvidia/cudnn/lib:$LD_LIBRARY_PATH"
+# 如遇 NVIDIA 动态库查找失败，再补充 PyTorch wheel 内置库路径
+export LD_LIBRARY_PATH="/root/miniconda3/lib/python3.12/site-packages/nvidia/nvjitlink/lib:/root/miniconda3/lib/python3.12/site-packages/nvidia/cublas/lib:/root/miniconda3/lib/python3.12/site-packages/nvidia/cudnn/lib:$LD_LIBRARY_PATH"
 export PYTHONDONTWRITEBYTECODE=1
 nohup python run.py --host 0.0.0.0 --port 8000 --workers 1 \
     > /root/backend.log 2>&1 < /dev/null &
@@ -304,15 +306,15 @@ docker compose up -d
 
 ### vLLM 安装报 `TypeError: expected string or bytes-like object, got 'NoneType'`
 
-vLLM 0.23.0+ 在 pip 依赖解析阶段有元数据解析 bug。**必须使用 `vllm==0.22.1`**：
+vLLM 0.23.0+ 在 pip 依赖解析阶段有元数据解析 bug。**必须使用 `vllm==0.10.2`**：
 
 ```bash
-pip install vllm==0.22.1  # 不要用 pip install vllm（会装 0.23.0）
+pip install vllm==0.10.2  # 不要用 pip install vllm（会装 0.23.0）
 ```
 
 ### vLLM 报 `unrecognized arguments: --lora-modules-dir`
 
-vLLM 0.22.1 已移除 `--lora-modules-dir` 参数。LoRA 适配器通过 API 动态加载，只需 `--enable-lora` 即可，无需指定目录。
+vLLM 0.10.2 已移除 `--lora-modules-dir` 参数。LoRA 适配器通过 API 动态加载，只需 `--enable-lora` 即可，无需指定目录。
 
 ### vLLM 启动报 CUDA / dtype 相关错误
 
@@ -320,22 +322,11 @@ AWQ 量化模型必须使用 `--dtype float16`（或 `auto`），**不要用 `--
 
 ### bitsandbytes 报 `libnvJitLink.so.13: cannot open shared object file`
 
-PyTorch 2.11.0+cu130 需要 CUDA 13 运行时库，但系统可能只安装了 CUDA 12。CUDA 13 库已随 pip 包安装，需手动加入 `LD_LIBRARY_PATH`：
+PyTorch 2.8.0+cu128 使用 CUDA 12.8 wheel。通常不需要手动设置额外 CUDA 路径；如果运行时仍找不到 NVIDIA 动态库，可先确认 PyTorch wheel 自带库目录已进入 `LD_LIBRARY_PATH`：
 
 ```bash
-# 查找 CUDA 13 库路径
-CUDA13_LIB=$(python -c "import nvidia.cuda13; print(nvidia.cuda13.lib_dir)" 2>/dev/null || \
-    echo "/root/miniconda3/lib/python3.12/site-packages/nvidia/cu13/lib")
-NVJITLINK_LIB=$(python -c "import nvidia.nvjitlink; print(nvidia.nvjitlink.lib_dir)" 2>/dev/null || \
-    echo "/root/miniconda3/lib/python3.12/site-packages/nvidia/nvjitlink/lib")
-CUBLAS_LIB=$(python -c "import nvidia.cublas; print(nvidia.cublas.lib_dir)" 2>/dev/null || \
-    echo "/root/miniconda3/lib/python3.12/site-packages/nvidia/cublas/lib")
-CUDNN_LIB=$(python -c "import nvidia.cudnn; print(nvidia.cudnn.lib_dir)" 2>/dev/null || \
-    echo "/root/miniconda3/lib/python3.12/site-packages/nvidia/cudnn/lib")
-export LD_LIBRARY_PATH="$CUDA13_LIB:$NVJITLINK_LIB:$CUBLAS_LIB:$CUDNN_LIB:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="/root/miniconda3/lib/python3.12/site-packages/nvidia/nvjitlink/lib:/root/miniconda3/lib/python3.12/site-packages/nvidia/cublas/lib:/root/miniconda3/lib/python3.12/site-packages/nvidia/cudnn/lib:$LD_LIBRARY_PATH"
 ```
-
-> 建议将上述路径写入 `~/.bashrc` 或后端启动脚本中。
 
 ### 后端多 worker 导致训练状态丢失
 
@@ -410,7 +401,7 @@ nohup python -m vllm.entrypoints.openai.api_server \
         hutao=/path/to/hutao_lora/final \
         minamo=/path/to/minamo_lora \
     --gpu-memory-utilization 0.85 --max-model-len 4096 \
-    --quantization awq --tensor-parallel-size 1 \
+    --served-model-name qwen2.5-7b-awq --quantization awq_marlin --tensor-parallel-size 1 \
     --host 0.0.0.0 --port 8001 \
     --enable-prefix-caching --trust-remote-code \
     > /root/vllm.log 2>&1 &

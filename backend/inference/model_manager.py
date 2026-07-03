@@ -24,44 +24,42 @@ _db_config_ttl: float = 5.0
 _db_config_lock = threading.Lock()
 
 
+def _coerce_config_value(value):
+    """Convert persisted config strings to primitive Python values."""
+    if isinstance(value, (bool, int, float)) or value is None:
+        return value
+    text = str(value)
+    lowered = text.lower()
+    if lowered == 'true':
+        return True
+    if lowered == 'false':
+        return False
+    try:
+        if '.' in text:
+            return float(text)
+        return int(text)
+    except (ValueError, TypeError):
+        return value
+
+
 def _get_db_config():
-    """从数据库读取模型配置参数（带缓存）"""
+    """Read model config through the active database adapter with a short cache."""
     global _cached_db_config, _cached_db_config_time
     with _db_config_lock:
         now = time.time()
         if _cached_db_config and (now - _cached_db_config_time) < _db_config_ttl:
             return _cached_db_config.copy()
-        conn = None
         try:
-            import sqlite3
-            db_path = Path(__file__).parent.parent / "qq_assistant.db"
-            conn = sqlite3.connect(str(db_path), check_same_thread=False)
-            cursor = conn.cursor()
-            cursor.execute('SELECT key, value FROM config')
-            rows = cursor.fetchall()
-            result = {}
-            for key, value in rows:
-                try:
-                    if '.' in value:
-                        result[key] = float(value)
-                    else:
-                        result[key] = int(value)
-                except (ValueError, TypeError):
-                    if value.lower() == 'true':
-                        result[key] = True
-                    elif value.lower() == 'false':
-                        result[key] = False
-                    else:
-                        result[key] = value
+            from db.adapter import db
+
+            raw_config = getattr(db, "config", {}) or {}
+            result = {key: _coerce_config_value(value) for key, value in raw_config.items()}
             _cached_db_config = result
             _cached_db_config_time = now
             return result.copy()
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to read model config from database adapter: %s", exc)
             return {}
-        finally:
-            if conn:
-                conn.close()
-
 
 _db_cfg = _get_db_config()
 from typing import Optional, Dict, Any, List, Tuple

@@ -26,7 +26,6 @@ async def get_messages(
     """获取消息记录 — 支持 SQL 层多条件组合过滤 + 分页"""
     total_all = db.get_message_count()
 
-    # SQL 层过滤（不再拉全表到 Python 过滤）
     messages = db.get_messages_filtered(
         search=search,
         session_type=sessionType if sessionType and sessionType != "all" else None,
@@ -36,8 +35,13 @@ async def get_messages(
         limit=limit,
         offset=offset,
     )
-    # 总数近似（精确计数需再查一次，此处用返回数 + 总数引用）
-    total = len(messages)
+    total = db.get_message_count_filtered(
+        search=search,
+        session_type=sessionType if sessionType and sessionType != "all" else None,
+        lora_name=lora if lora and lora != "all" else None,
+        session_id=sessionId,
+        platform=platform if platform and platform != "all" else None,
+    )
 
     return {
         "messages": messages,
