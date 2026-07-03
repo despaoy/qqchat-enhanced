@@ -180,7 +180,13 @@ class VectorDatabase:
         for candidate in cls._LOCAL_MODEL_SEARCH_PATHS:
             if candidate.exists() and (candidate / "config.json").exists():
                 return str(candidate)
-        return "paraphrase-multilingual-MiniLM-L12-v2"
+        if os.getenv("ALLOW_REMOTE_EMBEDDING_MODEL", "false").lower() in {"1", "true", "yes", "on"}:
+            return "paraphrase-multilingual-MiniLM-L12-v2"
+        raise FileNotFoundError(
+            "Embedding model not found locally. Set EMBEDDING_MODEL_PATH or download "
+            "paraphrase-multilingual-MiniLM-L12-v2; set ALLOW_REMOTE_EMBEDDING_MODEL=true "
+            "only when outbound HuggingFace access is available."
+        )
 
     def __init__(self, db_path: str = "data/vector_db", index_config: Optional[IndexConfig] = None):
         """初始化向量数据库。

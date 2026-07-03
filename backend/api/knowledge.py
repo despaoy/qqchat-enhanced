@@ -16,7 +16,7 @@ from db.models import (
     KnowledgeDocumentCreate, KnowledgeDocumentUpdate,
     KnowledgeSearchRequest
 )
-from app.config import INPUT_VALIDATOR_AVAILABLE, KNOWLEDGE_SCHEMA, VECTOR_DB_AVAILABLE
+from app.config import INPUT_VALIDATOR_AVAILABLE, KNOWLEDGE_DOCUMENT_SCHEMA, KNOWLEDGE_SCHEMA, VECTOR_DB_AVAILABLE
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -582,7 +582,7 @@ async def create_knowledge_document(request: KnowledgeDocumentCreate, current_us
         # 输入验证
         if INPUT_VALIDATOR_AVAILABLE:
             from infra.input_validator import InputValidator
-            is_valid, errors = InputValidator.validate(request.model_dump(), KNOWLEDGE_SCHEMA)
+            is_valid, errors = InputValidator.validate(request.model_dump(), KNOWLEDGE_DOCUMENT_SCHEMA)
             if not is_valid:
                 raise HTTPException(status_code=422, detail={"message": "输入验证失败", "errors": errors})
 

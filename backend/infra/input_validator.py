@@ -237,7 +237,7 @@ MESSAGE_SCHEMA = Schema(
     allow_extra=True,
 )
 
-KNOWLEDGE_SCHEMA = Schema(
+KNOWLEDGE_DOCUMENT_SCHEMA = Schema(
     fields={
         "title": FieldRule(
             field_type=FieldType.STRING,
@@ -268,12 +268,12 @@ KNOWLEDGE_SCHEMA = Schema(
             field_type=FieldType.LIST,
             required=False,
         ),
-        "top_k": FieldRule(
-            field_type=FieldType.INTEGER,
-            required=False,
-            min_value=1,
-            max_value=50,
-        ),
+    },
+    allow_extra=True,
+)
+
+KNOWLEDGE_SEARCH_SCHEMA = Schema(
+    fields={
         "query": FieldRule(
             field_type=FieldType.STRING,
             required=True,
@@ -283,10 +283,19 @@ KNOWLEDGE_SCHEMA = Schema(
             check_xss=True,
             sanitize=True,
         ),
+        "top_k": FieldRule(
+            field_type=FieldType.INTEGER,
+            required=False,
+            min_value=1,
+            max_value=50,
+        ),
     },
     allow_extra=True,
 )
 
+# Backward-compatible name for existing imports. Search requests need query;
+# document create/update endpoints must use KNOWLEDGE_DOCUMENT_SCHEMA explicitly.
+KNOWLEDGE_SCHEMA = KNOWLEDGE_SEARCH_SCHEMA
 TRAINING_SCHEMA = Schema(
     fields={
         "lora_name": FieldRule(

@@ -233,6 +233,7 @@ try:
     from infra.input_validator import (
         InputValidator,
         MESSAGE_SCHEMA,
+        KNOWLEDGE_DOCUMENT_SCHEMA,
         KNOWLEDGE_SCHEMA,
         TRAINING_SCHEMA,
         CONFIG_SCHEMA,
