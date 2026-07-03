@@ -32,6 +32,7 @@ function HistoryContent() {
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [sessionType, setSessionType] = useState('all');
+  const [platformFilter, setPlatformFilter] = useState('all');
   const [sessionNameFilter, setSessionNameFilter] = useState('');
   const [selectedLora, setSelectedLora] = useState('all');
   const [detailMessage, setDetailMessage] = useState<Message | null>(null);
@@ -157,7 +158,7 @@ function HistoryContent() {
     } finally {
       setBatchDeleting(false);
     }
-  }, [searchTerm, sessionType, selectedLora, sessionNameFilter, refetch]);
+  }, [searchTerm, sessionType, platformFilter, selectedLora, sessionNameFilter, refetch]);
 
   if (error) {
     return (
@@ -207,6 +208,19 @@ function HistoryContent() {
                   />
                 </div>
               </div>
+              <Select value={platformFilter} onValueChange={setPlatformFilter}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="平台" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部平台</SelectItem>
+                  <SelectItem value="qq">QQ</SelectItem>
+                  <SelectItem value="telegram">Telegram</SelectItem>
+                  <SelectItem value="wecom">企业微信</SelectItem>
+                  <SelectItem value="wechat_official">微信公众号</SelectItem>
+                  <SelectItem value="wechat_personal">个人微信</SelectItem>
+                </SelectContent>
+              </Select>
               <Select value={sessionType} onValueChange={setSessionType}>
                 <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="会话类型" />
@@ -406,6 +420,7 @@ function HistoryContent() {
               <div className="space-y-4 overflow-y-auto flex-1 min-h-0">
                 {/* 元信息 */}
                 <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <Badge variant="outline">{(detailMessage.platform || 'qq').toUpperCase()}</Badge>
                   <Badge variant={detailMessage.sessionType === 'group' ? 'default' : 'secondary'}>
                     {detailMessage.sessionType === 'group' ? '群聊' : '私聊'}
                   </Badge>

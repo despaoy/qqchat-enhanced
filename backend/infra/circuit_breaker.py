@@ -125,8 +125,18 @@ class CircuitBreaker:
 
     @property
     def state(self) -> CircuitState:
-        """Current circuit state (read-only, no side effects)"""
+        """Current circuit state, refreshing OPEN -> HALF_OPEN after timeout."""
+        self._maybe_transition_to_half_open()
         return self._state
+
+    def _maybe_transition_to_half_open(self) -> None:
+        """Move OPEN circuits to HALF_OPEN once the recovery timeout has elapsed."""
+        if (
+            self._state == CircuitState.OPEN
+            and self._last_failure_time is not None
+            and time.monotonic() - self._last_failure_time >= self.recovery_timeout
+        ):
+            self._transition_to_half_open()
 
     def _transition_to_open(self) -> None:
         """转换到OPEN状态。"""
@@ -283,6 +293,7 @@ class CircuitBreaker:
             CircuitOpenError: 熔断器打开且无降级策略时抛出。
         """
         async with self._lock:
+            self._maybe_transition_to_half_open()
             current_state = self._state
             if current_state == CircuitState.OPEN:
                 if self._last_failure_time is not None and time.monotonic() - self._last_failure_time >= self.recovery_timeout:
@@ -349,6 +360,7 @@ class CircuitBreaker:
                 result = await some_service()
         """
         async with self._lock:
+            self._maybe_transition_to_half_open()
             current_state = self._state
             if current_state == CircuitState.OPEN:
                 if self._last_failure_time is not None and time.monotonic() - self._last_failure_time >= self.recovery_timeout:

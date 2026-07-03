@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${PG_USER:-qqassistant}
-      POSTGRES_PASSWORD: ${PG_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD}
       POSTGRES_DB: ${PG_DATABASE:-qqassistant}
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -84,13 +84,19 @@ services:
       PG_HOST: postgres
       PG_PORT: "5432"
       PG_USER: ${PG_USER:-qqassistant}
-      PG_PASSWORD: ${PG_PASSWORD:-changeme}
+      PG_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD}
       PG_DATABASE: ${PG_DATABASE:-qqassistant}
+      DATABASE_URL: postgresql+asyncpg://${PG_USER:-qqassistant}:${PG_PASSWORD:?set PG_PASSWORD}@postgres:5432/${PG_DATABASE:-qqassistant}
       REDIS_URL: redis://redis:6379/0
       VLLM_ENABLED: "true"
       VLLM_BASE_URL: http://vllm:8001
       VLLM_BASE_URLS: http://vllm:8001
       ENVIRONMENT: ${ENVIRONMENT:-production}
+      ASTRBOT_INTEGRATION_TOKEN: ${ASTRBOT_INTEGRATION_TOKEN:?set ASTRBOT_INTEGRATION_TOKEN}
+      QQCHAT_BACKEND_URL: http://backend:8000
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?set ALLOWED_ORIGINS}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - backend_data:/app/data
       - ./data/knowledge_bases:/app/knowledge_bases

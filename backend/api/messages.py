@@ -18,6 +18,7 @@ async def get_messages(
     sessionType: Optional[str] = Query(None),
     lora: Optional[str] = Query(None),
     sessionId: Optional[str] = Query(None),
+    platform: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     current_user: dict = Depends(get_current_user)
@@ -31,6 +32,7 @@ async def get_messages(
         session_type=sessionType if sessionType and sessionType != "all" else None,
         lora_name=lora if lora and lora != "all" else None,
         session_id=sessionId,
+        platform=platform if platform and platform != "all" else None,
         limit=limit,
         offset=offset,
     )
@@ -54,12 +56,14 @@ async def get_session_summaries(current_user: dict = Depends(get_current_user)):
 class SessionBotToggle(BaseModel):
     sessionId: str
     enabled: bool
+    platform: str = "qq"
+    conversationId: Optional[str] = None
 
 
 @router.put("/api/sessions/bot-toggle")
 async def toggle_session_bot(req: SessionBotToggle, current_user: dict = Depends(get_current_user)):
     """设置某个会话的机器人开关"""
-    db.set_session_bot_enabled(req.sessionId, req.enabled)
+    db.set_session_bot_enabled(req.sessionId, req.enabled, req.platform, req.conversationId)
     return {"success": True, "sessionId": req.sessionId, "botEnabled": req.enabled}
 
 
@@ -68,6 +72,7 @@ class BatchDeleteRequest(BaseModel):
     sessionType: Optional[str] = None
     lora: Optional[str] = None
     sessionName: Optional[str] = None
+    platform: Optional[str] = None
 
 
 @router.delete("/api/messages/batch")
@@ -77,7 +82,8 @@ async def delete_messages_batch(req: BatchDeleteRequest, current_user: dict = De
         search=req.search,
         sessionType=req.sessionType,
         lora=req.lora,
-        sessionName=req.sessionName
+        sessionName=req.sessionName,
+        platform=req.platform
     )
     return {"success": True, "deleted": count, "message": f"已删除 {count} 条记录"}
 

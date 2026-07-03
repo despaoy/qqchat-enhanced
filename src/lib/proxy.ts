@@ -61,6 +61,27 @@ interface ProxyOptions {
   timeout?: number;
 }
 
+function isUnsafeMethod(method: string): boolean {
+  return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method.toUpperCase());
+}
+
+function isSameOriginRequest(request: Request): boolean {
+  const expectedOrigin = new URL(request.url).origin;
+  const origin = request.headers.get('Origin');
+  if (origin) {
+    return origin === expectedOrigin;
+  }
+  const referer = request.headers.get('Referer');
+  if (referer) {
+    try {
+      return new URL(referer).origin === expectedOrigin;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
  * 代理请求到后端 FastAPI 服务
  *
@@ -75,6 +96,14 @@ export async function proxyRequest(
   options: ProxyOptions = {}
 ): Promise<Response> {
   const { method = 'GET', body, headers: optHeaders = {}, timeout = PROXY_TIMEOUT } = options;
+  const isFormDataBody = typeof FormData !== 'undefined' && body instanceof FormData;
+
+  if (isUnsafeMethod(method) && !isSameOriginRequest(request)) {
+    return new Response(JSON.stringify({ detail: 'CSRF check failed' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 
   // 安全：禁止转发到未授权的后端路径，防止把整张后端 API 表面开放成代理
   if (!isProxyPathAllowed(path)) {
@@ -112,7 +141,7 @@ export async function proxyRequest(
 
   // 转发 Content-Type
   const contentType = request.headers.get('Content-Type');
-  if (contentType && method !== 'GET') {
+  if (contentType && method !== 'GET' && !isFormDataBody) {
     headers['Content-Type'] = contentType;
   }
 
@@ -127,7 +156,11 @@ export async function proxyRequest(
     };
 
     if (body && method !== 'GET') {
-      fetchOptions.body = typeof body === 'string' ? body : JSON.stringify(body);
+      if (isFormDataBody) {
+        fetchOptions.body = body;
+      } else {
+        fetchOptions.body = typeof body === 'string' ? body : JSON.stringify(body);
+      }
     }
 
     const response = await fetch(`${BACKEND_URL}${path}`, fetchOptions);

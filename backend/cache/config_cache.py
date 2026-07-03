@@ -6,6 +6,7 @@
 """
 import logging
 import random
+import time
 from typing import Dict, Optional
 
 from cache import redis_client
@@ -16,6 +17,8 @@ CONFIG_CACHE_KEY = "cache:config"
 CONFIG_CACHE_TTL = 60  # 配置缓存 60 秒
 
 KNOWLEDGE_STATS_KEY = "cache:knowledge_stats"
+_LOCAL_CONFIG_CACHE: tuple[float, Dict] | None = None
+
 KNOWLEDGE_STATS_TTL = 30  # 知识库统计 30 秒
 
 
@@ -26,17 +29,30 @@ def _ttl_with_jitter(ttl: int) -> int:
 
 
 def get_cached_config() -> Optional[Dict]:
-    """获取缓存的系统配置"""
-    return redis_client.cache_get(CONFIG_CACHE_KEY)
+    """Get config from Redis or local in-process TTL cache."""
+    cached = redis_client.cache_get(CONFIG_CACHE_KEY)
+    if cached is not None:
+        return cached
+    if _LOCAL_CONFIG_CACHE is None:
+        return None
+    expires_at, value = _LOCAL_CONFIG_CACHE
+    if time.monotonic() >= expires_at:
+        return None
+    return value
 
 
 def set_cached_config(config: Dict) -> bool:
-    """缓存系统配置"""
-    return redis_client.cache_set(CONFIG_CACHE_KEY, config, _ttl_with_jitter(CONFIG_CACHE_TTL))
+    """Cache config in Redis and local memory fallback."""
+    global _LOCAL_CONFIG_CACHE
+    ttl = _ttl_with_jitter(CONFIG_CACHE_TTL)
+    _LOCAL_CONFIG_CACHE = (time.monotonic() + ttl, dict(config))
+    return redis_client.cache_set(CONFIG_CACHE_KEY, config, ttl)
 
 
 def invalidate_config_cache() -> None:
-    """使配置缓存失效"""
+    """Invalidate config cache in Redis and local memory."""
+    global _LOCAL_CONFIG_CACHE
+    _LOCAL_CONFIG_CACHE = None
     redis_client.cache_delete(CONFIG_CACHE_KEY)
 
 

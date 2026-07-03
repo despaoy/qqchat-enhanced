@@ -728,11 +728,13 @@ class ModelManager:
         }
 
         self._current_provider = ModelProvider.MOCK
-        # 从数据库配置初始化提供商
+        env_provider = os.getenv("MODEL_PROVIDER", "").strip().lower()
         db_provider = _db_cfg.get("modelProvider", "mock")
-        if db_provider in [e.value for e in ModelProvider]:
-            self._current_provider = ModelProvider(db_provider)
-            logger.info(f"从数据库配置初始化模型提供商: {db_provider}")
+        provider_name = env_provider or db_provider
+        if provider_name in [e.value for e in ModelProvider]:
+            self._current_provider = ModelProvider(provider_name)
+            source = "environment" if env_provider else "database"
+            logger.info(f"Initialized model provider from {source}: {provider_name}")
         self._load_cache()
 
     def _load_cache(self):

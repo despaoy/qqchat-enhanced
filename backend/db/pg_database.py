@@ -4,6 +4,7 @@ PostgreSQL 异步数据库访问层
 """
 
 import os
+import json
 import logging
 from datetime import datetime
 from typing import Optional, Dict, List, Any
@@ -32,6 +33,14 @@ messages_table = Table(
     Column("sessionType", Text, nullable=False),
     Column("sessionId", Text, nullable=False),
     Column("sessionName", Text),
+    Column("platform", Text, nullable=False, server_default="qq"),
+    Column("adapter", Text, nullable=False, server_default="nonebot"),
+    Column("conversationId", Text),
+    Column("conversationType", Text),
+    Column("senderId", Text),
+    Column("senderName", Text),
+    Column("sourceMessageId", Text),
+    Column("traceId", Text),
     Column("userId", Text),
     Column("userName", Text),
     Column("message", Text, nullable=False),
@@ -143,6 +152,8 @@ saved_dialogues_table = Table(
 session_settings_table = Table(
     "session_settings", metadata,
     Column("sessionId", Text, primary_key=True),
+    Column("platform", Text, nullable=False, server_default="qq"),
+    Column("conversationId", Text),
     Column("sessionType", Text, nullable=False, server_default="private"),
     Column("sessionName", Text),
     Column("bot_enabled", Integer, nullable=False, server_default="1"),
@@ -158,6 +169,66 @@ claw_tools_table = Table(
     Column("enabled", Integer, nullable=False, server_default="1"),
     Column("created_at", Text, nullable=False),
     Column("updated_at", Text, nullable=False),
+)
+
+integration_message_dedup_table = Table(
+    "integration_message_dedup", metadata,
+    Column("dedupKey", Text, primary_key=True),
+    Column("platform", Text, nullable=False),
+    Column("adapter", Text, nullable=False),
+    Column("messageId", Text, nullable=False),
+    Column("createdAt", Text, nullable=False),
+)
+
+conversations_table = Table(
+    "conversations", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("platform", Text, nullable=False),
+    Column("conversationId", Text, nullable=False),
+    Column("conversationType", Text, nullable=False, server_default="private"),
+    Column("displayName", Text),
+    Column("botEnabled", Integer, nullable=False, server_default="1"),
+    Column("replyPolicy", Text, nullable=False, server_default="default"),
+    Column("createdAt", Text, nullable=False),
+    Column("updatedAt", Text, nullable=False),
+    UniqueConstraint("platform", "conversationId", "conversationType", name="uq_conversations_platform_conversation"),
+)
+
+integration_events_table = Table(
+    "integration_events", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("platform", Text, nullable=False),
+    Column("adapter", Text, nullable=False),
+    Column("sourceMessageId", Text),
+    Column("conversationId", Text),
+    Column("conversationType", Text),
+    Column("senderId", Text),
+    Column("eventType", Text, nullable=False, server_default="message"),
+    Column("eventHash", Text, nullable=False),
+    Column("rawSummary", Text),
+    Column("traceId", Text),
+    Column("status", Text, nullable=False, server_default="received"),
+    Column("createdAt", Text, nullable=False),
+    UniqueConstraint("platform", "adapter", "eventHash", name="uq_integration_events_platform_hash"),
+)
+
+model_invocations_table = Table(
+    "model_invocations", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("traceId", Text),
+    Column("platform", Text, nullable=False, server_default="qq"),
+    Column("conversationId", Text),
+    Column("sessionId", Text),
+    Column("modelName", Text),
+    Column("loraName", Text),
+    Column("costTime", Float, server_default="0"),
+    Column("promptTokens", Integer, server_default="0"),
+    Column("completionTokens", Integer, server_default="0"),
+    Column("totalTokens", Integer, server_default="0"),
+    Column("usedRag", Integer, nullable=False, server_default="0"),
+    Column("usedLora", Integer, nullable=False, server_default="0"),
+    Column("errorType", Text, server_default=""),
+    Column("createdAt", Text, nullable=False),
 )
 
 audit_logs_table = Table(
@@ -240,8 +311,30 @@ class PgDatabase:
             return
         async with self.engine.begin() as conn:
             await conn.run_sync(metadata.create_all)
+            await self._ensure_column(conn, "messages", "platform", "TEXT NOT NULL DEFAULT 'qq'")
+            await self._ensure_column(conn, "messages", "adapter", "TEXT NOT NULL DEFAULT 'nonebot'")
+            await self._ensure_column(conn, "messages", "conversationId", "TEXT")
+            await self._ensure_column(conn, "messages", "senderId", "TEXT")
+            await self._ensure_column(conn, "messages", "sourceMessageId", "TEXT")
+            await self._ensure_column(conn, "messages", "traceId", "TEXT")
+            await self._ensure_column(conn, "messages", "conversationType", "TEXT")
+            await self._ensure_column(conn, "messages", "senderName", "TEXT")
+            await self._ensure_column(conn, "session_settings", "platform", "TEXT NOT NULL DEFAULT 'qq'")
+            await self._ensure_column(conn, "session_settings", "conversationId", "TEXT")
+            await conn.execute(text('CREATE INDEX IF NOT EXISTS idx_messages_platform_conversation ON messages (platform, "conversationId", "createdAt")'))
+            await conn.execute(text('CREATE INDEX IF NOT EXISTS idx_messages_source_dedup ON messages (platform, adapter, "sourceMessageId")'))
+            await conn.execute(text('CREATE INDEX IF NOT EXISTS idx_messages_session_created ON messages ("sessionId", "createdAt")'))
+            await conn.execute(text('CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages ("createdAt")'))
+            await conn.execute(text('CREATE INDEX IF NOT EXISTS idx_conversations_platform_conversation ON conversations (platform, "conversationId", "conversationType")'))
+            await conn.execute(text('CREATE INDEX IF NOT EXISTS idx_integration_events_trace ON integration_events ("traceId")'))
+            await conn.execute(text('CREATE INDEX IF NOT EXISTS idx_integration_events_platform_created ON integration_events (platform, "createdAt")'))
+            await conn.execute(text('CREATE INDEX IF NOT EXISTS idx_model_invocations_trace ON model_invocations ("traceId")'))
+            await conn.execute(text('CREATE INDEX IF NOT EXISTS idx_model_invocations_created ON model_invocations ("createdAt")'))
         self._initialized = True
         logger.info(f"✅ PostgreSQL 数据库初始化完成: {self.database_url.split('@')[-1]}")
+
+    async def _ensure_column(self, conn, table_name: str, column_name: str, definition: str):
+        await conn.execute(text(f'ALTER TABLE "{table_name}" ADD COLUMN IF NOT EXISTS "{column_name}" {definition}'))
 
     async def close(self):
         """关闭引擎连接池"""
@@ -251,15 +344,34 @@ class PgDatabase:
     # 消息管理
     # ============================================
     async def add_message(self, message: Dict) -> Dict:
-        """添加消息记录"""
+        """Add a message record and keep the conversation index in sync."""
         created_at = message.get("createdAt", datetime.now().isoformat())
+        conversation_type = message.get("conversationType") or message.get("sessionType", "private")
+        sender_name = message.get("senderName") or message.get("userName", "")
+        conversation_id = message.get("conversationId", message.get("sessionId", ""))
+        platform = message.get("platform", "qq")
         async with self.async_session() as session:
+            await self._upsert_conversation_session(
+                session,
+                platform=platform,
+                conversation_id=conversation_id,
+                conversation_type=conversation_type,
+                display_name=message.get("sessionName") or conversation_id or message.get("sessionId", ""),
+            )
             stmt = messages_table.insert().values(
-                sessionType=message.get("sessionType", "private"),
+                sessionType=message.get("sessionType", conversation_type),
                 sessionId=message.get("sessionId", ""),
                 sessionName=message.get("sessionName", ""),
+                platform=platform,
+                adapter=message.get("adapter", "nonebot"),
+                conversationId=conversation_id,
+                conversationType=conversation_type,
+                senderId=message.get("senderId", message.get("userId", "")),
+                senderName=sender_name,
+                sourceMessageId=message.get("sourceMessageId", ""),
+                traceId=message.get("traceId", ""),
                 userId=message.get("userId", ""),
-                userName=message.get("userName", ""),
+                userName=message.get("userName", sender_name),
                 message=message.get("message", ""),
                 reply=message.get("reply", ""),
                 modelName=message.get("modelName", ""),
@@ -270,7 +382,7 @@ class PgDatabase:
             result = await session.execute(stmt)
             await session.commit()
             message_id = result.inserted_primary_key[0]
-            return {**message, "id": str(message_id), "createdAt": created_at}
+            return {**message, "id": str(message_id), "conversationType": conversation_type, "senderName": sender_name, "createdAt": created_at}
 
     async def get_messages(self, limit: int = 100, offset: int = 0) -> List[Dict]:
         """获取消息记录"""
@@ -290,6 +402,48 @@ class PgDatabase:
             result = await session.execute(stmt)
             return result.scalar()
 
+    async def get_messages_filtered(
+        self,
+        search: Optional[str] = None,
+        session_type: Optional[str] = None,
+        lora_name: Optional[str] = None,
+        session_id: Optional[str] = None,
+        platform: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[Dict]:
+        """Get messages with SQL-level filtering and pagination."""
+        async with self.async_session() as session:
+            from sqlalchemy import and_
+
+            conditions = []
+            if search:
+                pattern = f"%{search}%"
+                conditions.append(
+                    (messages_table.c.message.like(pattern))
+                    | (messages_table.c.reply.like(pattern))
+                    | (messages_table.c.userName.like(pattern))
+                )
+            if session_type:
+                conditions.append(messages_table.c.sessionType == session_type)
+            if lora_name:
+                conditions.append(messages_table.c.loraName == lora_name)
+            if session_id:
+                conditions.append(messages_table.c.sessionId == session_id)
+            if platform:
+                conditions.append(messages_table.c.platform == platform)
+
+            stmt = messages_table.select()
+            if conditions:
+                stmt = stmt.where(and_(*conditions))
+            stmt = (
+                stmt.order_by(messages_table.c.createdAt.desc())
+                .limit(min(limit, 1000))
+                .offset(offset)
+            )
+            result = await session.execute(stmt)
+            return [_row_to_dict(row) for row in result.fetchall()]
+
     async def delete_message(self, msg_id: int) -> bool:
         """删除单条消息记录"""
         async with self.async_session() as session:
@@ -304,6 +458,7 @@ class PgDatabase:
         sessionType: Optional[str] = None,
         lora: Optional[str] = None,
         sessionName: Optional[str] = None,
+        platform: Optional[str] = None,
     ) -> int:
         """批量删除消息（基于筛选条件），返回删除数量"""
         async with self.async_session() as session:
@@ -320,6 +475,8 @@ class PgDatabase:
                 conditions.append(messages_table.c.loraName == lora)
             if sessionName:
                 conditions.append(messages_table.c.sessionName.like(f"%{sessionName}%"))
+            if platform and platform != "all":
+                conditions.append(messages_table.c.platform == platform)
 
             stmt = messages_table.delete()
             if conditions:
@@ -834,6 +991,118 @@ class PgDatabase:
     # ============================================
     # 会话管理
     # ============================================
+    async def _upsert_conversation_session(
+        self,
+        session: AsyncSession,
+        *,
+        platform: str,
+        conversation_id: str,
+        conversation_type: str = "private",
+        display_name: str = "",
+        bot_enabled: bool | None = None,
+        reply_policy: str | None = None,
+    ) -> None:
+        if not conversation_id:
+            return
+        now = datetime.now().isoformat()
+        await session.execute(text('''
+            INSERT INTO conversations (platform, "conversationId", "conversationType", "displayName", "botEnabled", "replyPolicy", "createdAt", "updatedAt")
+            VALUES (:platform, :conversation_id, :conversation_type, :display_name, :bot_enabled, :reply_policy, :created_at, :updated_at)
+            ON CONFLICT (platform, "conversationId", "conversationType") DO UPDATE SET
+                "displayName" = COALESCE(NULLIF(EXCLUDED."displayName", ''), conversations."displayName"),
+                "botEnabled" = CASE WHEN :bot_enabled_is_null THEN conversations."botEnabled" ELSE EXCLUDED."botEnabled" END,
+                "replyPolicy" = CASE WHEN :reply_policy_is_null THEN conversations."replyPolicy" ELSE EXCLUDED."replyPolicy" END,
+                "updatedAt" = EXCLUDED."updatedAt"
+        '''), {
+            "platform": platform,
+            "conversation_id": conversation_id,
+            "conversation_type": conversation_type,
+            "display_name": display_name,
+            "bot_enabled": 1 if bot_enabled is None else int(bot_enabled),
+            "reply_policy": reply_policy or "default",
+            "created_at": now,
+            "updated_at": now,
+            "bot_enabled_is_null": bot_enabled is None,
+            "reply_policy_is_null": reply_policy is None,
+        })
+
+    async def upsert_conversation(self, data: Dict) -> None:
+        async with self.async_session() as session:
+            await self._upsert_conversation_session(
+                session,
+                platform=data.get("platform", "qq"),
+                conversation_id=data.get("conversationId") or data.get("sessionId", ""),
+                conversation_type=data.get("conversationType") or data.get("sessionType", "private"),
+                display_name=data.get("displayName") or data.get("sessionName", ""),
+                bot_enabled=data.get("botEnabled") if "botEnabled" in data else None,
+                reply_policy=data.get("replyPolicy"),
+            )
+            await session.commit()
+
+    async def get_conversation(self, platform: str, conversation_id: str, conversation_type: Optional[str] = None) -> Optional[Dict]:
+        async with self.async_session() as session:
+            if conversation_type:
+                stmt = text('SELECT * FROM conversations WHERE platform = :platform AND "conversationId" = :conversation_id AND "conversationType" = :conversation_type LIMIT 1')
+                result = await session.execute(stmt, {"platform": platform, "conversation_id": conversation_id, "conversation_type": conversation_type})
+            else:
+                stmt = text('SELECT * FROM conversations WHERE platform = :platform AND "conversationId" = :conversation_id ORDER BY "updatedAt" DESC LIMIT 1')
+                result = await session.execute(stmt, {"platform": platform, "conversation_id": conversation_id})
+            row = result.fetchone()
+            return _row_to_dict(row) if row else None
+
+    async def add_integration_event(self, event: Dict) -> None:
+        raw_summary = event.get("rawSummary", "")
+        if not isinstance(raw_summary, str):
+            raw_summary = json.dumps(raw_summary, ensure_ascii=False, default=str)
+        event_hash = event.get("eventHash") or f"{event.get('sourceMessageId', '')}:{event.get('traceId', '')}"
+        async with self.async_session() as session:
+            await session.execute(text('''
+                INSERT INTO integration_events (platform, adapter, "sourceMessageId", "conversationId", "conversationType", "senderId", "eventType", "eventHash", "rawSummary", "traceId", status, "createdAt")
+                VALUES (:platform, :adapter, :source_message_id, :conversation_id, :conversation_type, :sender_id, :event_type, :event_hash, :raw_summary, :trace_id, :status, :created_at)
+                ON CONFLICT (platform, adapter, "eventHash") DO UPDATE SET
+                    "traceId" = EXCLUDED."traceId", status = EXCLUDED.status, "rawSummary" = EXCLUDED."rawSummary"
+            '''), {
+                "platform": event.get("platform", "qq"),
+                "adapter": event.get("adapter", "other"),
+                "source_message_id": event.get("sourceMessageId", ""),
+                "conversation_id": event.get("conversationId", ""),
+                "conversation_type": event.get("conversationType", "private"),
+                "sender_id": event.get("senderId", ""),
+                "event_type": event.get("eventType", "message"),
+                "event_hash": event_hash,
+                "raw_summary": raw_summary[:4096],
+                "trace_id": event.get("traceId", ""),
+                "status": event.get("status", "received"),
+                "created_at": event.get("createdAt", datetime.now().isoformat()),
+            })
+            await session.commit()
+
+    async def add_model_invocation(self, invocation: Dict) -> None:
+        prompt_tokens = int(invocation.get("promptTokens", 0) or 0)
+        completion_tokens = int(invocation.get("completionTokens", 0) or 0)
+        total_tokens = int(invocation.get("totalTokens", prompt_tokens + completion_tokens) or 0)
+        async with self.async_session() as session:
+            await session.execute(text('''
+                INSERT INTO model_invocations ("traceId", platform, "conversationId", "sessionId", "modelName", "loraName", "costTime", "promptTokens", "completionTokens", "totalTokens", "usedRag", "usedLora", "errorType", "createdAt")
+                VALUES (:trace_id, :platform, :conversation_id, :session_id, :model_name, :lora_name, :cost_time, :prompt_tokens, :completion_tokens, :total_tokens, :used_rag, :used_lora, :error_type, :created_at)
+            '''), {
+                "trace_id": invocation.get("traceId", ""),
+                "platform": invocation.get("platform", "qq"),
+                "conversation_id": invocation.get("conversationId", ""),
+                "session_id": invocation.get("sessionId", ""),
+                "model_name": invocation.get("modelName", ""),
+                "lora_name": invocation.get("loraName", ""),
+                "cost_time": float(invocation.get("costTime", 0.0) or 0.0),
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "used_rag": int(bool(invocation.get("usedRag", False))),
+                "used_lora": int(bool(invocation.get("usedLora", False))),
+                "error_type": invocation.get("errorType", ""),
+                "created_at": invocation.get("createdAt", datetime.now().isoformat()),
+            })
+            await session.commit()
+
     async def get_session_summaries(self) -> List[Dict]:
         """获取所有会话的聚合统计信息"""
         async with self.async_session() as session:
@@ -842,11 +1111,14 @@ class PgDatabase:
                     "sessionId",
                     "sessionType",
                     "sessionName",
+                    COALESCE(platform, 'qq') as platform,
+                    COALESCE(adapter, 'nonebot') as adapter,
+                    COALESCE("conversationId", "sessionId") as "conversationId",
                     COUNT(*) as message_count,
                     MAX("createdAt") as last_active,
                     STRING_AGG(message, '||' ORDER BY "createdAt") as recent_messages
                 FROM messages
-                GROUP BY "sessionId", "sessionType", "sessionName"
+                GROUP BY "sessionId", "sessionType", "sessionName", platform, adapter, "conversationId"
                 ORDER BY last_active DESC
             """)
             result = await session.execute(stmt)
@@ -856,6 +1128,9 @@ class PgDatabase:
                 session_id = d["sessionId"]
                 session_type = d["sessionType"]
                 session_name = d["sessionName"] or session_id
+                platform = d.get("platform") or "qq"
+                adapter = d.get("adapter") or "nonebot"
+                conversation_id = d.get("conversationId") or session_id
                 message_count = d["message_count"]
                 last_active = d["last_active"]
 
@@ -877,6 +1152,9 @@ class PgDatabase:
                     "sessionId": session_id,
                     "sessionType": session_type,
                     "sessionName": session_name,
+                    "platform": platform,
+                    "adapter": adapter,
+                    "conversationId": conversation_id,
                     "messageCount": message_count,
                     "lastActive": last_active,
                     "summary": summary,
@@ -884,24 +1162,40 @@ class PgDatabase:
                 })
             return sessions
 
-    async def set_session_bot_enabled(self, session_id: str, enabled: bool) -> None:
+    async def set_session_bot_enabled(self, session_id: str, enabled: bool, platform: str = "qq", conversation_id: Optional[str] = None) -> None:
         """设置某个会话的机器人开关"""
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         async with self.async_session() as session:
             stmt = text(
-                'INSERT INTO session_settings ("sessionId", "sessionType", "sessionName", bot_enabled, updated_at) '
-                "VALUES (:sid, 'private', :sn, :be, :ua) "
-                'ON CONFLICT ("sessionId") DO UPDATE SET bot_enabled = EXCLUDED.bot_enabled, updated_at = EXCLUDED.updated_at'
+                'INSERT INTO session_settings ("sessionId", platform, "conversationId", "sessionType", "sessionName", bot_enabled, updated_at) '
+                "VALUES (:sid, :platform, :cid, 'private', :sn, :be, :ua) "
+                'ON CONFLICT ("sessionId") DO UPDATE SET platform = EXCLUDED.platform, "conversationId" = EXCLUDED."conversationId", bot_enabled = EXCLUDED.bot_enabled, updated_at = EXCLUDED.updated_at'
             )
-            await session.execute(stmt, {"sid": session_id, "sn": session_id, "be": int(enabled), "ua": now})
+            resolved_conversation_id = conversation_id or session_id
+            await session.execute(stmt, {"sid": session_id, "platform": platform, "cid": resolved_conversation_id, "sn": session_id, "be": int(enabled), "ua": now})
+            await self._upsert_conversation_session(
+                session,
+                platform=platform,
+                conversation_id=resolved_conversation_id,
+                conversation_type="private",
+                display_name=session_id,
+                bot_enabled=enabled,
+            )
             await session.commit()
 
-    async def is_session_bot_enabled(self, session_id: str) -> bool:
+    async def is_session_bot_enabled(self, session_id: str, platform: str = "qq", conversation_id: Optional[str] = None) -> bool:
         """检查某个会话的机器人是否启用（默认启用）"""
         async with self.async_session() as session:
             stmt = session_settings_table.select().where(session_settings_table.c.sessionId == session_id)
             result = await session.execute(stmt)
             row = result.fetchone()
+            if row is None and conversation_id:
+                conversation_stmt = text('SELECT "botEnabled" FROM conversations WHERE platform = :platform AND "conversationId" = :conversation_id ORDER BY "updatedAt" DESC LIMIT 1')
+                conversation_result = await session.execute(conversation_stmt, {"platform": platform, "conversation_id": conversation_id})
+                conversation_row = conversation_result.fetchone()
+                if conversation_row is None:
+                    return True
+                return bool(_row_to_dict(conversation_row)["botEnabled"])
             if row is None:
                 return True
             return bool(_row_to_dict(row)["bot_enabled"])
@@ -909,6 +1203,26 @@ class PgDatabase:
     # ============================================
     # Claw 工具 CRUD
     # ============================================
+    async def mark_integration_message_processed(self, platform: str, adapter: str, message_id: str) -> bool:
+        if not message_id:
+            return True
+        key = f"{platform}:{adapter}:{message_id}"
+        async with self.async_session() as session:
+            stmt = text(
+                'INSERT INTO integration_message_dedup ("dedupKey", platform, adapter, "messageId", "createdAt") '
+                'VALUES (:key, :platform, :adapter, :message_id, :created_at) '
+                'ON CONFLICT ("dedupKey") DO NOTHING'
+            )
+            result = await session.execute(stmt, {
+                "key": key,
+                "platform": platform,
+                "adapter": adapter,
+                "message_id": message_id,
+                "created_at": datetime.now().isoformat(),
+            })
+            await session.commit()
+            return result.rowcount > 0
+
     async def get_claw_tools(self) -> List[Dict]:
         """获取所有自定义 Claw 工具"""
         async with self.async_session() as session:
@@ -1239,6 +1553,9 @@ class SyncPgAdapter:
     def get_messages(self, **kwargs):
         return self._run(self._pg.get_messages(**kwargs))
 
+    def get_messages_filtered(self, **kwargs):
+        return self._run(self._pg.get_messages_filtered(**kwargs))
+
     def get_message_count(self, **kwargs):
         return self._run(self._pg.get_message_count(**kwargs))
 
@@ -1275,8 +1592,8 @@ class SyncPgAdapter:
     def create_knowledge_base(self, name, description=""):
         return self._run(self._pg.create_knowledge_base(name, description))
 
-    def update_knowledge_base(self, kb_id, **kwargs):
-        return self._run(self._pg.update_knowledge_base(kb_id, **kwargs))
+    def update_knowledge_base(self, kb_id, data):
+        return self._run(self._pg.update_knowledge_base(kb_id, data))
 
     def delete_knowledge_base(self, kb_id):
         return self._run(self._pg.delete_knowledge_base(kb_id))
@@ -1338,11 +1655,26 @@ class SyncPgAdapter:
     def get_session_summaries(self):
         return self._run(self._pg.get_session_summaries())
 
-    def set_session_bot_enabled(self, session_id, enabled):
-        return self._run(self._pg.set_session_bot_enabled(session_id, enabled))
+    def set_session_bot_enabled(self, session_id, enabled, platform="qq", conversation_id=None):
+        return self._run(self._pg.set_session_bot_enabled(session_id, enabled, platform, conversation_id))
 
-    def is_session_bot_enabled(self, session_id):
-        return self._run(self._pg.is_session_bot_enabled(session_id))
+    def is_session_bot_enabled(self, session_id, platform="qq", conversation_id=None):
+        return self._run(self._pg.is_session_bot_enabled(session_id, platform, conversation_id))
+
+    def mark_integration_message_processed(self, platform, adapter, message_id):
+        return self._run(self._pg.mark_integration_message_processed(platform, adapter, message_id))
+
+    def upsert_conversation(self, data):
+        return self._run(self._pg.upsert_conversation(data))
+
+    def get_conversation(self, platform, conversation_id, conversation_type=None):
+        return self._run(self._pg.get_conversation(platform, conversation_id, conversation_type))
+
+    def add_integration_event(self, event):
+        return self._run(self._pg.add_integration_event(event))
+
+    def add_model_invocation(self, invocation):
+        return self._run(self._pg.add_model_invocation(invocation))
 
     def get_claw_tools(self):
         return self._run(self._pg.get_claw_tools())

@@ -12,12 +12,21 @@ from typing import Optional, List, Dict, Any
 
 
 class MessageRequest(BaseModel):
-    message: str
+    message: str = Field(..., min_length=1, max_length=8000)
     sessionType: str = "private"
+    conversationType: str = ""
     sessionId: str = ""
+    sessionName: str = ""
     userId: str = ""
     userName: str = ""
+    senderName: str = ""
     loraName: str = ""
+    platform: str = "qq"
+    adapter: str = "nonebot"
+    conversationId: str = ""
+    senderId: str = ""
+    sourceMessageId: str = ""
+    traceId: str = ""
 
 
 class GenerateResponse(BaseModel):
@@ -27,14 +36,23 @@ class GenerateResponse(BaseModel):
 
 
 class StatsResponse(BaseModel):
+    todayMessages: int = 0
     todayReplies: int = 0
     avgResponseTime: float = 0.0
+    p95ResponseTime: float = 0.0
+    p99ResponseTime: float = 0.0
+    modelFailureRate: float = 0.0
+    ragFailureRate: float = 0.0
     activeSessions: int = 0
     modelLoad: int = 0
     cpuUsage: int = 0
     gpuMemory: Dict[str, float] = {}
     memoryUsage: Dict[str, float] = {}
     diskUsage: Dict[str, float] = {}
+    queueLength: int = 0
+    currentInferenceConcurrency: int = 0
+    astrBotGateway: Dict[str, Any] = {}
+    platformStatus: Dict[str, Any] = {}
 
 
 # ============================================

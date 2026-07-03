@@ -274,9 +274,7 @@ class AsyncInferenceService:
 
             # 熔断器记录成功
             if self._circuit_breaker:
-                self._circuit_breaker._stats.record_success()
-                if self._circuit_breaker.state.value == "half_open":
-                    await self._circuit_breaker.reset()
+                await self._circuit_breaker.record_success()
 
             return reply
 
@@ -285,11 +283,7 @@ class AsyncInferenceService:
 
             # 熔断器记录失败
             if self._circuit_breaker:
-                self._circuit_breaker._stats.record_failure()
-                self._circuit_breaker._failure_count += 1
-                self._circuit_breaker._last_failure_time = time.monotonic()
-                if self._circuit_breaker._failure_count >= self._circuit_breaker.failure_threshold:
-                    self._circuit_breaker._transition_to_open()
+                await self._circuit_breaker.record_failure(e)
 
             logger.error(f"推理失败 [{self.backend}]: {e}")
             return "[系统提示] 暂时无法处理您的消息，请稍后再试"

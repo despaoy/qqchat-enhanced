@@ -26,6 +26,8 @@ if _env_path.exists():
                 if _key and _key not in os.environ:
                     os.environ[_key] = _value
 
+_STARTUP_ENV = dict(os.environ)
+
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -43,6 +45,7 @@ from app.config import (
     load_balancer_mgr, circuit_breaker_registry,
 )
 from db.adapter import db
+from infra.deployment import validate_or_raise_for_startup
 
 logger = logging.getLogger("main")
 
@@ -59,6 +62,7 @@ from api.auth import router as auth_router
 from api.user_data import router as user_data_router
 from api.enhanced import router as enhanced_router
 from api.claw import router as claw_router
+from api.integrations import router as integrations_router
 
 
 # ═══════════════════════════════════════════
@@ -69,6 +73,8 @@ async def lifespan(app: FastAPI):
     global connection_pool, http_client_pool, backup_mgr, failover_mgr, access_control_mgr
 
     logger.info("🚀 QQ智能助手后端服务启动中（增强版）...")
+
+    validate_or_raise_for_startup(_STARTUP_ENV)
 
     # 初始化数据库
     # SQLiteDB 在 __init__ 中已通过 _init_database() 完成建表，无独立 init() 方法。
@@ -155,7 +161,9 @@ async def lifespan(app: FastAPI):
     if http_client_pool:
         await http_client_pool.close()
     if backup_mgr:
-        backup_mgr.stop_scheduled_backup()
+        stop_result = backup_mgr.stop_scheduled_backup()
+        if hasattr(stop_result, "__await__"):
+            await stop_result
     if failover_mgr:
         await failover_mgr.stop()
     if async_task_queue:
@@ -175,14 +183,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+def _allowed_origins() -> list[str]:
+    configured = os.getenv("ALLOWED_ORIGINS") or os.getenv("CORS_ORIGINS")
+    if configured:
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+    return [
         "http://localhost:3000",
         "http://localhost:5000",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5000",
-    ],
+    ]
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -226,6 +241,7 @@ app.include_router(auth_router)
 app.include_router(user_data_router)
 app.include_router(enhanced_router)
 app.include_router(claw_router)
+app.include_router(integrations_router)
 
 
 # ═══════════════════════════════════════════

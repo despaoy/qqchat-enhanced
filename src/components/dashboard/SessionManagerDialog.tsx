@@ -24,6 +24,7 @@ export function SessionManagerDialog() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<'all' | 'private' | 'group'>('all');
+  const [platformFilter, setPlatformFilter] = useState('all');
 
   const loadSessions = useCallback(async () => {
     setLoading(true);
@@ -39,7 +40,8 @@ export function SessionManagerDialog() {
 
   const handleToggleBot = async (sessionId: string, enabled: boolean) => {
     try {
-      await api.toggleSessionBot(sessionId, enabled);
+      const target = sessions.find(s => s.sessionId === sessionId);
+      await api.toggleSessionBot(sessionId, enabled, target?.platform || 'qq', target?.conversationId);
       setSessions(prev => prev.map(s =>
         s.sessionId === sessionId ? { ...s, botEnabled: enabled } : s
       ));
@@ -54,7 +56,10 @@ export function SessionManagerDialog() {
     }
   }, [open, loadSessions]);
 
-  const filteredSessions = sessions.filter(s => filter === 'all' || s.sessionType === filter);
+  const filteredSessions = sessions.filter(s =>
+    (filter === 'all' || s.sessionType === filter) &&
+    (platformFilter === 'all' || (s.platform || 'qq') === platformFilter)
+  );
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -73,6 +78,19 @@ export function SessionManagerDialog() {
         </DialogHeader>
         {/* 筛选栏 */}
         <div className="flex items-center gap-2">
+          <Select value={platformFilter} onValueChange={setPlatformFilter}>
+            <SelectTrigger className="w-[130px] h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部平台</SelectItem>
+              <SelectItem value="qq">QQ</SelectItem>
+              <SelectItem value="telegram">Telegram</SelectItem>
+              <SelectItem value="wecom">企业微信</SelectItem>
+              <SelectItem value="wechat_official">公众号</SelectItem>
+              <SelectItem value="wechat_personal">个人微信</SelectItem>
+            </SelectContent>
+          </Select>
           <Select value={filter} onValueChange={(v) => setFilter(v as 'all' | 'private' | 'group')}>
             <SelectTrigger className="w-[120px] h-8 text-xs">
               <SelectValue />

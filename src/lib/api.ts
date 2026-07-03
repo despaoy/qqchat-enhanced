@@ -40,6 +40,12 @@ export interface Message {
   sessionType: 'group' | 'private';
   sessionId: string;
   sessionName: string;
+  platform?: string;
+  adapter?: string;
+  conversationId?: string;
+  senderId?: string;
+  sourceMessageId?: string;
+  traceId?: string;
   userId: string;
   userName: string;
   message: string;
@@ -62,6 +68,9 @@ export interface SessionSummary {
   sessionId: string;
   sessionType: 'group' | 'private';
   sessionName: string;
+  platform?: string;
+  adapter?: string;
+  conversationId?: string;
   messageCount: number;
   lastActive: string;
   summary: string;
@@ -591,7 +600,7 @@ class ApiClient {
   /**
    * 批量删除消息（基于筛选条件）
    */
-  async deleteMessagesBatch(filters: { search?: string; sessionType?: string; lora?: string; sessionName?: string }): Promise<{ success: boolean; deleted: number; message: string }> {
+  async deleteMessagesBatch(filters: { search?: string; sessionType?: string; lora?: string; sessionName?: string; platform?: string }): Promise<{ success: boolean; deleted: number; message: string }> {
     return this.request<{ success: boolean; deleted: number; message: string }>('/messages/batch', {
       method: 'DELETE',
       body: JSON.stringify(filters),
@@ -623,10 +632,12 @@ class ApiClient {
    * @param {number} [offset] - 分页偏移量
    * @returns {Promise<MessagesResponse>} 消息列表及总数
    */
-  async getMessages(limit?: number, offset?: number): Promise<MessagesResponse> {
+  async getMessages(limit?: number, offset?: number, filters?: { platform?: string; sessionType?: string }): Promise<MessagesResponse> {
     const params = new URLSearchParams();
     if (limit) params.append('limit', limit.toString());
     if (offset) params.append('offset', offset.toString());
+    if (filters?.platform && filters.platform !== 'all') params.append('platform', filters.platform);
+    if (filters?.sessionType && filters.sessionType !== 'all') params.append('sessionType', filters.sessionType);
     const qs = params.toString();
     return this.request<MessagesResponse>(`/messages${qs ? '?' + qs : ''}`);
   }
@@ -651,10 +662,10 @@ class ApiClient {
   /**
    * 设置会话机器人开关
    */
-  async toggleSessionBot(sessionId: string, enabled: boolean): Promise<{ success: boolean; sessionId: string; botEnabled: boolean }> {
+  async toggleSessionBot(sessionId: string, enabled: boolean, platform = 'qq', conversationId?: string): Promise<{ success: boolean; sessionId: string; botEnabled: boolean }> {
     return this.request<{ success: boolean; sessionId: string; botEnabled: boolean }>('/sessions/bot-toggle', {
       method: 'PUT',
-      body: JSON.stringify({ sessionId, enabled }),
+      body: JSON.stringify({ sessionId, enabled, platform, conversationId }),
     });
   }
 

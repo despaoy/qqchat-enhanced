@@ -45,7 +45,7 @@ def _mask_config(config: dict) -> dict:
 # ============================================
 
 @router.get("/api/config")
-async def get_config():
+async def get_config(current_user: dict = Depends(get_current_user)):
     """获取系统配置（Redis 缓存优先，TTL 60s；敏感字段脱敏后返回）"""
     cached = get_cached_config()
     if cached is not None:
@@ -92,7 +92,7 @@ async def update_config(request: Request, current_user: dict = Depends(get_curre
                     provider._model_name = new_config['openaiCompatModel']
         except Exception as e:
             logger.warning(f"同步OpenAI兼容配置失败: {e}")
-    return {"success": True, "message": "配置已更新", "config": db.config}
+    return {"success": True, "message": "配置已更新", "config": _mask_config(db.config)}
 
 
 # ============================================

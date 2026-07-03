@@ -83,7 +83,8 @@ PROMPT_INJECTION_PATTERNS: list[re.Pattern[str]] = [
 # 敏感字段脱敏关键词
 SENSITIVE_FIELD_NAMES: set[str] = {
     "password", "password_hash", "api_key", "secret", "token",
-    "authorization", "cookie", "credential",
+    "authorization", "cookie", "credential", "openid", "unionid",
+    "phone", "mobile",
 }
 
 

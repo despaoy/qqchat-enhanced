@@ -7,7 +7,10 @@
     "dev": "next dev -p 5000",
     "lint": "eslint",
     "start": "next start -p 5000",
-    "ts-check": "tsc -p tsconfig.json"
+    "ts-check": "tsc -p tsconfig.json",
+    "verify:local": "powershell -ExecutionPolicy Bypass -File scripts/local-verify.ps1",
+    "verify:local:frontend": "powershell -ExecutionPolicy Bypass -File scripts/local-verify.ps1 -Frontend",
+    "local:backend": "powershell -ExecutionPolicy Bypass -File scripts/start-local-backend.ps1"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.11",

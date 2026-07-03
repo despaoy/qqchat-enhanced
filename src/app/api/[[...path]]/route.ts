@@ -105,5 +105,17 @@ export async function DELETE(request: Request, { params }: RouteContext) {
   }
   const { searchParams } = new URL(request.url);
   const backendPath = buildPath(segments, searchParams.toString());
-  return proxyRequest(request, backendPath, { method: 'DELETE' });
+
+  const contentLength = request.headers.get('content-length');
+  if (!contentLength || contentLength === '0') {
+    return proxyRequest(request, backendPath, { method: 'DELETE' });
+  }
+
+  const parsed = await parseJsonBody(request);
+  if (!parsed.ok) return parsed.response;
+  return proxyRequest(request, backendPath, {
+    method: 'DELETE',
+    body: parsed.data,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }

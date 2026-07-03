@@ -154,6 +154,10 @@ function SettingsContent() {
               <Bot className="h-4 w-4" />
               {t('settings.tab.bot')}
             </TabsTrigger>
+            <TabsTrigger value="integrations" className="flex items-center gap-2">
+              <Zap className="h-4 w-4" />
+              Integrations
+            </TabsTrigger>
             <TabsTrigger value="model" className="flex items-center gap-2">
               <Database className="h-4 w-4" />
               {t('settings.tab.model')}
@@ -298,6 +302,56 @@ function SettingsContent() {
                         value={getStr('defaultReplyTemplate', '')}
                         onChange={(e) => updateField('defaultReplyTemplate', e.target.value)}
                       />
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="integrations" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>AstrBot 多平台接入</CardTitle>
+                <CardDescription>配置 AstrBot 网关到后端的内部回调和平台开关。</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {loading ? (
+                  Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="space-y-2">
+                      <Skeleton className="h-4 w-24" />
+                      <Skeleton className="h-10 w-full" />
+                    </div>
+                  ))
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <Label>后端回调地址</Label>
+                      <Input value="/api/integrations/astrbot/messages" readOnly />
+                      <p className="text-sm text-muted-foreground">AstrBot 插件会把 QQ、Telegram、微信系消息标准化后发送到这个内部接口。</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Integration Token</Label>
+                      <Input
+                        type="password"
+                        value={getStr('astrbotIntegrationToken', '')}
+                        onChange={(e) => updateField('astrbotIntegrationToken', e.target.value)}
+                        placeholder="建议填写一段随机共享密钥，并同步到 ASTRBOT_INTEGRATION_TOKEN"
+                      />
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {[
+                        ['astrbotQQEnabled', 'QQ / NapCat'],
+                        ['astrbotTelegramEnabled', 'Telegram'],
+                        ['astrbotWecomEnabled', '企业微信'],
+                        ['astrbotWechatOfficialEnabled', '微信公众号'],
+                        ['astrbotWechatPersonalEnabled', '个人微信（二阶段）'],
+                      ].map(([key, label]) => (
+                        <div key={key} className="flex items-center justify-between rounded-md border p-3">
+                          <Label>{label}</Label>
+                          <Switch checked={getBool(key, key !== 'astrbotWechatPersonalEnabled')} onCheckedChange={(v) => updateField(key, v)} />
+                        </div>
+                      ))}
                     </div>
                   </>
                 )}

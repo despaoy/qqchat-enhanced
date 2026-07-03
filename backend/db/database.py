@@ -1,4 +1,5 @@
 import os
+import json
 import sqlite3
 import logging
 import threading
@@ -81,6 +82,12 @@ class SQLiteDB:
                 sessionType TEXT NOT NULL,
                 sessionId TEXT NOT NULL,
                 sessionName TEXT,
+                platform TEXT NOT NULL DEFAULT 'qq',
+                adapter TEXT NOT NULL DEFAULT 'nonebot',
+                conversationId TEXT,
+                senderId TEXT,
+                sourceMessageId TEXT,
+                traceId TEXT,
                 userId TEXT,
                 userName TEXT,
                 message TEXT NOT NULL,
@@ -236,6 +243,8 @@ class SQLiteDB:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS session_settings (
                 sessionId TEXT PRIMARY KEY,
+                platform TEXT NOT NULL DEFAULT 'qq',
+                conversationId TEXT,
                 sessionType TEXT NOT NULL DEFAULT 'private',
                 sessionName TEXT,
                 bot_enabled INTEGER NOT NULL DEFAULT 1,
@@ -270,6 +279,81 @@ class SQLiteDB:
             )
         ''')
 
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS integration_message_dedup (
+                dedupKey TEXT PRIMARY KEY,
+                platform TEXT NOT NULL,
+                adapter TEXT NOT NULL,
+                messageId TEXT NOT NULL,
+                createdAt TEXT NOT NULL
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                platform TEXT NOT NULL,
+                conversationId TEXT NOT NULL,
+                conversationType TEXT NOT NULL DEFAULT 'private',
+                displayName TEXT,
+                botEnabled INTEGER NOT NULL DEFAULT 1,
+                replyPolicy TEXT NOT NULL DEFAULT 'default',
+                createdAt TEXT NOT NULL,
+                updatedAt TEXT NOT NULL,
+                UNIQUE(platform, conversationId, conversationType)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS integration_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                platform TEXT NOT NULL,
+                adapter TEXT NOT NULL,
+                sourceMessageId TEXT,
+                conversationId TEXT,
+                conversationType TEXT,
+                senderId TEXT,
+                eventType TEXT NOT NULL DEFAULT 'message',
+                eventHash TEXT NOT NULL,
+                rawSummary TEXT,
+                traceId TEXT,
+                status TEXT NOT NULL DEFAULT 'received',
+                createdAt TEXT NOT NULL,
+                UNIQUE(platform, adapter, eventHash)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS model_invocations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                traceId TEXT,
+                platform TEXT NOT NULL DEFAULT 'qq',
+                conversationId TEXT,
+                sessionId TEXT,
+                modelName TEXT,
+                loraName TEXT,
+                costTime REAL DEFAULT 0,
+                promptTokens INTEGER DEFAULT 0,
+                completionTokens INTEGER DEFAULT 0,
+                totalTokens INTEGER DEFAULT 0,
+                usedRag INTEGER NOT NULL DEFAULT 0,
+                usedLora INTEGER NOT NULL DEFAULT 0,
+                errorType TEXT DEFAULT '',
+                createdAt TEXT NOT NULL
+            )
+        ''')
+
+        self._ensure_column(cursor, "messages", "platform", "TEXT NOT NULL DEFAULT 'qq'")
+        self._ensure_column(cursor, "messages", "adapter", "TEXT NOT NULL DEFAULT 'nonebot'")
+        self._ensure_column(cursor, "messages", "conversationId", "TEXT")
+        self._ensure_column(cursor, "messages", "senderId", "TEXT")
+        self._ensure_column(cursor, "messages", "sourceMessageId", "TEXT")
+        self._ensure_column(cursor, "messages", "traceId", "TEXT")
+        self._ensure_column(cursor, "messages", "conversationType", "TEXT")
+        self._ensure_column(cursor, "messages", "senderName", "TEXT")
+        self._ensure_column(cursor, "session_settings", "platform", "TEXT NOT NULL DEFAULT 'qq'")
+        self._ensure_column(cursor, "session_settings", "conversationId", "TEXT")
+
         conn.commit()
 
         # 高并发优化：WAL模式 + busy_timeout
@@ -282,6 +366,14 @@ class SQLiteDB:
         # 为高频查询建索引：按 sessionId 查消息，避免全表扫
         try:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_messages_sessionId_createdAt ON messages(sessionId, createdAt)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_messages_platform_conversation ON messages(platform, conversationId, createdAt)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_messages_source_dedup ON messages(platform, adapter, sourceMessageId)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_messages_createdAt ON messages(createdAt)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_conversations_platform_conversation ON conversations(platform, conversationId, conversationType)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_integration_events_trace ON integration_events(traceId)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_integration_events_platform_created ON integration_events(platform, createdAt)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_model_invocations_trace ON model_invocations(traceId)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_model_invocations_created ON model_invocations(createdAt)')
         except Exception:
             pass  # 索引已存在或 SQLite 版本不支，不影响功能
 
@@ -303,6 +395,12 @@ class SQLiteDB:
         conn.commit()
         logger.info(f"✅ 数据库初始化完成: {self.db_path}")
     
+    def _ensure_column(self, cursor, table: str, column: str, definition: str):
+        cursor.execute(f"PRAGMA table_info({table})")
+        columns = {row[1] for row in cursor.fetchall()}
+        if column not in columns:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
     def _init_default_loras(self, cursor):
         """初始化默认LoRA数据 - 自动扫描 loras/ 目录并注册"""
         lora_base = Path(__file__).parent.parent / "loras"
@@ -580,6 +678,7 @@ class SQLiteDB:
         session_type: str | None = None,
         lora_name: str | None = None,
         session_id: str | None = None,
+        platform: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ):
@@ -612,6 +711,9 @@ class SQLiteDB:
         if session_id:
             conditions.append("sessionId = ?")
             params.append(session_id)
+        if platform:
+            conditions.append("platform = ?")
+            params.append(platform)
 
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         params.extend([limit, offset])
@@ -629,38 +731,63 @@ class SQLiteDB:
         return cursor.fetchone()[0]
     
     def add_message(self, message: Dict):
-        """添加消息记录"""
+        """Add a message record and keep the conversation index in sync."""
         conn = self._get_connection()
         cursor = conn.cursor()
         created_at = message.get("createdAt", datetime.now().isoformat())
-        
+        conversation_type = message.get("conversationType") or message.get("sessionType", "private")
+        sender_name = message.get("senderName") or message.get("userName", "")
+        conversation_id = message.get("conversationId", message.get("sessionId", ""))
+        platform = message.get("platform", "qq")
+        display_name = message.get("sessionName") or conversation_id or message.get("sessionId", "")
+
+        self._upsert_conversation_cursor(
+            cursor,
+            platform=platform,
+            conversation_id=conversation_id,
+            conversation_type=conversation_type,
+            display_name=display_name,
+        )
+
         cursor.execute('''
-            INSERT INTO messages (sessionType, sessionId, sessionName, userId, userName, message, reply, modelName, loraName, costTime, createdAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO messages (
+                sessionType, sessionId, sessionName, platform, adapter, conversationId,
+                conversationType, senderId, senderName, sourceMessageId, traceId,
+                userId, userName, message, reply, modelName, loraName, costTime, createdAt
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            message.get("sessionType", "private"),
+            message.get("sessionType", conversation_type),
             message.get("sessionId", ""),
             message.get("sessionName", ""),
+            platform,
+            message.get("adapter", "nonebot"),
+            conversation_id,
+            conversation_type,
+            message.get("senderId", message.get("userId", "")),
+            sender_name,
+            message.get("sourceMessageId", ""),
+            message.get("traceId", ""),
             message.get("userId", ""),
-            message.get("userName", ""),
+            message.get("userName", sender_name),
             message.get("message", ""),
             message.get("reply", ""),
             message.get("modelName", ""),
             message.get("loraName", ""),
             message.get("costTime", 0.0),
-            created_at
+            created_at,
         ))
-        
+
         message_id = cursor.lastrowid
         conn.commit()
-        
-        # 返回完整的消息对象
         return {
             **message,
             "id": str(message_id),
-            "createdAt": created_at
+            "conversationType": conversation_type,
+            "senderName": sender_name,
+            "createdAt": created_at,
         }
-    
+
     def delete_message(self, msg_id: int) -> bool:
         """删除单条消息记录"""
         conn = self._get_connection()
@@ -669,7 +796,7 @@ class SQLiteDB:
         conn.commit()
         return cursor.rowcount > 0
     
-    def delete_messages_by_filter(self, search: str = None, sessionType: str = None, lora: str = None, sessionName: str = None) -> int:
+    def delete_messages_by_filter(self, search: str = None, sessionType: str = None, lora: str = None, sessionName: str = None, platform: str = None) -> int:
         """批量删除消息（基于筛选条件），返回删除数量"""
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -688,6 +815,9 @@ class SQLiteDB:
         if sessionName:
             conditions.append("sessionName LIKE ?")
             params.append(f"%{sessionName}%")
+        if platform and platform != "all":
+            conditions.append("platform = ?")
+            params.append(platform)
         
         if conditions:
             cursor.execute(f"DELETE FROM messages WHERE {' AND '.join(conditions)}", params)
@@ -1139,6 +1269,125 @@ class SQLiteDB:
     # 会话管理
     # ============================================
 
+    def _upsert_conversation_cursor(
+        self,
+        cursor,
+        *,
+        platform: str,
+        conversation_id: str,
+        conversation_type: str = "private",
+        display_name: str = "",
+        bot_enabled: bool | None = None,
+        reply_policy: str | None = None,
+    ):
+        if not conversation_id:
+            return
+        now = datetime.now().isoformat()
+        bot_value = 1 if bot_enabled is None else int(bot_enabled)
+        reply_value = reply_policy or "default"
+        cursor.execute('''
+            INSERT INTO conversations (platform, conversationId, conversationType, displayName, botEnabled, replyPolicy, createdAt, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(platform, conversationId, conversationType) DO UPDATE SET
+                displayName = COALESCE(NULLIF(excluded.displayName, ''), conversations.displayName),
+                botEnabled = CASE WHEN ? IS NULL THEN conversations.botEnabled ELSE excluded.botEnabled END,
+                replyPolicy = CASE WHEN ? IS NULL THEN conversations.replyPolicy ELSE excluded.replyPolicy END,
+                updatedAt = excluded.updatedAt
+        ''', (platform, conversation_id, conversation_type, display_name, bot_value, reply_value, now, now, bot_enabled, reply_policy))
+
+    def upsert_conversation(self, data: Dict):
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        self._upsert_conversation_cursor(
+            cursor,
+            platform=data.get("platform", "qq"),
+            conversation_id=data.get("conversationId") or data.get("sessionId", ""),
+            conversation_type=data.get("conversationType") or data.get("sessionType", "private"),
+            display_name=data.get("displayName") or data.get("sessionName", ""),
+            bot_enabled=data.get("botEnabled") if "botEnabled" in data else None,
+            reply_policy=data.get("replyPolicy"),
+        )
+        conn.commit()
+
+    def get_conversation(self, platform: str, conversation_id: str, conversation_type: str | None = None):
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        if conversation_type:
+            cursor.execute(
+                'SELECT * FROM conversations WHERE platform = ? AND conversationId = ? AND conversationType = ? LIMIT 1',
+                (platform, conversation_id, conversation_type),
+            )
+        else:
+            cursor.execute(
+                'SELECT * FROM conversations WHERE platform = ? AND conversationId = ? ORDER BY updatedAt DESC LIMIT 1',
+                (platform, conversation_id),
+            )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def add_integration_event(self, event: Dict):
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        created_at = event.get("createdAt", datetime.now().isoformat())
+        raw_summary = event.get("rawSummary", "")
+        if not isinstance(raw_summary, str):
+            raw_summary = json.dumps(raw_summary, ensure_ascii=False, default=str)
+        event_hash = event.get("eventHash") or f"{event.get('sourceMessageId', '')}:{event.get('traceId', '')}"
+        cursor.execute('''
+            INSERT INTO integration_events (
+                platform, adapter, sourceMessageId, conversationId, conversationType,
+                senderId, eventType, eventHash, rawSummary, traceId, status, createdAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(platform, adapter, eventHash) DO UPDATE SET
+                traceId = excluded.traceId,
+                status = excluded.status,
+                rawSummary = excluded.rawSummary
+        ''', (
+            event.get("platform", "qq"),
+            event.get("adapter", "other"),
+            event.get("sourceMessageId", ""),
+            event.get("conversationId", ""),
+            event.get("conversationType", "private"),
+            event.get("senderId", ""),
+            event.get("eventType", "message"),
+            event_hash,
+            raw_summary[:4096],
+            event.get("traceId", ""),
+            event.get("status", "received"),
+            created_at,
+        ))
+        conn.commit()
+
+    def add_model_invocation(self, invocation: Dict):
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        created_at = invocation.get("createdAt", datetime.now().isoformat())
+        prompt_tokens = int(invocation.get("promptTokens", 0) or 0)
+        completion_tokens = int(invocation.get("completionTokens", 0) or 0)
+        total_tokens = int(invocation.get("totalTokens", prompt_tokens + completion_tokens) or 0)
+        cursor.execute('''
+            INSERT INTO model_invocations (
+                traceId, platform, conversationId, sessionId, modelName, loraName, costTime,
+                promptTokens, completionTokens, totalTokens, usedRag, usedLora, errorType, createdAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            invocation.get("traceId", ""),
+            invocation.get("platform", "qq"),
+            invocation.get("conversationId", ""),
+            invocation.get("sessionId", ""),
+            invocation.get("modelName", ""),
+            invocation.get("loraName", ""),
+            float(invocation.get("costTime", 0.0) or 0.0),
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            int(bool(invocation.get("usedRag", False))),
+            int(bool(invocation.get("usedLora", False))),
+            invocation.get("errorType", ""),
+            created_at,
+        ))
+        conn.commit()
+
     def get_session_summaries(self):
         """获取所有会话的聚合统计信息"""
         conn = self._get_connection()
@@ -1150,11 +1399,14 @@ class SQLiteDB:
                 sessionId,
                 sessionType,
                 sessionName,
+                COALESCE(platform, 'qq') as platform,
+                COALESCE(adapter, 'nonebot') as adapter,
+                COALESCE(conversationId, sessionId) as conversationId,
                 COUNT(*) as message_count,
                 MAX(createdAt) as last_active,
                 GROUP_CONCAT(message, '||') as recent_messages
             FROM messages
-            GROUP BY sessionId
+            GROUP BY sessionId, sessionType, sessionName, platform, adapter, conversationId
             ORDER BY last_active DESC
         ''')
         rows = cursor.fetchall()
@@ -1164,6 +1416,9 @@ class SQLiteDB:
             session_id = row['sessionId']
             session_type = row['sessionType']
             session_name = row['sessionName'] or session_id
+            platform = row['platform'] or 'qq'
+            adapter = row['adapter'] or 'nonebot'
+            conversation_id = row['conversationId'] or session_id
             message_count = row['message_count']
             last_active = row['last_active']
 
@@ -1186,6 +1441,9 @@ class SQLiteDB:
                 'sessionId': session_id,
                 'sessionType': session_type,
                 'sessionName': session_name,
+                'platform': platform,
+                'adapter': adapter,
+                'conversationId': conversation_id,
                 'messageCount': message_count,
                 'lastActive': last_active,
                 'summary': summary,
@@ -1194,24 +1452,34 @@ class SQLiteDB:
 
         return sessions
 
-    def set_session_bot_enabled(self, session_id: str, enabled: bool):
+    def set_session_bot_enabled(self, session_id: str, enabled: bool, platform: str = "qq", conversation_id: str | None = None):
         """设置某个会话的机器人开关"""
         conn = self._get_connection()
         cursor = conn.cursor()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+        resolved_conversation_id = conversation_id or session_id
         cursor.execute('''
-            INSERT INTO session_settings (sessionId, sessionType, sessionName, bot_enabled, updated_at)
-            VALUES (?, 'private', ?, ?, ?)
-            ON CONFLICT(sessionId) DO UPDATE SET bot_enabled = ?, updated_at = ?
-        ''', (session_id, session_id, int(enabled), now, int(enabled), now))
+            INSERT INTO session_settings (sessionId, platform, conversationId, sessionType, sessionName, bot_enabled, updated_at)
+            VALUES (?, ?, ?, 'private', ?, ?, ?)
+            ON CONFLICT(sessionId) DO UPDATE SET platform = ?, conversationId = ?, bot_enabled = ?, updated_at = ?
+        ''', (session_id, platform, resolved_conversation_id, session_id, int(enabled), now, platform, resolved_conversation_id, int(enabled), now))
+        self._upsert_conversation_cursor(
+            cursor,
+            platform=platform,
+            conversation_id=resolved_conversation_id,
+            conversation_type='private',
+            display_name=session_id,
+            bot_enabled=enabled,
+        )
         conn.commit()
         # 变更后主动失效缓存
-        self._bot_enabled_cache.pop(session_id, None)
+        if hasattr(self, '_bot_enabled_cache'):
+            self._bot_enabled_cache.pop(session_id, None)
 
     # session bot 开关内存缓存（减少高频读库）
     # TTL 60s，变更时主动失效
-    def is_session_bot_enabled(self, session_id: str) -> bool:
+    def is_session_bot_enabled(self, session_id: str, platform: str = "qq", conversation_id: str | None = None) -> bool:
         """检查某个会话的机器人是否启用（默认启用，内存 TTL 缓存）"""
         import time as _time
         now = _time.time()
@@ -1230,9 +1498,33 @@ class SQLiteDB:
             (session_id,)
         )
         row = cursor.fetchone()
-        result = True if row is None else bool(row['bot_enabled'])
+        if row is None and conversation_id:
+            cursor.execute(
+                'SELECT botEnabled FROM conversations WHERE platform = ? AND conversationId = ? ORDER BY updatedAt DESC LIMIT 1',
+                (platform, conversation_id),
+            )
+            conversation_row = cursor.fetchone()
+            result = True if conversation_row is None else bool(conversation_row['botEnabled'])
+        else:
+            result = True if row is None else bool(row['bot_enabled'])
         self._bot_enabled_cache[session_id] = (result, now + 60)
         return result
+
+    def mark_integration_message_processed(self, platform: str, adapter: str, message_id: str) -> bool:
+        if not message_id:
+            return True
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        key = f"{platform}:{adapter}:{message_id}"
+        try:
+            cursor.execute(
+                "INSERT INTO integration_message_dedup (dedupKey, platform, adapter, messageId, createdAt) VALUES (?, ?, ?, ?, ?)",
+                (key, platform, adapter, message_id, datetime.now().isoformat()),
+            )
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
 
     # ── Claw 工具 CRUD ──
 
