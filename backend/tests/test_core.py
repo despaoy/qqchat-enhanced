@@ -340,6 +340,15 @@ class TestGroupRateLimiter:
 # Multi-platform integration tests
 # ============================================
 
+class TestDatabaseConfiguration:
+    def test_sqlite_path_uses_database_path_env(self, monkeypatch, tmp_path):
+        from db.database import _database_path_from_env
+
+        custom_path = tmp_path / "data" / "custom.db"
+        monkeypatch.setenv("DATABASE_PATH", str(custom_path))
+
+        assert _database_path_from_env() == custom_path
+
 class TestMultiPlatformStorage:
     def _make_db(self):
         from db.database import SQLiteDB
@@ -641,6 +650,23 @@ class TestIntegrationSecurity:
         assert active == "old-token"
         assert "new-token" in allowed
 
+    def test_security_middleware_allows_astrbot_endpoint_to_handle_own_token(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from middleware.security import SecurityMiddleware
+
+        app = FastAPI()
+
+        @app.post("/api/integrations/astrbot/messages")
+        async def integration_endpoint():
+            return {"ok": True}
+
+        app.add_middleware(SecurityMiddleware)
+        response = TestClient(app).post("/api/integrations/astrbot/messages", headers={"X-Integration-Token": "test-token"})
+
+        assert response.status_code == 200
+        assert response.json() == {"ok": True}
     def test_integration_raw_payload_limit_and_control_chars(self, monkeypatch):
         from fastapi import HTTPException
         from api import integrations
@@ -734,9 +760,12 @@ class TestAstrBotContracts:
 
     def test_main_app_exposes_astrbot_endpoint(self, monkeypatch):
         monkeypatch.setenv("SECURITY_MIDDLEWARE_ENABLED", "false")
+        from fastapi.testclient import TestClient
+
         from app.main import app
 
-        assert any(route.path == "/api/integrations/astrbot/messages" for route in app.routes)
+        openapi = TestClient(app).get("/openapi.json").json()
+        assert "/api/integrations/astrbot/messages" in openapi["paths"]
 
 
 class TestAstrBotIntegrationFlow:

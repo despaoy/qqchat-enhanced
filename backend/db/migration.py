@@ -12,6 +12,7 @@ SQLite → PostgreSQL 一次性迁移脚本
 """
 
 import asyncio
+import os
 import sqlite3
 import sys
 import logging
@@ -26,7 +27,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # SQLite 数据库路径
-SQLITE_DB_PATH = Path(__file__).parent.parent / "qq_assistant.db"
+SQLITE_DB_PATH = Path(os.getenv("DATABASE_PATH") or Path(__file__).parent.parent / "qq_assistant.db")
 
 
 # ============================================

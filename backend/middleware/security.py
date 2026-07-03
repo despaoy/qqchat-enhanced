@@ -376,7 +376,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         # 公开只读端点放行（无需认证）
         PUBLIC_GET_PATHS = {"/api/stats", "/api/stats/activity", "/api/stats/services", "/api/model/status", "/api/vllm/status", "/health", "/ready"}
         # 公开POST端点（Bot使用的搜索接口）
-        PUBLIC_POST_PATHS = {"/api/knowledge/search"}
+        PUBLIC_POST_PATHS = {"/api/knowledge/search", "/api/integrations/astrbot/messages"}
         if request.method in ("GET", "HEAD") and (path in PUBLIC_GET_PATHS or path.startswith("/docs") or path.startswith("/redoc")):
             return await call_next(request)
         if request.method == "POST" and path in PUBLIC_POST_PATHS:

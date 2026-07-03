@@ -103,7 +103,7 @@ async def lifespan(app: FastAPI):
     if RESOURCE_POOL_AVAILABLE:
         try:
             from infra.resource_pool import ConnectionPool, HttpClientPool
-            db_path = str(_BACKEND_ROOT / "qq_assistant.db")
+            db_path = str(getattr(db, "db_path", _BACKEND_ROOT / "qq_assistant.db"))
             connection_pool = ConnectionPool(db_path, max_size=20)
             http_client_pool = HttpClientPool(max_connections=100)
             logger.info("✅ 资源池初始化完成")
@@ -113,7 +113,7 @@ async def lifespan(app: FastAPI):
     if BACKUP_MANAGER_AVAILABLE:
         try:
             from infra.backup_manager import BackupManager
-            db_path = str(_BACKEND_ROOT / "qq_assistant.db")
+            db_path = str(getattr(db, "db_path", _BACKEND_ROOT / "qq_assistant.db"))
             backup_mgr = BackupManager(db_path)
             import asyncio
             asyncio.create_task(backup_mgr.start_scheduled_backup())
@@ -143,7 +143,7 @@ async def lifespan(app: FastAPI):
     if ACCESS_CONTROL_AVAILABLE:
         try:
             from infra.access_control import AccessControlManager
-            db_path = str(_BACKEND_ROOT / "qq_assistant.db")
+            db_path = str(getattr(db, "db_path", _BACKEND_ROOT / "qq_assistant.db"))
             access_control_mgr = AccessControlManager(db_path)
             logger.info("✅ 访问控制管理器初始化完成")
         except Exception as e:

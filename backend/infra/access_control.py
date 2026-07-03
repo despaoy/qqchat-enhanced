@@ -64,7 +64,7 @@ _RATE_LIMIT_WINDOW = 60
 _MAX_AUDIT_LOG_ENTRIES = 10000
 
 # 数据库路径
-_DB_PATH = Path(__file__).parent.parent / "qq_assistant.db"
+_DB_PATH = Path(os.getenv("DATABASE_PATH") or Path(__file__).parent.parent / "qq_assistant.db")
 
 
 # ---------------------------------------------------------------------------

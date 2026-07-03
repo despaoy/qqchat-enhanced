@@ -35,15 +35,22 @@ def _resolve_path(p: str) -> str:
     return str(Path(__file__).parent.parent / p)
 
 # 数据库路径
-DB_PATH = Path(__file__).parent.parent / "qq_assistant.db"
+def _database_path_from_env() -> Path:
+    configured = os.getenv("DATABASE_PATH", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    return Path(__file__).parent.parent / "qq_assistant.db"
+
+DB_PATH = _database_path_from_env()
 
 # ============================================
 # SQLite数据库类
 # ============================================
 class SQLiteDB:
     """SQLite数据库类 - 实现数据持久化"""
-    def __init__(self, db_path: Path = DB_PATH):
-        self.db_path = db_path
+    def __init__(self, db_path: Path | str = DB_PATH):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
         self._init_database()
     

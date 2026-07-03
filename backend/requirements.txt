@@ -1,16 +1,16 @@
 # ============================================
 # QQ智能助手 - Python 依赖
-# 目标环境: Python 3.12+ / CUDA 13.0+ (RTX 3090 驱动 595+)
+# 目标环境: Python 3.12+ / CUDA 12.8 (RTX 3090 / AutoDL PyTorch 2.8)
 # ============================================
 #
 # ⚠️ 重要安装顺序（GPU 服务器）:
 #
-#   # 1. 先装 PyTorch CUDA 13.0 版本（vllm 0.22.1 严格依赖 torch==2.11.0）
-#   pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
+#   # 1. 先装 PyTorch CUDA 13.0 版本（vllm 0.22.1 严格依赖 torch==2.8.0）
+#   pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 \
 #       --index-url https://download.pytorch.org/whl/cu130
 #
-#   # 2. 再装 vLLM（必须 0.22.1，勿用 0.23.0+，会有 pip 元数据解析 bug）
-#   pip install vllm==0.22.1
+#   # 2. 再装 vLLM（当前 AutoDL 实测 0.10.2，勿用 0.23.0+，会有 pip 元数据解析 bug）
+#   pip install vllm==0.10.2
 #
 #   # 3. 最后装其余依赖（torch/vllm 会被跳过）
 #   pip install -r requirements.txt
@@ -21,16 +21,16 @@
 #   pip install -r requirements-ci.txt
 # ============================================
 
-# ── AI/ML 核心（CUDA 13.0 专用，须按上述顺序单独安装）──
+# ── AI/ML 核心（CUDA 12.8 / AutoDL 实测，须按上述顺序单独安装）──
 # vllm 0.22.1: 原生支持 CUDA 13 + transformers v5；0.23.0 有 pip 元数据 bug，勿用
 # torch 2.11.0: vllm 0.22.1 的硬性依赖，cu130 构建来自 download.pytorch.org/whl/cu130
-torch==2.11.0
-torchvision==0.26.0
-torchaudio==2.11.0
-vllm==0.22.1
+torch==2.8.0
+torchvision==0.23.0
+torchaudio==2.8.0
+vllm==0.10.2
 
-# Transformers v5（2026.01 稳定大版本，v4 已过时）
-transformers>=5.0.0,<6.0
+# Transformers v4.56（2026.01 稳定大版本，v4 已过时）
+transformers>=4.56.0,<5.0
 
 # 训练框架
 peft>=0.14.0,<1.0
@@ -87,7 +87,7 @@ requests>=2.32.0,<3.0
 
 # 向量数据库与 RAG
 faiss-cpu>=1.9.0,<2.0           # CPU 版开发用，生产可换 faiss-gpu
-sentence-transformers>=5.0.0,<6.0
+sentence-transformers>=4.56.0,<5.0
 numpy>=2.0.0,<3.0
 scipy>=1.14.0,<2.0
 scikit-learn>=1.6.0,<2.0
@@ -97,3 +97,7 @@ rank-bm25>=0.2.2,<1.0           # BM25关键词检索（RAG混合搜索）
 # Redis 缓存（可选，未配置时后端自动降级为数据库直连）
 redis>=5.2.0,<9.0
 hiredis>=3.1.0,<4.0
+
+# Test runner
+pytest>=8.4.0,<10.0
+pytest-asyncio>=1.0.0,<2.0
