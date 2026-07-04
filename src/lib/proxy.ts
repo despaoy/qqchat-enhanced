@@ -65,16 +65,37 @@ function isUnsafeMethod(method: string): boolean {
   return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method.toUpperCase());
 }
 
+function isLoopbackHost(hostname: string): boolean {
+  return ['localhost', '127.0.0.1', '::1', '[::1]'].includes(hostname.toLowerCase());
+}
+
+function originsMatch(actualOrigin: string, expectedOrigin: string): boolean {
+  if (actualOrigin === expectedOrigin) return true;
+
+  try {
+    const actual = new URL(actualOrigin);
+    const expected = new URL(expectedOrigin);
+    return (
+      actual.protocol === expected.protocol &&
+      actual.port === expected.port &&
+      isLoopbackHost(actual.hostname) &&
+      isLoopbackHost(expected.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function isSameOriginRequest(request: Request): boolean {
   const expectedOrigin = new URL(request.url).origin;
   const origin = request.headers.get('Origin');
   if (origin) {
-    return origin === expectedOrigin;
+    return originsMatch(origin, expectedOrigin);
   }
   const referer = request.headers.get('Referer');
   if (referer) {
     try {
-      return new URL(referer).origin === expectedOrigin;
+      return originsMatch(new URL(referer).origin, expectedOrigin);
     } catch {
       return false;
     }
