@@ -1,6 +1,6 @@
 'use client';
 
-import { Home, MessageSquare, Settings, BrainCircuit, Activity, Database, Bot, Zap, User, LogIn, Terminal, Brain } from 'lucide-react';
+import { Home, MessageSquare, Settings, BrainCircuit, Activity, Database, Bot, Zap, User, LogIn, Terminal, Brain, Cable } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -98,6 +98,7 @@ export function Sidebar() {
     { name: t('nav.lora'), href: '/lora', icon: BrainCircuit },
     { name: t('nav.intentTraining'), href: '/intent-training', icon: Brain },
     { name: t('nav.monitor'), href: '/monitor', icon: Activity },
+    { name: '平台连接', href: '/integrations', icon: Cable },
     { name: t('nav.knowledge'), href: '/knowledge', icon: Database },
     { name: t('nav.claw'), href: '/claw', icon: Terminal },
     { name: t('nav.settings'), href: '/settings', icon: Settings },
