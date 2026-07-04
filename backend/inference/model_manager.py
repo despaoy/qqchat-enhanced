@@ -609,6 +609,12 @@ class VLLMProvider(BaseProvider):
         if _db_cfg.get("vllmTimeout"):
             self.timeout = float(_db_cfg["vllmTimeout"])
 
+    def _chat_completions_url(self) -> str:
+        base = self.base_url.rstrip("/")
+        if not base.endswith("/v1"):
+            base = f"{base}/v1"
+        return f"{base}/chat/completions"
+
     def set_lora_adapter(self, lora_path: Optional[str]):
         """通过 vLLM 的 --enable-lora 传递 LoRA 名称"""
         if lora_path:
@@ -657,7 +663,7 @@ class VLLMProvider(BaseProvider):
         for attempt in range(3):
             try:
                 resp = await self._async_client.post(
-                    f"{self.base_url}/chat/completions",
+                    self._chat_completions_url(),
                     json=payload,
                     headers={"Authorization": "Bearer EMPTY"}
                 )
