@@ -56,6 +56,7 @@ class QQChatGatewayPlugin(Star):
         dedup_key = self._dedup_key(payload)
         if self._is_duplicate(dedup_key):
             logger.info("qqchat gateway skipped duplicate event: %s", dedup_key)
+            event.stop_event()
             return
 
         try:
@@ -70,6 +71,7 @@ class QQChatGatewayPlugin(Star):
             )
             if payload["conversationType"] == "private":
                 yield event.plain_result("[\u7cfb\u7edf\u63d0\u793a] \u540e\u7aef\u670d\u52a1\u6682\u65f6\u4e0d\u53ef\u7528\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5\u3002")
+            event.stop_event()
             return
 
         logger.info(
@@ -81,6 +83,7 @@ class QQChatGatewayPlugin(Star):
         )
         if response.get("shouldReply") and response.get("replyText"):
             yield event.plain_result(str(response["replyText"]))
+        event.stop_event()
 
     def _message_text(self, event: AstrMessageEvent) -> str:
         text = getattr(event, "message_str", "") or ""
@@ -171,21 +174,34 @@ class QQChatGatewayPlugin(Star):
         return False
 
     def _platform(self, event: AstrMessageEvent) -> str:
-        name = ""
+        candidates: list[str] = []
         getter = getattr(event, "get_platform_name", None)
         if callable(getter):
             try:
-                name = str(getter()).lower()
+                candidates.append(str(getter()))
             except Exception:
-                name = ""
-        name = name or str(getattr(event, "platform", "qq")).lower()
+                pass
+        for attr in ("platform", "platform_id", "platform_name"):
+            value = getattr(event, attr, None)
+            if value:
+                candidates.append(str(value))
+        raw = self._raw_event(event)
+        for key in ("platform", "platform_id", "platform_name", "adapter", "type"):
+            value = raw.get(key)
+            if value:
+                candidates.append(str(value))
+        name = " ".join(candidates).lower()
         if "telegram" in name:
             return "telegram"
         if "wecom" in name or "enterprise" in name:
             return "wecom"
+        if "weixin_personal" in name or "personal_weixin" in name:
+            return "wechat_personal"
+        if "weixin_oc" in name:
+            return "wechat_personal"
         if "official" in name or "mp" in name:
             return "wechat_official"
-        if "wechat" in name or "gewechat" in name:
+        if "wechat" in name or "gewechat" in name or "weixin" in name:
             return "wechat_personal"
         return "qq"
 
@@ -199,7 +215,7 @@ class QQChatGatewayPlugin(Star):
         if platform == "wechat_official":
             return "official_account"
         if platform == "wechat_personal":
-            return os.getenv("QQCHAT_WECHAT_ADAPTER", "wechatpadpro")
+            return os.getenv("QQCHAT_WECHAT_ADAPTER", "gewechat")
         return "other"
 
     def _conversation_type(self, event: AstrMessageEvent) -> str:

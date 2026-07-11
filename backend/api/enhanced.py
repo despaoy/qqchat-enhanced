@@ -44,7 +44,7 @@ def _validate_path(path_str: str, allowed_base: str = None) -> str:
     resolved = Path(path_str).resolve()
     if allowed_base:
         base = Path(allowed_base).resolve()
-        if not str(resolved).startswith(str(base)):
+        if not resolved.is_relative_to(base):
             raise ValueError(f"Path must be within {allowed_base}")
     return str(resolved)
 
@@ -165,7 +165,7 @@ async def restore_backup(backup_name: str, current_user: dict = Depends(get_curr
             raise HTTPException(status_code=400, detail="无效的备份名称")
         backup_path = backup_dir / backup_name
         # Ensure resolved path is within backup directory
-        if not str(backup_path.resolve()).startswith(str(backup_dir.resolve())):
+        if not backup_path.resolve().is_relative_to(backup_dir.resolve()):
             raise HTTPException(status_code=400, detail="无效的备份路径")
         if not backup_path.exists():
             raise HTTPException(status_code=404, detail="备份文件不存在")

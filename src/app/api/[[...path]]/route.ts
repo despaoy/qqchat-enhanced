@@ -42,10 +42,10 @@ export async function POST(request: Request, { params }: RouteContext) {
 
   const contentType = request.headers.get('Content-Type') || '';
   if (contentType.includes('multipart/form-data')) {
-    const formData = await request.formData();
     return proxyRequest(request, backendPath, {
       method: 'POST',
-      body: formData,
+      body: request.body,
+      headers: { 'Content-Type': contentType },
     });
   }
 

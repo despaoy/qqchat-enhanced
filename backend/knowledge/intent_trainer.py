@@ -325,6 +325,7 @@ def _get_vllm_client():
     vllm_enabled = (
         os.getenv("VLLM_ENABLED", "").lower() == "true"
         or bool(os.getenv("VLLM_BASE_URLS", "").strip())
+        or bool(os.getenv("VLLM_BASE_URL", "").strip())
     )
     if not vllm_enabled:
         logger.warning("vLLM 未启用（缺少 VLLM_ENABLED 或 VLLM_BASE_URLS 环境变量）")

@@ -1,8 +1,8 @@
 """数据库适配器 - 统一访问接口
 
-根据环境变量 USE_POSTGRESQL 自动选择数据库后端：
-- USE_POSTGRESQL=true  → PostgreSQL (SyncPgAdapter)
-- USE_POSTGRESQL=false → SQLite (默认)
+根据环境变量自动选择数据库后端：
+- USE_POSTGRESQL=true，或未显式设置且 DATABASE_URL 为 PostgreSQL URL → PostgreSQL
+- USE_POSTGRESQL=false → SQLite
 
 所有 API 层应通过 `from db.adapter import db` 获取数据库实例。
 """
@@ -13,7 +13,17 @@ from interfaces import DatabaseInterface
 
 logger = logging.getLogger(__name__)
 
-_USE_PG = os.getenv("USE_POSTGRESQL", "false").lower() == "true"
+def _should_use_postgresql(env=os.environ) -> bool:
+    """Resolve the database backend without silently ignoring DATABASE_URL."""
+    explicit = str(env.get("USE_POSTGRESQL", "")).strip().lower()
+    if explicit:
+        return explicit in {"1", "true", "yes", "on"}
+
+    database_url = str(env.get("DATABASE_URL", "")).strip().lower()
+    return database_url.startswith(("postgresql://", "postgresql+asyncpg://"))
+
+
+_USE_PG = _should_use_postgresql()
 
 if _USE_PG:
     try:
@@ -21,7 +31,9 @@ if _USE_PG:
         db = sync_pg_db
         logger.info("✅ 数据库适配器：PostgreSQL 模式（SyncPgAdapter）")
     except ImportError as e:
-        logger.warning(f"PostgreSQL 模块导入失败，回退到 SQLite: {e}")
+        if os.getenv("ENVIRONMENT", "development").strip().lower() == "production":
+            raise RuntimeError("PostgreSQL 已配置，但 PostgreSQL 依赖不可用") from e
+        logger.warning(f"PostgreSQL 模块导入失败，开发环境回退到 SQLite: {e}")
         from db.database import db
         _USE_PG = False
 else:

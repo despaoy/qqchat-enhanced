@@ -4,6 +4,9 @@
 模拟各类故障场景，验证系统的容错和恢复能力
 """
 
+# This is an executable integration test script, not a pytest test module.
+__test__ = False
+
 import argparse
 import asyncio
 import json

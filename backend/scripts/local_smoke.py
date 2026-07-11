@@ -14,20 +14,20 @@ if str(BACKEND_ROOT) not in sys.path:
 TEMP_DIR = BACKEND_ROOT / ".test_tmp"
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-os.environ.setdefault("ENVIRONMENT", "development")
-os.environ.setdefault("MODEL_PROVIDER", "mock")
-os.environ.setdefault("VLLM_ENABLED", "false")
-os.environ.setdefault("VLLM_BASE_URLS", "")
-os.environ.setdefault("VLLM_BASE_URL", "http://localhost:8001")
-os.environ.setdefault("SECURITY_MIDDLEWARE_ENABLED", "false")
-os.environ.setdefault("ASTRBOT_ENABLED", "true")
-os.environ.setdefault("ASTRBOT_INTEGRATION_TOKEN", "local-verify-token")
-os.environ.setdefault("INTEGRATION_SIGNATURE_REQUIRED", "false")
-os.environ.setdefault("DATABASE_PATH", str(TEMP_DIR / "local_verify.db"))
-os.environ.setdefault("QQCHAT_BACKEND_URL", "http://127.0.0.1:8000")
-os.environ.setdefault("JWT_SECRET", "local-smoke-jwt-secret-value-32-chars")
-os.environ.setdefault("ALLOWED_ORIGINS", "http://localhost:5000")
-os.environ.setdefault("LOG_LEVEL", "INFO")
+os.environ["ENVIRONMENT"] = "development"
+os.environ["MODEL_PROVIDER"] = "mock"
+os.environ["VLLM_ENABLED"] = "false"
+os.environ["VLLM_BASE_URLS"] = ""
+os.environ["VLLM_BASE_URL"] = ""
+os.environ["SECURITY_MIDDLEWARE_ENABLED"] = "false"
+os.environ["ASTRBOT_ENABLED"] = "true"
+os.environ["ASTRBOT_INTEGRATION_TOKEN"] = "local-verify-token"
+os.environ["INTEGRATION_SIGNATURE_REQUIRED"] = "false"
+os.environ["DATABASE_PATH"] = str(TEMP_DIR / "local_verify.db")
+os.environ["QQCHAT_BACKEND_URL"] = "http://127.0.0.1:8000"
+os.environ["JWT_SECRET"] = "local-smoke-jwt-secret-value-32-chars"
+os.environ["ALLOWED_ORIGINS"] = "http://localhost:5000"
+os.environ["LOG_LEVEL"] = "INFO"
 
 from fastapi.testclient import TestClient
 

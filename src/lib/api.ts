@@ -1072,16 +1072,16 @@ class ApiClient {
   }
 
   /** 用户注册 */
-  async register(request: RegisterRequest): Promise<{ success: boolean; user: User; token: string }> {
-    return this.request<{ success: boolean; user: User; token: string }>('/auth/register', {
+  async register(request: RegisterRequest): Promise<{ success: boolean; user: User }> {
+    return this.request<{ success: boolean; user: User }>('/auth/register', {
       method: 'POST',
       body: JSON.stringify(request),
     });
   }
 
   /** 用户登录 */
-  async login(request: LoginRequest): Promise<{ success: boolean; user: User; token: string }> {
-    return this.request<{ success: boolean; user: User; token: string }>('/auth/login', {
+  async login(request: LoginRequest): Promise<{ success: boolean; user: User }> {
+    return this.request<{ success: boolean; user: User }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify(request),
     });

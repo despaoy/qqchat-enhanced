@@ -44,10 +44,17 @@ from app.config import (
     FAILOVER_AVAILABLE, ACCESS_CONTROL_AVAILABLE,
     load_balancer_mgr, circuit_breaker_registry,
 )
-from db.adapter import db
+from db.adapter import db, is_pg_mode
 from infra.deployment import validate_or_raise_for_startup
 
 logger = logging.getLogger("main")
+
+
+def _initialize_database(database) -> None:
+    """Initialize and probe either database adapter through its public contract."""
+    if hasattr(database, "init"):
+        database.init()
+    database.execute_sql("SELECT 1")
 
 # ── 导入所有 API 路由 ──
 from api.stats import router as stats_router
@@ -81,11 +88,8 @@ async def lifespan(app: FastAPI):
     # 此处仅做一次连接探活（SELECT 1），确认数据库文件可读写。
     # 重要：初始化失败应阻断启动，防止服务带病运行（容器编排会自动重启）。
     try:
-        if hasattr(db, "init"):
-            db.init()
-        conn = db.get_connection()
-        conn.execute("SELECT 1")
-        logger.info("✅ 数据库初始化完成")
+        _initialize_database(db)
+        logger.info("✅ 数据库初始化完成 (%s)", "PostgreSQL" if is_pg_mode() else "SQLite")
     except Exception as e:
         logger.critical(f"❌ 数据库初始化失败，服务无法启动: {e}", exc_info=True)
         raise RuntimeError(f"数据库初始化失败: {e}") from e
@@ -100,7 +104,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Redis 缓存初始化跳过: {e}")
 
-    if RESOURCE_POOL_AVAILABLE:
+    if RESOURCE_POOL_AVAILABLE and not is_pg_mode():
         try:
             from infra.resource_pool import ConnectionPool, HttpClientPool
             db_path = str(getattr(db, "db_path", _BACKEND_ROOT / "qq_assistant.db"))
@@ -110,7 +114,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"资源池初始化失败: {e}")
 
-    if BACKUP_MANAGER_AVAILABLE:
+    if BACKUP_MANAGER_AVAILABLE and not is_pg_mode():
         try:
             from infra.backup_manager import BackupManager
             db_path = str(getattr(db, "db_path", _BACKEND_ROOT / "qq_assistant.db"))
@@ -140,7 +144,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"故障转移管理器初始化失败: {e}")
 
-    if ACCESS_CONTROL_AVAILABLE:
+    if ACCESS_CONTROL_AVAILABLE and not is_pg_mode():
         try:
             from infra.access_control import AccessControlManager
             db_path = str(getattr(db, "db_path", _BACKEND_ROOT / "qq_assistant.db"))
@@ -195,17 +199,7 @@ def _allowed_origins() -> list[str]:
     ]
 
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_allowed_origins(),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # ── 安全中间件（可通过环境变量控制开关） ──
-import os
-
 _SECURITY_ENABLED = os.getenv("SECURITY_MIDDLEWARE_ENABLED", "true").lower() == "true"
 
 if _SECURITY_ENABLED:
@@ -217,16 +211,27 @@ if _SECURITY_ENABLED:
             SecurityHeadersMiddleware,
             AuditLogMiddleware,
         )
-        # 注意：Starlette 中间件按添加顺序的逆序执行，先添加的最后执行
-        # 所以最外层（最先执行）的中间件最后添加
-        app.add_middleware(AuditLogMiddleware)               # 最外层：审计日志
-        app.add_middleware(InputValidationMiddleware)         # 输入验证
-        app.add_middleware(RateLimitMiddleware)               # 限流
-        app.add_middleware(SecurityMiddleware)                # 认证
-        app.add_middleware(SecurityHeadersMiddleware)         # 安全头（最内层）
+        # Starlette's last added middleware is outermost. Request order:
+        # CORS -> audit -> security headers -> auth -> rate limit -> validation.
+        app.add_middleware(InputValidationMiddleware)
+        app.add_middleware(RateLimitMiddleware)
+        app.add_middleware(SecurityMiddleware)
+        app.add_middleware(SecurityHeadersMiddleware)
+        app.add_middleware(AuditLogMiddleware)
         logger.info("✅ 安全中间件已启用（认证+限流+输入验证+审计+安全头）")
     except ImportError as e:
+        if os.getenv("ENVIRONMENT", "development").strip().lower() == "production":
+            raise RuntimeError("Security middleware is required in production") from e
         logger.warning(f"安全中间件导入失败，跳过: {e}")
+
+# CORS is outermost so even authentication and rate-limit errors include CORS headers.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins(),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ── 挂载所有路由 ──
 app.include_router(stats_router)

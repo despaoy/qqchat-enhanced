@@ -13,11 +13,12 @@ Required production environment variables:
 
 - `ASTRBOT_INTEGRATION_TOKEN`: shared secret between AstrBot plugin and FastAPI.
 - `QQCHAT_BACKEND_URL`: backend URL used by AstrBot, preferably internal network HTTP.
-- `DATABASE_URL`: PostgreSQL URL, or complete `PG_HOST`, `PG_USER`, `PG_PASSWORD`, `PG_DATABASE` with `USE_POSTGRESQL=true`.
+- `DATABASE_URL`: PostgreSQL URL. `postgresql://` is normalized to the asyncpg driver automatically.
 - `VLLM_BASE_URL` or `VLLM_BASE_URLS`: model inference endpoint.
 - `JWT_SECRET`: non-placeholder value with at least 32 characters.
 - `ALLOWED_ORIGINS`: comma-separated trusted frontend/admin origins.
 - `LOG_LEVEL`: one of `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.
+- `BACKEND_WORKERS=1`: required while idempotency, nonce replay protection, and session locks are process-local.
 
 Startup behavior:
 

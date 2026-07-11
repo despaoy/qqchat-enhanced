@@ -64,21 +64,23 @@ def validate_deployment_environment(env: Mapping[str, str] | None = None) -> Dep
         (errors if production else warnings).append("ASTRBOT_INTEGRATION_TOKEN or ASTRBOT_INTEGRATION_TOKENS is required")
     elif any(_is_placeholder(token) for token in token_values if token):
         (errors if production else warnings).append("ASTRBOT integration token still uses a placeholder value")
+    elif production and any(len(token) < 32 for token in token_values if token):
+        errors.append("ASTRBOT integration tokens must contain at least 32 characters")
 
     if not _has_any(env, "QQCHAT_BACKEND_URL", "BACKEND_URL"):
         (errors if production else warnings).append("QQCHAT_BACKEND_URL is required for AstrBot callback configuration")
 
-    has_database_url = bool(_value(env, "DATABASE_URL"))
-    has_pg_parts = _is_truthy(_value(env, "USE_POSTGRESQL")) and all(
-        _value(env, key) for key in ("PG_HOST", "PG_USER", "PG_PASSWORD", "PG_DATABASE")
-    )
-    if production and not (has_database_url or has_pg_parts):
-        errors.append("DATABASE_URL or complete PostgreSQL PG_* settings are required")
-    elif not production and not (has_database_url or has_pg_parts):
+    database_url = _value(env, "DATABASE_URL")
+    has_database_url = bool(database_url)
+    if production and not has_database_url:
+        errors.append("DATABASE_URL is required for the PostgreSQL application database")
+    elif production and not database_url.startswith(("postgresql://", "postgresql+asyncpg://", "postgres://")):
+        errors.append("DATABASE_URL must use a PostgreSQL URL")
+    elif not production and not has_database_url:
         warnings.append("SQLite fallback is active; use PostgreSQL for production")
 
-    if production and _value(env, "PG_PASSWORD") in {"changeme", "password", "qqassistant"}:
-        errors.append("PG_PASSWORD must be changed from the default")
+    if production and _value(env, "USE_POSTGRESQL").lower() in {"0", "false", "no", "off"}:
+        errors.append("USE_POSTGRESQL=false is not allowed in production")
 
     if not _has_any(env, "VLLM_BASE_URL", "VLLM_BASE_URLS"):
         (errors if production else warnings).append("VLLM_BASE_URL or VLLM_BASE_URLS is required for model inference")
@@ -94,6 +96,22 @@ def validate_deployment_environment(env: Mapping[str, str] | None = None) -> Dep
         errors.append("ALLOWED_ORIGINS/CORS_ORIGINS must be explicit production origins")
     elif not origins:
         warnings.append("ALLOWED_ORIGINS/CORS_ORIGINS is not set")
+
+    if production and _value(env, "SECURITY_MIDDLEWARE_ENABLED").lower() in {"0", "false", "no", "off"}:
+        errors.append("SECURITY_MIDDLEWARE_ENABLED=false is not allowed in production")
+
+    try:
+        worker_count = int(_value(env, "BACKEND_WORKERS") or "1")
+    except ValueError:
+        worker_count = 0
+    if worker_count != 1:
+        errors.append("BACKEND_WORKERS must be 1 while idempotency, nonce, and session locks are process-local")
+
+    if production and _is_truthy(_value(env, "ALLOW_PUBLIC_REGISTRATION")):
+        warnings.append("Public registration is enabled; disable it immediately after creating the administrator")
+
+    if production and _is_truthy(_value(env, "CLAW_CODE_EXECUTION_ENABLED")):
+        warnings.append("Claw code execution is enabled; isolate the backend container and use a read-only filesystem")
 
     log_level = (_value(env, "LOG_LEVEL") or "INFO").upper()
     if log_level not in _REQUIRED_LOG_LEVELS:

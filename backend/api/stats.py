@@ -363,8 +363,6 @@ async def get_activity():
 @router.get("/services")
 async def get_services():
     uptime_str = get_service_uptime()
-    nonebot_running = _check_service(8081)
-    napcat_running = _check_service(6099)
     astrbot = _astrbot_service_status()
     queue_stats = inference_runtime.stats()
     queue_ratio = queue_stats["queue_size"] / max(queue_stats["max_queue_size"], 1)
@@ -374,11 +372,7 @@ async def get_services():
         {"name": "Backend API", "status": "running", "uptime": uptime_str},
         {"name": "Inference Queue", "status": queue_status, "uptime": uptime_str, "stats": queue_stats},
         {"name": "AstrBot Gateway", "status": astrbot["status"], "uptime": uptime_str if astrbot["running"] else "-", "port": astrbot["port"]},
-        {"name": "NoneBot Bot", "status": "running" if nonebot_running else "stopped", "uptime": uptime_str if nonebot_running else "-"},
         {"name": "Model Service", "status": "running", "uptime": uptime_str},
         {"name": "In-Memory DB", "status": "running", "uptime": uptime_str},
-        {"name": "QQ Adapter (NapCat)", "status": "running" if napcat_running else "stopped", "uptime": uptime_str if napcat_running else "-"},
     ]
-    for platform, status in _platform_status().items():
-        services.append({"name": f"Platform {platform}", "status": status["status"], "uptime": uptime_str if status["status"] == "connected" else "-", "lastEvent": status["lastEvent"]})
     return {"services": services}

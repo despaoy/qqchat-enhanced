@@ -13,8 +13,10 @@ if str(_BACKEND_ROOT) not in sys.path:
 
 if __name__ == "__main__":
     import uvicorn
-    import multiprocessing
-    worker_count = min(4, multiprocessing.cpu_count()) if sys.platform != 'win32' else 1
+    import os
+    worker_count = int(os.getenv("BACKEND_WORKERS", "1"))
+    if worker_count != 1:
+        raise RuntimeError("当前架构要求 BACKEND_WORKERS=1，以保证幂等、会话锁和 nonce 状态一致")
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",

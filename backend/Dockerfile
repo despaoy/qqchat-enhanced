@@ -36,13 +36,8 @@ RUN if [ "$INSTALL_GPU_DEPS" = "true" ]; then \
 # Copy application code
 COPY . .
 
-# Environment defaults (密码通过环境变量注入，不硬编码)
-ENV USE_POSTGRESQL=true
-ENV PG_HOST=${PG_HOST:-postgres}
-ENV PG_PORT=${PG_PORT:-5432}
-ENV PG_USER=${PG_USER:-qqassistant}
-ENV PG_PASSWORD=${PG_PASSWORD:-changeme}
-ENV PG_DATABASE=${PG_DATABASE:-qqassistant}
+# Non-secret runtime defaults. Database and authentication settings are injected by the deploy environment.
+ENV BACKEND_WORKERS=1
 ENV REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
 ENV VLLM_ENABLED=true
 ENV VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8001}

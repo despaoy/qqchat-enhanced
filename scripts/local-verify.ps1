@@ -61,7 +61,9 @@ $CompileTargets = @(
 )
 
 Invoke-Step "Python syntax check" $Backend $Python.Command ($PyArgs + @("-m", "py_compile") + $CompileTargets)
-Invoke-Step "Backend core tests" $Backend $Python.Command ($PyArgs + @("-m", "pytest", "tests/test_core.py", "-q"))
+Invoke-Step "Backend core tests" $Backend $Python.Command ($PyArgs + @(
+    "-m", "pytest", "tests", "-q"
+))
 Invoke-Step "API smoke test and mock AstrBot event" $Backend $Python.Command ($PyArgs + @("-m", "scripts.local_smoke"))
 Invoke-Step "Git whitespace check" $Root "git" @("diff", "--check")
 

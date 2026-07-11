@@ -9,6 +9,7 @@ from app.dependencies import get_current_user
 from db.models import MessageRequest, GenerateResponse
 from infra.concurrency_control import InferenceQueueFull, inference_runtime
 from infra.security_utils import strip_control_chars
+from inference.lora_utils import resolve_lora_served_name
 from infra.observability import increment, log_event, set_consecutive
 
 from db.adapter import db
@@ -117,6 +118,7 @@ async def _ensure_vllm():
         vllm_enabled = (
             os.getenv("VLLM_ENABLED", "").lower() == "true"
             or bool(os.getenv("VLLM_BASE_URLS", "").strip())
+            or bool(os.getenv("VLLM_BASE_URL", "").strip())
         )
         if vllm_enabled:
             try:
@@ -127,6 +129,12 @@ async def _ensure_vllm():
             except Exception as e:
                 logger.warning(f"vLLM 客户端初始化失败: {e}")
         return False
+
+async def get_vllm_client():
+    if not await _ensure_vllm():
+        return None
+    return _vllm_client
+
 
 # 确保熔断器已注册（仅首次）
 if CIRCUIT_BREAKER_AVAILABLE and circuit_breaker_registry:
@@ -177,17 +185,14 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
     active_lora = next((l for l in db.loras if l["status"] == "active"), None)
 
     if request.loraName:
+        requested_lora = next((item for item in db.loras if item["name"] == request.loraName), None)
+        if requested_lora is None:
+            raise HTTPException(status_code=422, detail="指定的 LoRA 不存在")
         lora_name = request.loraName
     else:
         lora_name = active_lora["name"] if active_lora else "default"
 
-    # 将数据库中的LoRA名称映射到vLLM注册的名称
-    # 数据库: hutao_lora_7b / minamo_lora  →  vLLM: hutao / minamo
-    _LORA_NAME_MAP = {
-        "hutao_lora_7b": "hutao",
-        "minamo_lora": "minamo",
-    }
-    vllm_lora_name = _LORA_NAME_MAP.get(lora_name, lora_name)
+    vllm_lora_name = resolve_lora_served_name(lora_name) if lora_name != "default" else "default"
 
     # 检查vLLM是否实际支持该LoRA，避免404触发熔断
     vllm_effective_lora = vllm_lora_name if lora_name != "default" else None
@@ -195,8 +200,12 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
         try:
             available_loras = await _vllm_client.list_loras()
             if available_loras is not None and vllm_effective_lora not in available_loras:
-                logger.info(f"vLLM 无 LoRA '{vllm_effective_lora}'，使用基础模型 (可用: {available_loras})")
-                vllm_effective_lora = None
+                logger.warning(
+                    "Selected LoRA is not loaded in vLLM name=%s available=%s",
+                    vllm_effective_lora,
+                    available_loras,
+                )
+                raise HTTPException(status_code=409, detail="所选 LoRA 尚未加载到 vLLM，请先重新激活")
         except Exception as e:
             # 查询失败时保守地尝试使用
             logger.warning(f"查询vLLM可用LoRA失败: {e}")
@@ -210,7 +219,7 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
             reply, used_rag = await _generate_with_vllm(request, vllm_effective_lora, vllm_lora_name)
             cost_time = round(time.time() - start_time, 2)
 
-            model_label = f"vllm/{os.getenv('VLLM_MODEL', 'Qwen/Qwen2.5-7B-Instruct')}"
+            model_label = f"vllm/{os.getenv('VLLM_SERVED_MODEL_NAME', os.getenv('VLLM_MODEL', 'qwen2.5-7b-awq'))}"
             await _record_model_invocation(request, model_label, lora_name, cost_time, used_rag=used_rag, completion_text=reply)
             await _save_message(request, reply, "vllm", lora_name, cost_time)
             set_consecutive("model_failure", True)
@@ -218,7 +227,7 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
 
             result = GenerateResponse(
                 reply=reply,
-                model=f"vllm/{os.getenv('VLLM_MODEL', 'Qwen/Qwen2.5-7B-Instruct')}",
+                model=f"vllm/{os.getenv('VLLM_SERVED_MODEL_NAME', os.getenv('VLLM_MODEL', 'qwen2.5-7b-awq'))}",
                 costTime=cost_time
             )
 
@@ -234,7 +243,7 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
             return result
         except Exception as e:
             failed_cost = round(time.time() - start_time, 2)
-            model_label = f"vllm/{os.getenv('VLLM_MODEL', 'Qwen/Qwen2.5-7B-Instruct')}"
+            model_label = f"vllm/{os.getenv('VLLM_SERVED_MODEL_NAME', os.getenv('VLLM_MODEL', 'qwen2.5-7b-awq'))}"
             await _record_model_invocation(
                 request,
                 model_label,
@@ -256,6 +265,11 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
                 errorType=type(e).__name__,
             )
             logger.warning(f"vLLM inference failed, falling back to model manager: {e}")
+            if vllm_effective_lora:
+                raise HTTPException(
+                    status_code=503,
+                    detail="所选 LoRA 推理失败，请检查 vLLM 适配器状态",
+                ) from e
 
     # ── 回退：使用原有模型管理器 ──
     try:

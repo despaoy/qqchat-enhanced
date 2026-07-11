@@ -177,7 +177,7 @@ DB_PATH=./qq_assistant.db
 UVICORN_CONFIG = {
     "host": "0.0.0.0",
     "port": 8000,
-    "workers": 4,  # FastAPI workers
+    "workers": 1,  # 进程内幂等/会话状态要求单 worker
     "limit_concurrency": 500,
     "timeout_keep_alive": 30,
     "timeout_graceful_shutdown": 30,

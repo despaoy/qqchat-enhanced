@@ -30,9 +30,24 @@ def _validate_path(path_str: str, allowed_base: str = None) -> str:
     resolved = Path(path_str).resolve()
     if allowed_base:
         base = Path(allowed_base).resolve()
-        if not str(resolved).startswith(str(base)):
+        if not resolved.is_relative_to(base):
             raise ValueError(f"Path must be within {allowed_base}")
     return str(resolved)
+
+
+def _validate_resource_name(name: str, label: str = "名称") -> str:
+    """Require one filesystem-safe path component while allowing Unicode."""
+    value = (name or "").strip()
+    invalid_chars = {"/", "\\", "\x00", ":", "*", "?", "<", ">", "|", chr(34)}
+    if (
+        not value
+        or len(value) > 100
+        or value in {".", ".."}
+        or any(char in value for char in invalid_chars)
+        or any(ord(char) < 32 for char in value)
+    ):
+        raise HTTPException(status_code=422, detail=f"{label}包含非法路径字符")
+    return value
 
 
 @router.get("/api/training/datasets")
@@ -74,7 +89,7 @@ async def create_dataset(request: DatasetUploadRequest, current_user: dict = Dep
             style_config = preprocessor.get_style(request.style)
 
         # 清理数据集名称中的非法文件名字符
-        safe_name = re.sub(r'[/\\:*?"<>|]', '_', request.dataset_name)
+        safe_name = _validate_resource_name(request.dataset_name, "数据集名称")
 
         dataset_dir, stats = preprocessor.prepare_training_data(
             raw_data=request.data,
@@ -92,6 +107,8 @@ async def create_dataset(request: DatasetUploadRequest, current_user: dict = Dep
                 "stats": stats
             }
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"创建数据集失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -105,16 +122,14 @@ async def export_dataset(dataset_name: str, current_user: dict = Depends(get_cur
         import zipfile
         from fastapi.responses import StreamingResponse
 
-        # Validate dataset_name to prevent path traversal
-        if '..' in dataset_name or '/' in dataset_name or '\\' in dataset_name or '\x00' in dataset_name:
-            raise HTTPException(status_code=400, detail="无效的数据集名称")
+        dataset_name = _validate_resource_name(dataset_name, "数据集名称")
 
         from training.preprocessor import get_dataset_preprocessor
         preprocessor = get_dataset_preprocessor()
 
         dataset_dir = preprocessor.data_dir / dataset_name
         # Ensure resolved path is within data directory
-        if not str(dataset_dir.resolve()).startswith(str(preprocessor.data_dir.resolve())):
+        if not dataset_dir.resolve().is_relative_to(preprocessor.data_dir.resolve()):
             raise HTTPException(status_code=400, detail="无效的数据集路径")
         if not dataset_dir.exists() or not dataset_dir.is_dir():
             raise HTTPException(status_code=404, detail=f"数据集不存在: {dataset_name}")
@@ -183,13 +198,14 @@ async def import_dataset(req: ImportDatasetRequest, current_user: dict = Depends
         try:
             validated_path = _validate_path(req.source_path)
             resolved = Path(validated_path)
-            if not any(str(resolved).startswith(d) for d in allowed_dirs):
+            if not any(resolved.is_relative_to(Path(d)) for d in allowed_dirs):
                 raise HTTPException(status_code=400, detail="源路径不在允许的目录范围内")
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
         from training.preprocessor import import_dataset_from_folder
-        result = import_dataset_from_folder(req.source_path, req.dataset_name)
+        dataset_name = _validate_resource_name(req.dataset_name, "数据集名称") if req.dataset_name else None
+        result = import_dataset_from_folder(req.source_path, dataset_name)
         return result
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -248,6 +264,9 @@ async def list_model_configs(current_user: dict = Depends(get_current_user)):
 async def start_training(request: TrainingStartRequest, current_user: dict = Depends(get_current_user)):
     """启动LoRA训练"""
     try:
+        request.lora_name = _validate_resource_name(request.lora_name, "LoRA 名称")
+        request.dataset_name = _validate_resource_name(request.dataset_name, "数据集名称")
+
         # 输入验证
         if INPUT_VALIDATOR_AVAILABLE:
             from infra.input_validator import InputValidator
@@ -956,7 +975,7 @@ async def create_dataset_from_saved(item_id: int, dataset_name: Optional[str] = 
         dialogues = json.loads(rows[0]["dialogues_json"])
         # 清理文件名中的非法字符（Windows不允许 / \ : * ? " < > |）
         raw_name = dataset_name or f"{saved_name}_dataset"
-        ds_name = re.sub(r'[/\\:*?"<>|]', '_', raw_name)
+        ds_name = _validate_resource_name(raw_name, "数据集名称")
 
         # 转换为训练数据格式
         training_data = []

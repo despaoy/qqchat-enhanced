@@ -4,6 +4,9 @@
 测试常见安全漏洞，验证系统的安全防护能力
 """
 
+# This is an executable integration test script, not a pytest test module.
+__test__ = False
+
 import argparse
 import asyncio
 import json

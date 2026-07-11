@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - run: pnpm ts-check
       - run: pnpm lint
       - run: pnpm build
@@ -61,7 +61,7 @@ jobs:
           python -m py_compile interfaces/__init__.py
       - name: Run tests
         run: |
-          python -m pytest tests/ -v --tb=short 2>/dev/null || echo "No tests or test failures (non-blocking)"
+          python -m pytest tests/ -q --basetemp=.test_tmp/pytest
 
   # Docker build check
   docker:

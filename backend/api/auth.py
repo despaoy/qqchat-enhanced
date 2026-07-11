@@ -1,5 +1,7 @@
 """用户认证API"""
 
+import asyncio
+import logging
 import time
 from fastapi import APIRouter, HTTPException, Depends, Response, Request
 
@@ -9,6 +11,8 @@ from app.config import create_access_token, JWT_EXPIRY_HOURS
 from app.dependencies import get_current_user
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+_registration_lock = asyncio.Lock()
 
 # Token 黑名单（内存 TTL，服务重启清空）
 # 存储已注销的 jti → 过期时间戳
@@ -51,6 +55,19 @@ def is_token_revoked(jti: str) -> bool:
     return jti in _TOKEN_BLACKLIST and _TOKEN_BLACKLIST[jti] > time.time()
 
 
+def _registration_allowed() -> bool:
+    import os
+
+    if os.getenv("ENVIRONMENT", "development").strip().lower() != "production":
+        return True
+    if os.getenv("ALLOW_PUBLIC_REGISTRATION", "false").strip().lower() in {"1", "true", "yes", "on"}:
+        return True
+
+    rows = db.execute_sql("SELECT COUNT(*) AS count FROM users")
+    user_count = int(rows[0]["count"]) if rows else 0
+    return user_count == 0
+
+
 def _hash_password(password: str) -> str:
     """使用 bcrypt 哈希密码（自动加盐）"""
     import bcrypt
@@ -61,7 +78,7 @@ def _hash_password(password: str) -> str:
 def _set_auth_cookie(response: Response, token: str):
     """设置 httpOnly Cookie 存储 JWT Token"""
     import os
-    is_production = os.getenv("ENVIRONMENT", "development") == "production"
+    is_production = os.getenv("ENVIRONMENT", "development").strip().lower() == "production"
     response.set_cookie(
         key="access_token",
         value=token,
@@ -77,12 +94,17 @@ def _set_auth_cookie(response: Response, token: str):
 async def register(request: RegisterRequest, response: Response):
     """用户注册"""
     try:
-        existing = db.get_user_by_username(request.username)
-        if existing:
-            raise HTTPException(status_code=409, detail="用户名已存在")
+        async with _registration_lock:
+            if not _registration_allowed():
+                raise HTTPException(status_code=403, detail="生产环境已关闭公开注册")
 
-        password_hash = _hash_password(request.password)
-        user = db.add_user(request.username, password_hash)
+            existing = db.get_user_by_username(request.username)
+            if existing:
+                raise HTTPException(status_code=409, detail="用户名已存在")
+
+            password_hash = _hash_password(request.password)
+            user = db.add_user(request.username, password_hash)
+
         user_id = user["id"]
         now = user["created_at"]
         token = create_access_token(request.username, user_id)
@@ -93,8 +115,9 @@ async def register(request: RegisterRequest, response: Response):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"注册失败: {str(e)}")
+    except Exception:
+        logger.exception("User registration failed")
+        raise HTTPException(status_code=500, detail="注册失败，请稍后重试")
 
 
 @router.post("/api/auth/login")

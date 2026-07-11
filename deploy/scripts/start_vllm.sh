@@ -80,6 +80,7 @@ start_vllm() {
     log_info "  LoRA directory: ${LORA_PATH}"
 
     export CUDA_VISIBLE_DEVICES="${GPU_ID}"
+    export VLLM_ALLOW_RUNTIME_LORA_UPDATING="${VLLM_ALLOW_RUNTIME_LORA_UPDATING:-True}"
 
     python3 -m vllm.entrypoints.openai.api_server \
         --model "${MODEL_PATH}" \

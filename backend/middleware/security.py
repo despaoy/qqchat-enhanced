@@ -51,6 +51,8 @@ RATE_LIMIT_RPM: int = int(os.getenv("RATE_LIMIT_RPM", "300"))
 RATE_LIMIT_TPM: int = int(os.getenv("RATE_LIMIT_TPM", "500000"))
 GENERATE_RPM: int = int(os.getenv("GENERATE_RPM", "60"))
 GENERATE_TPM: int = int(os.getenv("GENERATE_TPM", "500000"))
+AUTH_RPM: int = int(os.getenv("AUTH_RPM", "10"))
+TRUST_PROXY_HEADERS: bool = os.getenv("TRUST_PROXY_HEADERS", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 # 输入验证
 MAX_BODY_SIZE: int = int(os.getenv("MAX_BODY_SIZE", str(1024 * 1024)))  # 默认 1MB
@@ -121,7 +123,7 @@ def _sanitize_dict(data: dict[str, Any]) -> dict[str, Any]:
 def _get_client_ip(request: Request) -> str:
     """获取客户端真实 IP，支持代理头。"""
     forwarded = request.headers.get("X-Forwarded-For", "")
-    if forwarded:
+    if TRUST_PROXY_HEADERS and forwarded:
         return forwarded.split(",")[0].strip()
     real_ip = request.headers.get("X-Real-IP", "")
     if real_ip:
@@ -374,9 +376,9 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # 公开只读端点放行（无需认证）
-        PUBLIC_GET_PATHS = {"/api/stats", "/api/stats/activity", "/api/stats/services", "/api/model/status", "/api/vllm/status", "/health", "/ready"}
-        # 公开POST端点（Bot使用的搜索接口）
-        PUBLIC_POST_PATHS = {"/api/knowledge/search", "/api/integrations/astrbot/messages"}
+        PUBLIC_GET_PATHS = {"/health", "/ready"}
+        # AstrBot has independent token/signature authentication in its route.
+        PUBLIC_POST_PATHS = {"/api/integrations/astrbot/messages"}
         if request.method in ("GET", "HEAD") and (path in PUBLIC_GET_PATHS or path.startswith("/docs") or path.startswith("/redoc")):
             return await call_next(request)
         if request.method == "POST" and path in PUBLIC_POST_PATHS:
@@ -450,6 +452,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         default_tpm: int | None = None,
         generate_rpm: int | None = None,
         generate_tpm: int | None = None,
+        auth_rpm: int | None = None,
     ) -> None:
         super().__init__(app)
         self._limiter = limiter or _rate_limiter
@@ -457,6 +460,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._default_tpm = default_tpm or RATE_LIMIT_TPM
         self._generate_rpm = generate_rpm or GENERATE_RPM
         self._generate_tpm = generate_tpm or GENERATE_TPM
+        self._auth_rpm = auth_rpm or AUTH_RPM
 
     def _get_rate_limit_key(self, request: Request) -> str:
         """生成限流键：IP + 用户。"""
@@ -472,12 +476,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         key = self._get_rate_limit_key(request)
 
-        # 健康检查等路径不限流
-        if path in AUTH_WHITELIST:
+        # Only health probes bypass rate limiting. Login/register remain public
+        # but have a stricter anonymous limit.
+        if path in {"/health", "/ready", "/"}:
             return await call_next(request)
 
         # 根据路径选择限流配置
-        if self._is_generate_endpoint(path):
+        if path in {"/api/auth/login", "/api/auth/register"}:
+            rpm_limit = self._auth_rpm
+            tpm_limit = self._default_tpm
+        elif self._is_generate_endpoint(path):
             rpm_limit = self._generate_rpm
             tpm_limit = self._generate_tpm
         else:

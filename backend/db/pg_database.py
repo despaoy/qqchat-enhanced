@@ -22,6 +22,15 @@ logger = logging.getLogger(__name__)
 # ============================================
 DEFAULT_DATABASE_URL = ""  # 必须通过环境变量 DATABASE_URL 配置
 
+
+def _normalize_database_url(database_url: str) -> str:
+    """Use the asyncpg SQLAlchemy dialect for common PostgreSQL URL forms."""
+    if database_url.startswith("postgres://"):
+        return "postgresql+asyncpg://" + database_url[len("postgres://"):]
+    if database_url.startswith("postgresql://"):
+        return "postgresql+asyncpg://" + database_url[len("postgresql://"):]
+    return database_url
+
 # ============================================
 # SQLAlchemy Core 表定义
 # ============================================
@@ -262,13 +271,20 @@ intent_active_kbs_table = Table(
 training_tasks_table = Table(
     "training_tasks", metadata,
     Column("id", Text, primary_key=True),
-    Column("taskType", Text, nullable=False),
+    Column("task_id", Text, unique=True),
+    Column("lora_name", Text, server_default=""),
     Column("status", Text, nullable=False, server_default="pending"),
-    Column("config", Text),
     Column("progress", Float, server_default="0"),
+    Column("error_message", Text, server_default=""),
+    Column("config_json", Text, server_default="{}"),
+    Column("created_at", Text, server_default=""),
+    Column("updated_at", Text, server_default=""),
+    # Legacy columns retained for existing PostgreSQL deployments.
+    Column("taskType", Text, nullable=False, server_default="lora"),
+    Column("config", Text),
     Column("result", Text),
-    Column("createdAt", Text, nullable=False),
-    Column("updatedAt", Text, nullable=False),
+    Column("createdAt", Text, nullable=False, server_default=""),
+    Column("updatedAt", Text, nullable=False, server_default=""),
 )
 
 
@@ -292,7 +308,7 @@ class PgDatabase:
     """PostgreSQL 异步数据库类 - 与 SQLiteDB 相同接口的异步版本"""
 
     def __init__(self, database_url: Optional[str] = None):
-        self.database_url = database_url or os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
+        self.database_url = _normalize_database_url(database_url or os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL))
         if not self.database_url:
             raise ValueError("DATABASE_URL is required when USE_POSTGRESQL=true")
         self.engine = create_async_engine(
@@ -323,6 +339,13 @@ class PgDatabase:
             await self._ensure_column(conn, "messages", "senderName", "TEXT")
             await self._ensure_column(conn, "session_settings", "platform", "TEXT NOT NULL DEFAULT 'qq'")
             await self._ensure_column(conn, "session_settings", "conversationId", "TEXT")
+            await self._ensure_column(conn, "training_tasks", "task_id", "TEXT")
+            await self._ensure_column(conn, "training_tasks", "lora_name", "TEXT DEFAULT ''")
+            await self._ensure_column(conn, "training_tasks", "error_message", "TEXT DEFAULT ''")
+            await self._ensure_column(conn, "training_tasks", "config_json", "TEXT DEFAULT '{}'")
+            await self._ensure_column(conn, "training_tasks", "created_at", "TEXT DEFAULT ''")
+            await self._ensure_column(conn, "training_tasks", "updated_at", "TEXT DEFAULT ''")
+            await conn.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS idx_training_tasks_task_id ON training_tasks (task_id)'))
             await conn.execute(text('CREATE INDEX IF NOT EXISTS idx_messages_platform_conversation ON messages (platform, "conversationId", "createdAt")'))
             await conn.execute(text('CREATE INDEX IF NOT EXISTS idx_messages_source_dedup ON messages (platform, adapter, "sourceMessageId")'))
             await conn.execute(text('CREATE INDEX IF NOT EXISTS idx_messages_session_created ON messages ("sessionId", "createdAt")'))
@@ -694,11 +717,16 @@ class PgDatabase:
     async def update_knowledge_base(self, kb_id: int, data: Dict) -> Optional[Dict]:
         """更新知识库"""
         now = datetime.now().isoformat()
+        values = {"updated_at": now}
+        if "name" in data and data["name"] is not None:
+            values["name"] = data["name"]
+        if "description" in data and data["description"] is not None:
+            values["description"] = data["description"]
         async with self.async_session() as session:
             stmt = (
                 knowledge_bases_table.update()
                 .where(knowledge_bases_table.c.id == kb_id)
-                .values(name=data.get("name"), description=data.get("description", ""), updated_at=now)
+                .values(**values)
             )
             await session.execute(stmt)
             await session.commit()
@@ -1409,6 +1437,78 @@ class PgDatabase:
     # ============================================
     # 训练任务管理
     # ============================================
+    @staticmethod
+    def _normalize_training_task(row) -> Optional[Dict]:
+        if row is None:
+            return None
+        data = _row_to_dict(row)
+        try:
+            config = json.loads(data.get("config_json") or data.get("config") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            config = {}
+        return {
+            "task_id": data.get("task_id") or data.get("id"),
+            "lora_name": data.get("lora_name", ""),
+            "status": data.get("status", "pending"),
+            "progress": float(data.get("progress", 0) or 0),
+            "error_message": data.get("error_message", ""),
+            "config": config,
+            "created_at": data.get("created_at") or data.get("createdAt", ""),
+            "updated_at": data.get("updated_at") or data.get("updatedAt", ""),
+        }
+
+    async def save_training_task(self, task_id: str, task_data: Dict) -> None:
+        created_at = task_data.get("created_at", "")
+        updated_at = task_data.get("updated_at", "")
+        config_json = json.dumps(task_data.get("config", {}), ensure_ascii=False)
+        async with self.async_session() as session:
+            await session.execute(text('''
+                INSERT INTO training_tasks (
+                    id, task_id, lora_name, status, progress, error_message,
+                    config_json, created_at, updated_at, "taskType", "createdAt", "updatedAt"
+                ) VALUES (
+                    :id, :task_id, :lora_name, :status, :progress, :error_message,
+                    :config_json, :created_at, :updated_at, 'lora', :created_at, :updated_at
+                )
+                ON CONFLICT (id) DO UPDATE SET
+                    task_id = EXCLUDED.task_id,
+                    lora_name = EXCLUDED.lora_name,
+                    status = EXCLUDED.status,
+                    progress = EXCLUDED.progress,
+                    error_message = EXCLUDED.error_message,
+                    config_json = EXCLUDED.config_json,
+                    updated_at = EXCLUDED.updated_at,
+                    "updatedAt" = EXCLUDED."updatedAt"
+            '''), {
+                "id": task_id,
+                "task_id": task_id,
+                "lora_name": task_data.get("lora_name", ""),
+                "status": task_data.get("status", "pending"),
+                "progress": float(task_data.get("progress", 0) or 0),
+                "error_message": task_data.get("error_message") or "",
+                "config_json": config_json,
+                "created_at": created_at,
+                "updated_at": updated_at,
+            })
+            await session.commit()
+
+    async def get_all_training_tasks(self) -> List[Dict]:
+        async with self.async_session() as session:
+            result = await session.execute(
+                training_tasks_table.select().order_by(training_tasks_table.c.created_at.desc())
+            )
+            return [self._normalize_training_task(row) for row in result.fetchall()]
+
+    async def get_active_training_by_lora_name(self, lora_name: str) -> List[Dict]:
+        async with self.async_session() as session:
+            result = await session.execute(
+                training_tasks_table.select().where(
+                    training_tasks_table.c.lora_name == lora_name,
+                    training_tasks_table.c.status.in_(("pending", "running", "training")),
+                )
+            )
+            return [self._normalize_training_task(row) for row in result.fetchall()]
+
     async def add_training_task(self, task: Dict) -> Dict:
         """添加训练任务"""
         now = datetime.now().isoformat()
@@ -1442,8 +1542,7 @@ class PgDatabase:
         async with self.async_session() as session:
             stmt = training_tasks_table.select().where(training_tasks_table.c.id == task_id)
             result = await session.execute(stmt)
-            row = result.fetchone()
-            return _row_to_dict(row) if row else None
+            return self._normalize_training_task(result.fetchone())
 
     async def update_training_task(self, task_id: str, data: Dict) -> Optional[Dict]:
         """更新训练任务"""
@@ -1724,8 +1823,8 @@ class SyncPgAdapter:
     def get_claw_tool_by_name(self, name):
         return self._run(self._pg.get_claw_tool_by_name(name))
 
-    def save_claw_tool(self, tool_data):
-        return self._run(self._pg.save_claw_tool(tool_data))
+    def save_claw_tool(self, name, description, code, enabled=True):
+        return self._run(self._pg.save_claw_tool(name, description, code, enabled))
 
     def delete_claw_tool(self, tool_id):
         return self._run(self._pg.delete_claw_tool(tool_id))
@@ -1748,17 +1847,28 @@ class SyncPgAdapter:
     def set_active_kb(self, kb_name, is_active):
         return self._run(self._pg.set_active_kb(kb_name, is_active))
 
+    def save_training_task(self, task_id, task_data):
+        return self._run(self._pg.save_training_task(task_id, task_data))
+
+    def get_all_training_tasks(self):
+        return self._run(self._pg.get_all_training_tasks())
+
+    def get_active_training_by_lora_name(self, lora_name):
+        return self._run(self._pg.get_active_training_by_lora_name(lora_name))
+
     def add_training_task(self, task_data):
         return self._run(self._pg.add_training_task(task_data))
 
-    def get_training_tasks(self):
-        return self._run(self._pg.get_training_tasks())
+    def get_training_tasks(self, status=None):
+        return self._run(self._pg.get_training_tasks(status))
 
     def get_training_task(self, task_id):
         return self._run(self._pg.get_training_task(task_id))
 
-    def update_training_task(self, task_id, **kwargs):
-        return self._run(self._pg.update_training_task(task_id, **kwargs))
+    def update_training_task(self, task_id, data=None, **kwargs):
+        updates = dict(data or {})
+        updates.update(kwargs)
+        return self._run(self._pg.update_training_task(task_id, updates))
 
     def delete_training_task(self, task_id):
         return self._run(self._pg.delete_training_task(task_id))

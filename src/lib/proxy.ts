@@ -4,7 +4,23 @@
  */
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000';
-const PROXY_TIMEOUT = 30000; // 30秒超时
+const PROXY_TIMEOUT = Number(process.env.PROXY_TIMEOUT_MS || 30000);
+const PROXY_LONG_TIMEOUT = Number(process.env.PROXY_LONG_TIMEOUT_MS || 210000);
+
+function defaultProxyTimeout(path: string): number {
+  const pathOnly = path.split('?')[0];
+  const longRunningPrefixes = [
+    '/api/generate',
+    '/api/training/start',
+    '/api/training/generate-dialogues',
+    '/api/knowledge/bases/',
+    '/api/knowledge/scan/import',
+    '/api/knowledge/train-intent',
+  ];
+  return longRunningPrefixes.some((prefix) => pathOnly.startsWith(prefix))
+    ? PROXY_LONG_TIMEOUT
+    : PROXY_TIMEOUT;
+}
 
 // 安全：允许转发的后端路径前缀白名单。
 // 路径安全：拒绝含 '..' 或 '//' 的路径，防止目录穿越。
@@ -116,8 +132,10 @@ export async function proxyRequest(
   path: string,
   options: ProxyOptions = {}
 ): Promise<Response> {
-  const { method = 'GET', body, headers: optHeaders = {}, timeout = PROXY_TIMEOUT } = options;
+  const { method = 'GET', body, headers: optHeaders = {}, timeout } = options;
+  const effectiveTimeout = timeout ?? defaultProxyTimeout(path);
   const isFormDataBody = typeof FormData !== 'undefined' && body instanceof FormData;
+  const isStreamBody = typeof ReadableStream !== 'undefined' && body instanceof ReadableStream;
 
   if (isUnsafeMethod(method) && !isSameOriginRequest(request)) {
     return new Response(JSON.stringify({ detail: 'CSRF check failed' }), {
@@ -165,9 +183,13 @@ export async function proxyRequest(
   if (contentType && method !== 'GET' && !isFormDataBody) {
     headers['Content-Type'] = contentType;
   }
+  if (isStreamBody) {
+    const contentLength = request.headers.get('Content-Length');
+    if (contentLength) headers['Content-Length'] = contentLength;
+  }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  const timeoutId = setTimeout(() => controller.abort(), effectiveTimeout);
 
   try {
     const fetchOptions: RequestInit = {
@@ -177,8 +199,11 @@ export async function proxyRequest(
     };
 
     if (body && method !== 'GET') {
-      if (isFormDataBody) {
-        fetchOptions.body = body;
+      if (isFormDataBody || isStreamBody) {
+        fetchOptions.body = body as BodyInit;
+        if (isStreamBody) {
+          (fetchOptions as RequestInit & { duplex: 'half' }).duplex = 'half';
+        }
       } else {
         fetchOptions.body = typeof body === 'string' ? body : JSON.stringify(body);
       }

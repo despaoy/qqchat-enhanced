@@ -10,10 +10,28 @@ from app.dependencies import get_current_user
 
 from db.adapter import db
 from db.database import LORA_DIR_MAP
+from inference.lora_utils import resolve_lora_served_name
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 _lora_status_lock = asyncio.Lock()
+
+
+def _resolve_vllm_adapter_path(lora_name: str) -> str:
+    """Map a trusted backend LoRA directory to the path visible by vLLM."""
+    local_root = (Path(__file__).parent.parent / "loras").resolve()
+    local_path = (local_root / lora_name).resolve()
+    if not local_path.is_relative_to(local_root):
+        raise ValueError("LoRA path escapes the configured root")
+    if not (local_path / "adapter_config.json").exists():
+        final_path = local_path / "final"
+        if (final_path / "adapter_config.json").exists():
+            local_path = final_path
+        else:
+            raise FileNotFoundError("LoRA adapter_config.json was not found")
+
+    vllm_root = Path(os.getenv("VLLM_LORA_ROOT", str(local_root)))
+    return str(vllm_root / local_path.relative_to(local_root))
 
 
 def _read_lora_metadata(adapter_path: Path) -> dict:
@@ -160,13 +178,34 @@ async def update_lora_status(lora_id: str, request: Request, current_user: dict 
     """更新LoRA模型状态"""
     body = await request.json()
     status = body.get("status", "inactive")
+    if status not in {"active", "inactive"}:
+        raise HTTPException(status_code=422, detail="LoRA 状态只能是 active 或 inactive")
+
+    existing = next((item for item in db.get_loras() if item["id"] == lora_id), None)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="LoRA模型不存在")
 
     async with _lora_status_lock:
-        lora = db.update_lora_status(lora_id, status)
-    if lora:
-        return {"success": True, "message": f"LoRA状态已更新为{status}", "lora": lora}
+        if status == "active":
+            try:
+                from api.generate import get_vllm_client
 
-    raise HTTPException(status_code=404, detail="LoRA模型不存在")
+                client = await get_vllm_client()
+                if client is None:
+                    raise RuntimeError("vLLM client is unavailable")
+                served_name = resolve_lora_served_name(existing["name"])
+                adapter_path = _resolve_vllm_adapter_path(existing["name"])
+                await client.load_lora_adapter(served_name, adapter_path)
+            except (FileNotFoundError, ValueError) as exc:
+                logger.warning("Invalid LoRA adapter id=%s error=%s", lora_id, exc)
+                raise HTTPException(status_code=422, detail="LoRA 适配器文件无效或配置不完整") from exc
+            except Exception as exc:
+                logger.exception("Failed to load LoRA into vLLM id=%s", lora_id)
+                raise HTTPException(status_code=502, detail="LoRA 无法加载到 vLLM，数据库状态未变更") from exc
+
+        lora = db.update_lora_status(lora_id, status)
+
+    return {"success": True, "message": f"LoRA状态已更新为{status}", "lora": lora}
 
 
 @router.delete("/api/loras/{lora_id}")

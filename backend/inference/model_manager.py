@@ -589,7 +589,7 @@ class VLLMProvider(BaseProvider):
     def __init__(self):
         super().__init__("vllm")
         self.base_url = os.getenv("VLLM_BASE_URL", "http://localhost:8001/v1")
-        self.model = os.getenv("VLLM_MODEL", "qwen2.5-7b")
+        self.model = os.getenv("VLLM_SERVED_MODEL_NAME", os.getenv("VLLM_MODEL", "qwen2.5-7b-awq"))
         self.timeout = float(os.getenv("VLLM_TIMEOUT", "120.0"))
         self._model_name = self.model
         self._loaded = True

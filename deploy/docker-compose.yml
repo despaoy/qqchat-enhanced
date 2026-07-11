@@ -36,6 +36,8 @@ services:
   vllm:
     image: vllm/vllm-openai:v0.10.2
     restart: unless-stopped
+    environment:
+      VLLM_ALLOW_RUNTIME_LORA_UPDATING: "True"
     deploy:
       resources:
         reservations:
@@ -59,7 +61,7 @@ services:
       - ./data/models/Qwen2.5-7B-Instruct-AWQ:/models/Qwen2.5-7B-Instruct-AWQ
       - ./data/loras:/loras
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -92,18 +94,22 @@ services:
       VLLM_ENABLED: "true"
       VLLM_BASE_URL: http://vllm:8001
       VLLM_BASE_URLS: http://vllm:8001
+      VLLM_SERVED_MODEL_NAME: qwen2.5-7b-awq
+      VLLM_LORA_ROOT: /loras
       ENVIRONMENT: ${ENVIRONMENT:-production}
       ASTRBOT_INTEGRATION_TOKEN: ${ASTRBOT_INTEGRATION_TOKEN:?set ASTRBOT_INTEGRATION_TOKEN}
       QQCHAT_BACKEND_URL: http://backend:8000
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?set ALLOWED_ORIGINS}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      BACKEND_WORKERS: "1"
+      CLAW_CODE_EXECUTION_ENABLED: "false"
     volumes:
       - backend_data:/app/data
       - ./data/knowledge_bases:/app/knowledge_bases
       - ./data/loras:/app/loras
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -123,7 +129,7 @@ services:
     environment:
       BACKEND_URL: http://backend:8000
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5000"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -145,7 +151,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/health"]
       interval: 30s
       timeout: 5s
       retries: 3

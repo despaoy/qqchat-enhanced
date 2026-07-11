@@ -240,15 +240,18 @@ class VLLMClient:
             strategy: 负载均衡策略
         """
         # 从环境变量读取配置
-        raw_urls = base_urls or os.getenv(
-            "VLLM_BASE_URLS", "http://localhost:8001,http://localhost:8002"
+        raw_urls = (
+            base_urls
+            or os.getenv("VLLM_BASE_URLS", "").strip()
+            or os.getenv("VLLM_BASE_URL", "").strip()
+            or "http://localhost:8001"
         )
         self._base_urls: List[str] = [
             u.strip().rstrip("/") for u in raw_urls.split(",") if u.strip()
         ]
         self._api_key: str = api_key or os.getenv("VLLM_API_KEY", "")
         self._model: str = model or os.getenv(
-            "VLLM_MODEL", "Qwen/Qwen2.5-7B-Instruct"
+            "VLLM_SERVED_MODEL_NAME", os.getenv("VLLM_MODEL", "qwen2.5-7b-awq")
         )
         self._timeout: float = timeout or float(os.getenv("VLLM_TIMEOUT", "120"))
         self._max_retries: int = max_retries or int(os.getenv("VLLM_MAX_RETRIES", "3"))
@@ -715,6 +718,65 @@ class VLLMClient:
     # ------------------------------------------------------------------
     # 辅助方法
     # ------------------------------------------------------------------
+
+    async def _model_ids_for_instance(self, instance: VLLMInstance) -> Optional[List[str]]:
+        try:
+            client = await self._ensure_client()
+            response = await client.get(
+                f"{instance.base_url}/v1/models",
+                headers=self._build_headers(),
+                timeout=httpx.Timeout(10.0, connect=5.0),
+            )
+            if response.status_code != 200:
+                return None
+            return [
+                str(item.get("id", ""))
+                for item in response.json().get("data", [])
+                if item.get("id")
+            ]
+        except Exception as exc:
+            logger.warning("Failed to list models from %s: %s", instance.name, exc)
+            return None
+
+    async def load_lora_adapter(self, lora_name: str, lora_path: str) -> None:
+        """Load a trusted local LoRA on every configured vLLM instance."""
+        if not lora_name or not lora_path:
+            raise ValueError("LoRA name and path are required")
+
+        loaded_instances: list[str] = []
+        errors: list[str] = []
+        client = await self._ensure_client()
+        for instance in self._instances:
+            model_ids = await self._model_ids_for_instance(instance)
+            if model_ids is not None and (
+                lora_name in model_ids
+                or any(model_id.endswith(f":{lora_name}") for model_id in model_ids)
+            ):
+                loaded_instances.append(instance.name)
+                continue
+
+            try:
+                response = await client.post(
+                    f"{instance.base_url}/v1/load_lora_adapter",
+                    json={"lora_name": lora_name, "lora_path": lora_path},
+                    headers=self._build_headers(),
+                    timeout=httpx.Timeout(60.0, connect=5.0),
+                )
+                if response.status_code == 200:
+                    loaded_instances.append(instance.name)
+                else:
+                    errors.append(f"{instance.name}: HTTP {response.status_code}")
+            except Exception as exc:
+                errors.append(f"{instance.name}: {type(exc).__name__}")
+
+        if errors:
+            logger.error(
+                "LoRA runtime load failed name=%s loaded=%s errors=%s",
+                lora_name,
+                loaded_instances,
+                errors,
+            )
+            raise RuntimeError("LoRA could not be loaded on every vLLM instance")
 
     async def list_loras(self) -> Optional[List[str]]:
         """查询vLLM中可用的LoRA适配器列表

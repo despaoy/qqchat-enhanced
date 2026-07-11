@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import io
+import os
 import zipfile
 import re
 from pathlib import Path, PurePosixPath
@@ -21,6 +22,53 @@ from app.config import INPUT_VALIDATOR_AVAILABLE, KNOWLEDGE_DOCUMENT_SCHEMA, KNO
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+_ZIP_MAX_BYTES = int(os.getenv("KNOWLEDGE_ZIP_MAX_BYTES", str(100 * 1024 * 1024)))
+_ZIP_MAX_FILES = int(os.getenv("KNOWLEDGE_ZIP_MAX_FILES", "1000"))
+_ZIP_MAX_ENTRY_BYTES = int(os.getenv("KNOWLEDGE_ZIP_MAX_ENTRY_BYTES", str(10 * 1024 * 1024)))
+_ZIP_MAX_UNCOMPRESSED_BYTES = int(
+    os.getenv("KNOWLEDGE_ZIP_MAX_UNCOMPRESSED_BYTES", str(200 * 1024 * 1024))
+)
+_ZIP_MAX_COMPRESSION_RATIO = float(os.getenv("KNOWLEDGE_ZIP_MAX_COMPRESSION_RATIO", "200"))
+
+
+def _validated_zip_entries(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
+    """Validate archive metadata before reading or writing any document."""
+    entries = [entry for entry in archive.infolist() if not entry.is_dir()]
+    if len(entries) > _ZIP_MAX_FILES:
+        raise HTTPException(status_code=413, detail="ZIP contains too many files")
+
+    total_uncompressed = 0
+    seen_names: set[str] = set()
+    for entry in entries:
+        name = entry.filename
+        path = PurePosixPath(name)
+        if (
+            not name
+            or chr(92) in name
+            or path.is_absolute()
+            or any(part in {"", ".", ".."} for part in path.parts)
+            or ":" in path.parts[0]
+        ):
+            raise HTTPException(status_code=400, detail="ZIP contains an unsafe path")
+        if name in seen_names:
+            raise HTTPException(status_code=400, detail="ZIP contains duplicate file names")
+        seen_names.add(name)
+
+        if entry.flag_bits & 0x1:
+            raise HTTPException(status_code=400, detail="Encrypted ZIP entries are not supported")
+        if entry.file_size > _ZIP_MAX_ENTRY_BYTES:
+            raise HTTPException(status_code=413, detail="A ZIP entry exceeds the size limit")
+
+        total_uncompressed += entry.file_size
+        if total_uncompressed > _ZIP_MAX_UNCOMPRESSED_BYTES:
+            raise HTTPException(status_code=413, detail="ZIP expands beyond the allowed size")
+        if entry.file_size and (
+            entry.compress_size == 0
+            or entry.file_size / entry.compress_size > _ZIP_MAX_COMPRESSION_RATIO
+        ):
+            raise HTTPException(status_code=413, detail="ZIP compression ratio is suspicious")
+
+    return entries
 
 # ============================================
 # 知识库管理
@@ -124,20 +172,21 @@ async def upload_zip(kb_id: int, file: UploadFile = File(...), current_user: dic
         raise HTTPException(status_code=400, detail="请上传ZIP文件")
 
     try:
-        content = await file.read()
-        MAX_ZIP_SIZE = 100 * 1024 * 1024  # 100MB
-        if len(content) > MAX_ZIP_SIZE:
-            raise HTTPException(status_code=413, detail=f"文件大小超过限制 ({MAX_ZIP_SIZE // 1024 // 1024}MB)")
+        content = await file.read(_ZIP_MAX_BYTES + 1)
+        if len(content) > _ZIP_MAX_BYTES:
+            raise HTTPException(status_code=413, detail=f"文件大小超过限制 ({_ZIP_MAX_BYTES // 1024 // 1024}MB)")
         zf = zipfile.ZipFile(io.BytesIO(content))
-    except zipfile.BadZipFile:
-        raise HTTPException(status_code=400, detail="无效的ZIP文件")
+        zip_entries = _validated_zip_entries(zf)
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=400, detail="无效的ZIP文件") from exc
 
     kb_name = existing["name"]
     created_folders = {}
     created_docs = 0
     errors = []
 
-    for entry in zf.namelist():
+    for zip_entry in zip_entries:
+        entry = zip_entry.filename
         # 跳过目录条目和隐藏文件
         if entry.endswith('/') or entry.startswith('.') or '__MACOSX' in entry:
             continue
@@ -177,10 +226,10 @@ async def upload_zip(kb_id: int, file: UploadFile = File(...), current_user: dic
 
         # 读取文件内容
         try:
-            file_content = zf.read(entry).decode('utf-8')
+            file_content = zf.read(zip_entry).decode('utf-8')
         except UnicodeDecodeError:
             try:
-                file_content = zf.read(entry).decode('gbk')
+                file_content = zf.read(zip_entry).decode('gbk')
             except UnicodeDecodeError:
                 errors.append(f"文件编码不支持: {entry}")
                 continue

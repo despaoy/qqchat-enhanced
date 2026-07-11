@@ -341,10 +341,10 @@ class TestGroupRateLimiter:
 # ============================================
 
 class TestDatabaseConfiguration:
-    def test_sqlite_path_uses_database_path_env(self, monkeypatch, tmp_path):
+    def test_sqlite_path_uses_database_path_env(self, monkeypatch):
         from db.database import _database_path_from_env
 
-        custom_path = tmp_path / "data" / "custom.db"
+        custom_path = Path(".test_tmp") / "config" / f"custom_{uuid.uuid4().hex}.db"
         monkeypatch.setenv("DATABASE_PATH", str(custom_path))
 
         assert _database_path_from_env() == custom_path

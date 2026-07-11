@@ -28,7 +28,7 @@ def _validate_path(path_str: str, allowed_base: str = None) -> str:
     resolved = Path(path_str).resolve()
     if allowed_base:
         base = Path(allowed_base).resolve()
-        if not str(resolved).startswith(str(base)):
+        if not resolved.is_relative_to(base):
             raise ValueError(f"Path must be within {allowed_base}")
     return str(resolved)
 
@@ -494,7 +494,7 @@ def import_dataset_from_folder(source_path: str, dataset_name: str = None) -> di
     try:
         validated_path = _validate_path(source_path)
         resolved = Path(validated_path)
-        if not any(str(resolved).startswith(d) for d in allowed_dirs):
+        if not any(resolved.is_relative_to(Path(d)) for d in allowed_dirs):
             raise ValueError("源路径不在允许的目录范围内")
     except ValueError as e:
         raise ValueError(f"源路径验证失败: {e}")

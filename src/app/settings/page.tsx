@@ -345,7 +345,7 @@ function SettingsContent() {
                         ['astrbotTelegramEnabled', 'Telegram'],
                         ['astrbotWecomEnabled', '企业微信'],
                         ['astrbotWechatOfficialEnabled', '微信公众号'],
-                        ['astrbotWechatPersonalEnabled', '个人微信（二阶段）'],
+                        ['astrbotWechatPersonalEnabled', '个人微信（实验）'],
                       ].map(([key, label]) => (
                         <div key={key} className="flex items-center justify-between rounded-md border p-3">
                           <Label>{label}</Label>

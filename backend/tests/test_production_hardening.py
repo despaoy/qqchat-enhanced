@@ -1,0 +1,384 @@
+"""Regression tests for production hardening fixes."""
+
+from __future__ import annotations
+
+import ast
+import io
+import sys
+import zipfile
+from pathlib import Path
+
+import pytest
+from fastapi import HTTPException
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+
+def test_database_url_selects_postgresql_when_flag_is_unset():
+    from db.adapter import _should_use_postgresql
+
+    assert _should_use_postgresql(
+        {"DATABASE_URL": "postgresql+asyncpg://user:pass@db/app"}
+    )
+    assert _should_use_postgresql(
+        {
+            "USE_POSTGRESQL": "false",
+            "DATABASE_URL": "postgresql+asyncpg://user:pass@db/app",
+        }
+    ) is False
+    assert _should_use_postgresql({"DATABASE_URL": "sqlite:///local.db"}) is False
+
+
+def test_production_validation_rejects_unsupported_database_and_workers():
+    from infra.deployment import validate_deployment_environment
+
+    base = {
+        "ENVIRONMENT": "production",
+        "ASTRBOT_INTEGRATION_TOKEN": "a" * 32,
+        "QQCHAT_BACKEND_URL": "http://backend:8000",
+        "VLLM_BASE_URL": "http://vllm:8001",
+        "JWT_SECRET": "j" * 32,
+        "ALLOWED_ORIGINS": "https://admin.example.com",
+        "LOG_LEVEL": "INFO",
+    }
+
+    missing_url = validate_deployment_environment(
+        {
+            **base,
+            "USE_POSTGRESQL": "true",
+            "PG_HOST": "db",
+            "PG_USER": "app",
+            "PG_PASSWORD": "secret",
+            "PG_DATABASE": "app",
+        }
+    )
+    assert any("DATABASE_URL" in error for error in missing_url.errors)
+
+    wrong_scheme = validate_deployment_environment(
+        {**base, "DATABASE_URL": "sqlite:///app.db"}
+    )
+    assert any("PostgreSQL URL" in error for error in wrong_scheme.errors)
+
+    multiple_workers = validate_deployment_environment(
+        {
+            **base,
+            "DATABASE_URL": "postgresql://user:pass@db/app",
+            "BACKEND_WORKERS": "2",
+        }
+    )
+    assert any("BACKEND_WORKERS" in error for error in multiple_workers.errors)
+
+
+def test_postgresql_sync_adapter_keeps_api_method_contracts():
+    source = (BACKEND_ROOT / "db" / "pg_database.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    adapter = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "SyncPgAdapter"
+    )
+    methods = {
+        node.name: node
+        for node in adapter.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+    save_args = [arg.arg for arg in methods["save_claw_tool"].args.args]
+    assert save_args == ["self", "name", "description", "code", "enabled"]
+    assert methods["get_training_tasks"].args.args[1].arg == "status"
+    update_args = [arg.arg for arg in methods["update_training_task"].args.args]
+    assert update_args[:3] == ["self", "task_id", "data"]
+
+
+def test_path_validation_rejects_prefix_collision():
+    from api.training import _validate_path
+
+    base = BACKEND_ROOT / "data"
+    sibling = BACKEND_ROOT / "database-escape"
+    with pytest.raises(ValueError):
+        _validate_path(str(sibling), str(base))
+
+
+def test_zip_validation_rejects_traversal_and_accepts_text():
+    from api.knowledge import _validated_zip_entries
+
+    unsafe_buffer = io.BytesIO()
+    with zipfile.ZipFile(unsafe_buffer, "w") as archive:
+        archive.writestr("../secret.txt", "secret")
+    unsafe_buffer.seek(0)
+    with zipfile.ZipFile(unsafe_buffer) as archive:
+        with pytest.raises(HTTPException) as exc:
+            _validated_zip_entries(archive)
+    assert exc.value.status_code == 400
+
+    safe_buffer = io.BytesIO()
+    with zipfile.ZipFile(safe_buffer, "w") as archive:
+        archive.writestr("character/profile.txt", "hello")
+    safe_buffer.seek(0)
+    with zipfile.ZipFile(safe_buffer) as archive:
+        entries = _validated_zip_entries(archive)
+    assert [entry.filename for entry in entries] == ["character/profile.txt"]
+
+
+def test_claw_validator_blocks_dunder_escape_and_allows_basic_code():
+    from api.claw import _validate_tool_code
+
+    _validate_tool_code("return sum([1, 2, 3])")
+    with pytest.raises(ValueError):
+        _validate_tool_code("return ().__class__.__base__.__subclasses__()")
+    with pytest.raises(ValueError):
+        _validate_tool_code("import os\nreturn os.getcwd()")
+
+
+@pytest.mark.asyncio
+async def test_claw_execution_is_opt_in_in_production(monkeypatch):
+    from api.claw import ToolExecuteRequest, execute_tool_code
+
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("CLAW_CODE_EXECUTION_ENABLED", raising=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await execute_tool_code(ToolExecuteRequest(code="return 1"), {"user_id": 1})
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Codex Windows sandbox blocks multiprocessing pipes")
+def test_claw_executor_runs_in_child_and_enforces_timeout(monkeypatch):
+    from api.claw import _run_in_sandbox_process
+
+    monkeypatch.setenv("CLAW_EXECUTION_TIMEOUT", "0.5")
+    success = _run_in_sandbox_process("return sum([1, 2, 3])", {})
+    assert success["success"] is True
+    assert success["result"] == "6"
+
+    timed_out = _run_in_sandbox_process("while True:\n    pass", {})
+    assert timed_out["success"] is False
+    assert "timed out" in timed_out["error"]
+
+
+def test_production_jwt_secret_must_be_explicit_and_strong():
+    from app.config import _validate_jwt_secret
+
+    with pytest.raises(RuntimeError):
+        _validate_jwt_secret("", "production")
+    with pytest.raises(RuntimeError):
+        _validate_jwt_secret("short", "production")
+    assert _validate_jwt_secret("s" * 32, "production") == "s" * 32
+
+def test_database_startup_probe_uses_adapter_contract():
+    from app.main import _initialize_database
+
+    class FakeDatabase:
+        def __init__(self):
+            self.initialized = False
+            self.queries = []
+
+        def init(self):
+            self.initialized = True
+
+        def execute_sql(self, query, params=None):
+            self.queries.append(query)
+            return [{"value": 1}]
+
+        def get_connection(self):
+            raise AssertionError("SQLite-only connection API must not be used")
+
+    database = FakeDatabase()
+    _initialize_database(database)
+    assert database.initialized is True
+    assert database.queries == ["SELECT 1"]
+
+def test_lora_served_name_mapping_can_be_configured(monkeypatch):
+    from inference.lora_utils import resolve_lora_served_name
+
+    assert resolve_lora_served_name("hutao_lora_7b") == "hutao"
+    monkeypatch.setenv("LORA_SERVED_NAME_MAP", '{"custom_lora": "custom-served"}')
+    assert resolve_lora_served_name("custom_lora") == "custom-served"
+    with pytest.raises(ValueError):
+        resolve_lora_served_name("../escape")
+
+
+@pytest.mark.asyncio
+async def test_vllm_runtime_lora_load_uses_official_endpoint(monkeypatch):
+    from inference.vllm_client import VLLMClient
+
+    requests = []
+
+    class FakeResponse:
+        def __init__(self, status_code, payload=None):
+            self.status_code = status_code
+            self._payload = payload or {}
+            self.text = ""
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        async def get(self, url, **kwargs):
+            return FakeResponse(200, {"data": [{"id": "qwen2.5-7b-awq"}]})
+
+        async def post(self, url, **kwargs):
+            requests.append((url, kwargs.get("json")))
+            return FakeResponse(200)
+
+    client = VLLMClient(base_urls="http://vllm:8001", model="qwen2.5-7b-awq")
+
+    async def fake_ensure_client():
+        return FakeClient()
+
+    monkeypatch.setattr(client, "_ensure_client", fake_ensure_client)
+    await client.load_lora_adapter("minamo", "/loras/minamo/final")
+
+    assert requests == [
+        (
+            "http://vllm:8001/v1/load_lora_adapter",
+            {"lora_name": "minamo", "lora_path": "/loras/minamo/final"},
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_lora_status_is_not_changed_when_runtime_load_fails(monkeypatch):
+    from api import loras
+
+    class FakeDb:
+        def __init__(self):
+            self.updated = False
+
+        def get_loras(self):
+            return [{"id": "1", "name": "minamo_lora", "status": "inactive"}]
+
+        def update_lora_status(self, lora_id, status):
+            self.updated = True
+            return {"id": lora_id, "name": "minamo_lora", "status": status}
+
+    class FakeRequest:
+        async def json(self):
+            return {"status": "active"}
+
+    class FailingClient:
+        async def load_lora_adapter(self, name, path):
+            raise RuntimeError("load failed")
+
+    async def fake_get_client():
+        return FailingClient()
+
+    fake_db = FakeDb()
+    monkeypatch.setattr(loras, "db", fake_db)
+    monkeypatch.setattr(loras, "_resolve_vllm_adapter_path", lambda name: "/loras/minamo")
+    import api.generate
+    monkeypatch.setattr(api.generate, "get_vllm_client", fake_get_client)
+
+    with pytest.raises(HTTPException) as exc:
+        await loras.update_lora_status("1", FakeRequest(), {"user_id": 1})
+
+    assert exc.value.status_code == 502
+    assert fake_db.updated is False
+
+
+def test_postgresql_adapter_exposes_training_persistence_contract():
+    source = (BACKEND_ROOT / "db" / "pg_database.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    classes = {
+        node.name: node for node in tree.body if isinstance(node, ast.ClassDef)
+    }
+    for class_name in ("PgDatabase", "SyncPgAdapter"):
+        methods = {
+            node.name
+            for node in classes[class_name].body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        assert {
+            "save_training_task",
+            "get_training_task",
+            "get_all_training_tasks",
+            "get_active_training_by_lora_name",
+        }.issubset(methods)
+
+
+def test_production_registration_allows_only_bootstrap_user(monkeypatch):
+    from api import auth
+
+    class FakeDb:
+        def __init__(self, count):
+            self.count = count
+
+        def execute_sql(self, query):
+            return [{"count": self.count}]
+
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("ALLOW_PUBLIC_REGISTRATION", "false")
+
+    monkeypatch.setattr(auth, "db", FakeDb(0))
+    assert auth._registration_allowed() is True
+
+    monkeypatch.setattr(auth, "db", FakeDb(1))
+    assert auth._registration_allowed() is False
+
+    monkeypatch.setenv("ALLOW_PUBLIC_REGISTRATION", "true")
+    assert auth._registration_allowed() is True
+
+
+def test_forwarded_ip_requires_explicit_trusted_proxy(monkeypatch):
+    from starlette.requests import Request
+    from middleware import security
+
+    request = Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [(b"x-forwarded-for", b"203.0.113.8")],
+        "client": ("127.0.0.1", 12345),
+        "server": ("localhost", 8000),
+        "scheme": "http",
+        "query_string": b"",
+    })
+
+    monkeypatch.setattr(security, "TRUST_PROXY_HEADERS", False)
+    assert security._get_client_ip(request) == "127.0.0.1"
+    monkeypatch.setattr(security, "TRUST_PROXY_HEADERS", True)
+    assert security._get_client_ip(request) == "203.0.113.8"
+
+
+@pytest.mark.asyncio
+async def test_admin_status_requires_auth_and_cors_wraps_error():
+    import httpx
+    from fastapi.middleware.cors import CORSMiddleware
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+    from middleware.security import SecurityMiddleware
+
+    async def protected_status(request):
+        return JSONResponse({"ok": True})
+
+    app = Starlette(routes=[Route("/api/stats", protected_status)])
+    app.add_middleware(SecurityMiddleware)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5000"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get(
+            "/api/stats",
+            headers={"Origin": "http://localhost:5000"},
+        )
+
+    assert response.status_code == 401
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:5000"
+
+
+
+def test_training_resource_names_cannot_escape_output_directory():
+    from api.training import _validate_resource_name
+
+    assert _validate_resource_name("胡桃_lora-1") == "胡桃_lora-1"
+    for unsafe in ("..", "../escape", "/tmp/escape", "folder\\escape", "bad:name"):
+        with pytest.raises(HTTPException):
+            _validate_resource_name(unsafe)

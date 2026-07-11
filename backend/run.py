@@ -8,7 +8,6 @@
 """
 import sys
 import os
-import multiprocessing
 from pathlib import Path
 
 # 确保 backend 根目录在 Python 路径中
@@ -19,7 +18,7 @@ if str(_BACKEND_ROOT) not in sys.path:
 # 加载 .env 环境变量（在导入其他模块之前）
 try:
     from dotenv import load_dotenv
-    load_dotenv(_BACKEND_ROOT / ".env", override=True)
+    load_dotenv(_BACKEND_ROOT / ".env", override=False)
 except ImportError:
     pass
 
@@ -54,13 +53,14 @@ def main():
     parser.add_argument("--port", type=int, default=8000, help="监听端口（默认8000）")
     parser.add_argument("--host", default="0.0.0.0", help="监听地址")
     parser.add_argument("--reload", action="store_true", help="开发模式热重载")
-    parser.add_argument("--workers", type=int, default=None, help="Worker进程数（默认自动）")
+    parser.add_argument("--workers", type=int, default=None, help="Worker进程数（当前架构必须为1）")
     args = parser.parse_args()
 
-    if args.workers is not None:
-        worker_count = args.workers
-    else:
-        worker_count = min(4, multiprocessing.cpu_count()) if sys.platform != 'win32' else 1
+    worker_count = args.workers if args.workers is not None else int(os.getenv("BACKEND_WORKERS", "1"))
+    if worker_count != 1:
+        parser.error(
+            "当前幂等缓存、会话锁和集成 nonce 状态为进程内实现，BACKEND_WORKERS/--workers 必须为 1"
+        )
 
     uvicorn.run(
         "app.main:app",

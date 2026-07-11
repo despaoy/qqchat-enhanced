@@ -21,10 +21,21 @@ import jwt
 __logger = logging.getLogger(__name__)
 
 
+def _validate_jwt_secret(secret: str, environment: str) -> str:
+    if secret and secret != "qq-assistant-jwt-secret-change-in-production" and len(secret) >= 32:
+        return secret
+    if environment.strip().lower() == "production":
+        raise RuntimeError("JWT_SECRET must be explicitly set to at least 32 characters in production")
+    return ""
+
+
 def _ensure_jwt_secret() -> str:
     """确保 JWT 密钥安全：优先从环境变量读取，否则自动生成并持久化到 .env"""
-    secret = os.getenv("JWT_SECRET", "")
-    if secret and secret != "qq-assistant-jwt-secret-change-in-production" and len(secret) >= 32:
+    secret = _validate_jwt_secret(
+        os.getenv("JWT_SECRET", ""),
+        os.getenv("ENVIRONMENT", "development"),
+    )
+    if secret:
         return secret
     # 自动生成安全密钥
     new_secret = secrets.token_urlsafe(48)

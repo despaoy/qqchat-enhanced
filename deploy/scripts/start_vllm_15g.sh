@@ -51,6 +51,7 @@ start_vllm() {
     log_info "启动 vLLM（AWQ量化 / GPU ${GPU_ID} / 端口 ${PORT}）"
 
     export CUDA_VISIBLE_DEVICES="${GPU_ID}"
+    export VLLM_ALLOW_RUNTIME_LORA_UPDATING="${VLLM_ALLOW_RUNTIME_LORA_UPDATING:-True}"
 
     python -m vllm.entrypoints.openai.api_server \
         --model "${MODEL_PATH}" \
