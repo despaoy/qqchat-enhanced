@@ -26,7 +26,7 @@ def _resolve_path(p: str) -> str:
 
 @dataclass
 class RerankConfig:
-    model_name: str = _resolve_path("bge-reranker-base")
+    model_name: str = os.getenv("RERANKER_MODEL_PATH", _resolve_path("bge-reranker-base"))
     device: str = "cuda:0"
     batch_size: int = 8
     max_length: int = 512
@@ -281,6 +281,9 @@ def get_reranker(config: Optional[RerankConfig] = None) -> CrossEncoderReranker:
 
 def rerank_documents(query: str, candidates: List[Dict], top_k: int = 5) -> List[Dict]:
     reranker = get_reranker()
+    if os.getenv("RERANKER_ENABLED", "false").strip().lower() not in {"1", "true", "yes", "on"}:
+        return candidates[:top_k]
+
     return reranker.rerank(query, candidates, top_k)
 
 

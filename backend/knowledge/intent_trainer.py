@@ -22,8 +22,14 @@ from typing import Dict, Any, Optional, List
 logger = logging.getLogger(__name__)
 
 BACKEND_DIR = Path(__file__).parent.parent
-MODEL_DIR = BACKEND_DIR / "intent_classifier_model"
-SAMPLES_DIR = BACKEND_DIR / "intent_samples"
+def _runtime_dir_from_env(name: str, default: Path) -> Path:
+    configured = os.getenv(name, "").strip()
+    path = Path(configured).expanduser() if configured else default
+    return path if path.is_absolute() else BACKEND_DIR / path
+
+
+MODEL_DIR = _runtime_dir_from_env("INTENT_MODEL_PATH", BACKEND_DIR / "intent_classifier_model")
+SAMPLES_DIR = _runtime_dir_from_env("INTENT_SAMPLES_PATH", BACKEND_DIR / "intent_samples")
 
 # 最大可选知识库数量（性能与准确度平衡）
 MAX_KB_COUNT = 8
@@ -745,7 +751,7 @@ def _load_embed_model():
     candidates = [
         BACKEND_DIR.parent / "RAG" / "paraphrase-multilingual-MiniLM-L12-v2",
         BACKEND_DIR / "models" / "paraphrase-multilingual-MiniLM-L12-v2",
-        Path(os.getenv("EMBED_MODEL_PATH", "")),
+        Path(os.getenv("EMBEDDING_MODEL_PATH") or os.getenv("EMBED_MODEL_PATH", "")),
     ]
     for candidate in candidates:
         if candidate and Path(candidate).exists():

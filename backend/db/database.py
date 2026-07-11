@@ -10,9 +10,22 @@ from typing import Optional, Dict
 logger = logging.getLogger(__name__)
 
 # LoRA路径映射 - 自动扫描 backend/loras/ 目录
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+
+def _runtime_path_from_env(name: str, default: Path) -> Path:
+    """Resolve a persistent runtime path without depending on the process cwd."""
+    configured = os.getenv(name, "").strip()
+    path = Path(configured).expanduser() if configured else default
+    return path if path.is_absolute() else BACKEND_DIR / path
+
+
+LORA_ROOT = _runtime_path_from_env("LORA_PATH", BACKEND_DIR / "loras")
+
+
 def _scan_lora_dirs():
     """扫描 loras 目录，自动发现 LoRA 适配器"""
-    lora_base = Path(__file__).parent.parent / "loras"
+    lora_base = LORA_ROOT
     path_map = {}
     if lora_base.exists():
         for d in lora_base.iterdir():
@@ -39,7 +52,7 @@ def _database_path_from_env() -> Path:
     configured = os.getenv("DATABASE_PATH", "").strip()
     if configured:
         return Path(configured).expanduser()
-    return Path(__file__).parent.parent / "qq_assistant.db"
+    return BACKEND_DIR / "qq_assistant.db"
 
 DB_PATH = _database_path_from_env()
 
@@ -410,7 +423,7 @@ class SQLiteDB:
 
     def _init_default_loras(self, cursor):
         """初始化默认LoRA数据 - 自动扫描 loras/ 目录并注册"""
-        lora_base = Path(__file__).parent.parent / "loras"
+        lora_base = LORA_ROOT
         default_loras = []
 
         if lora_base.exists():
@@ -482,7 +495,7 @@ class SQLiteDB:
 
     def _cleanup_stale_loras(self, cursor):
         """清理无对应文件的旧记录（如硬编码的 hutao_style）"""
-        lora_base = Path(__file__).parent.parent / "loras"
+        lora_base = LORA_ROOT
         # 获取 loras/ 目录下所有有效目录名
         valid_dirs = set()
         if lora_base.exists():
@@ -551,7 +564,7 @@ class SQLiteDB:
 
     def _sync_loras_from_disk(self, cursor):
         """同步：扫描 loras/ 目录，注册新增 LoRA 并更新已有记录的元信息"""
-        lora_base = Path(__file__).parent.parent / "loras"
+        lora_base = LORA_ROOT
         if not lora_base.exists():
             return
 

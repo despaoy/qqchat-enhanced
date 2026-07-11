@@ -3,13 +3,14 @@ import asyncio
 import json
 import logging
 from pathlib import Path
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Request, HTTPException, Depends
 from app.dependencies import get_current_user
 
 from db.adapter import db
-from db.database import LORA_DIR_MAP
+from db.database import LORA_DIR_MAP, LORA_ROOT
 from inference.lora_utils import resolve_lora_served_name
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ _lora_status_lock = asyncio.Lock()
 
 def _resolve_vllm_adapter_path(lora_name: str) -> str:
     """Map a trusted backend LoRA directory to the path visible by vLLM."""
-    local_root = (Path(__file__).parent.parent / "loras").resolve()
+    local_root = LORA_ROOT.resolve()
     local_path = (local_root / lora_name).resolve()
     if not local_path.is_relative_to(local_root):
         raise ValueError("LoRA path escapes the configured root")
@@ -93,7 +94,7 @@ async def get_loras(status: Optional[str] = None, current_user: dict = Depends(g
 @router.post("/api/loras/scan")
 async def scan_loras(current_user: dict = Depends(get_current_user)):
     """扫描 loras/ 目录，自动发现并注册新的 LoRA 适配器，更新已有记录元信息"""
-    lora_base = Path(__file__).parent.parent / "loras"
+    lora_base = LORA_ROOT
     if not lora_base.exists():
         return {"success": True, "message": "loras 目录不存在", "new_count": 0}
 

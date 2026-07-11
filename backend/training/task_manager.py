@@ -20,6 +20,13 @@ from fastapi import HTTPException
 logger = logging.getLogger(__name__)
 
 
+def _lora_root() -> Path:
+    configured = os.getenv("LORA_PATH", "").strip()
+    path = Path(configured).expanduser() if configured else Path(__file__).parent.parent / "loras"
+    return path if path.is_absolute() else Path(__file__).parent.parent / path
+
+
+
 @dataclass
 class RTX4060Config:
     """RTX 4060 (8GB) 优化的训练超参数配置。"""
@@ -125,8 +132,8 @@ class SimpleLoRATrainer:
             db: 数据库实例，用于训练任务持久化
         """
         self.base_dir = base_dir or Path(__file__).parent
-        self.loras_dir = self.base_dir / "loras"
-        self.loras_dir.mkdir(exist_ok=True)
+        self.loras_dir = _lora_root()
+        self.loras_dir.mkdir(parents=True, exist_ok=True)
         self.db = db
         self.tasks: Dict[str, Dict[str, Any]] = {}
         self._cancel_events: Dict[str, threading.Event] = {}
