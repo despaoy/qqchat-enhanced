@@ -59,6 +59,18 @@ async def run_evaluation(req: EvalRunRequest, current_user: dict = Depends(get_c
     except Exception as e:
         logger.warning(f"记录评估运行失败（非致命）: {e}")
 
+    from evaluation.runtime_runner import schedule_generation_evaluation
+    queued_metrics = {"status": "queued", "mock": req.mock}
+    try:
+        db.execute_sql(
+            "UPDATE gold_eval_runs SET metrics=?, notes=? WHERE id=?",
+            (json.dumps(queued_metrics), "queued", run_id),
+        )
+    except Exception as exc:
+        logger.warning("failed to persist queued evaluation run=%s: %s", run_id, exc)
+    schedule_generation_evaluation(run_id, req.model_dump(), db)
+    return {"success": True, "run_id": run_id, "status": "queued", "mock": req.mock}
+
     try:
         if not req.mock:
             from evaluation.generation_metrics import GenerationMetrics

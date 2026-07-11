@@ -201,7 +201,17 @@ async def start_quantization_benchmark(req: ExperimentStartRequest,
     try:
         from experiments.quantization_benchmark import QuantizationBenchmark
         bench = QuantizationBenchmark()
-        results = bench.run_comparison(mock=req.mock)
+        if not req.mock:
+            error = (
+                "A real quantization comparison requires one isolated vLLM process per "
+                "quantization variant. Use deploy/compare_quantization.sh instead."
+            )
+            db.execute_sql(
+                "UPDATE experiment_runs SET status='failed', completed_at=?, results=? WHERE id=?",
+                (_now(), json.dumps({"error": error}), exp_id),
+            )
+            return {"success": False, "experiment_id": exp_id, "status": "failed", "error": error}
+        results = [item.to_dict() for item in await bench.run_comparison(bench.DEFAULT_CONFIGS, mock=True)]
         db.execute_sql(
             "UPDATE experiment_runs SET status='completed', completed_at=?, results=? WHERE id=?",
             (_now(), json.dumps(results), exp_id),
