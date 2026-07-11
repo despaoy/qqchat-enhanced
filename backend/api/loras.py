@@ -12,6 +12,7 @@ from app.dependencies import get_current_user
 from db.adapter import db
 from db.database import LORA_DIR_MAP, LORA_ROOT
 from inference.lora_utils import resolve_lora_served_name
+from inference.adapter_checker import AdapterChecker
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -190,6 +191,17 @@ async def update_lora_status(lora_id: str, request: Request, current_user: dict 
         if status == "active":
             try:
                 from api.generate import get_vllm_client
+
+                # 适配器兼容性检查（激活前验证）
+                checker = AdapterChecker(lora_root=str(LORA_ROOT))
+                compat_report = checker.check_adapter(existing["name"])
+                if not compat_report.compatible:
+                    detail = {
+                        "message": "适配器兼容性检查未通过",
+                        "errors": compat_report.errors,
+                        "warnings": compat_report.warnings,
+                    }
+                    raise HTTPException(status_code=409, detail=detail)
 
                 client = await get_vllm_client()
                 if client is None:

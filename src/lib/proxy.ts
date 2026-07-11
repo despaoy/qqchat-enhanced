@@ -16,6 +16,8 @@ function defaultProxyTimeout(path: string): number {
     '/api/knowledge/bases/',
     '/api/knowledge/scan/import',
     '/api/knowledge/train-intent',
+    '/api/evaluation/run',
+    '/api/experiments/',
   ];
   return longRunningPrefixes.some((prefix) => pathOnly.startsWith(prefix))
     ? PROXY_LONG_TIMEOUT
@@ -47,6 +49,12 @@ const PROXY_ALLOWED_PREFIXES = [
   '/api/services',
   '/api/claw',
   '/api/enhanced',
+  '/api/evaluation',
+  '/api/experiments',
+  '/api/retrieval-eval',
+  '/api/preferences',
+  '/api/router',
+  '/api/feedback',
   '/health',
   '/ready',
 ];

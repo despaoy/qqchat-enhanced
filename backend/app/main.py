@@ -70,6 +70,11 @@ from api.user_data import router as user_data_router
 from api.enhanced import router as enhanced_router
 from api.claw import router as claw_router
 from api.integrations import router as integrations_router
+from api.evaluation import router as evaluation_router
+from api.experiments import router as experiments_router
+from api.retrieval_eval import router as retrieval_eval_router
+from api.preferences import router as preferences_router
+from api.router import router as lora_router_router
 
 
 # ═══════════════════════════════════════════
@@ -247,6 +252,11 @@ app.include_router(user_data_router)
 app.include_router(enhanced_router)
 app.include_router(claw_router)
 app.include_router(integrations_router)
+app.include_router(evaluation_router)
+app.include_router(experiments_router)
+app.include_router(retrieval_eval_router)
+app.include_router(preferences_router)
+app.include_router(lora_router_router)
 
 
 # ═══════════════════════════════════════════

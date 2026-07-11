@@ -40,6 +40,7 @@ accelerate>=1.4.0,<2.0
 trl>=0.13.0,<2.0
 sentencepiece>=0.2.0,<1.0
 tqdm>=4.67.0,<5.0
+tensorboard>=2.18.0,<3.0
 
 # 量化模型加载后端（按需安装，请根据 CUDA 版本选择预编译 wheel）
 # AWQ 量化模型需要 autoawq；注意：autoawq 安装时可能会固定/transformers 版本，

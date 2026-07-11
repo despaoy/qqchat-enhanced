@@ -46,6 +46,11 @@ class RTX4060Config:
     weight_decay: float = 0.01
     max_grad_norm: float = 0.5
     early_stopping_patience: int = 3
+    packing: bool = True
+    neftune_noise_alpha: float = 5.0
+    use_dora: bool = False
+    use_rslora: bool = False
+    report_to: str = "tensorboard"
 
 
 @dataclass
@@ -80,6 +85,11 @@ class RTX3090Config:
     weight_decay: float = 0.01
     max_grad_norm: float = 0.5
     early_stopping_patience: int = 3
+    packing: bool = True
+    neftune_noise_alpha: float = 5.0
+    use_dora: bool = False
+    use_rslora: bool = False
+    report_to: str = "tensorboard"
 
 
 def _resolve_model_path(env_var: str, default_rel: str) -> str:
@@ -337,6 +347,7 @@ class SimpleLoRATrainer:
             "lora_target_modules", "load_in_4bit", "load_in_8bit",
             "use_cache", "preprocessing_num_workers", "dataloader_num_workers",
             "logging_steps", "save_steps", "eval_steps", "save_total_limit",
+            "packing", "neftune_noise_alpha", "use_dora", "use_rslora", "report_to", "logging_dir",
         }
         for key in extra_keys:
             if key in config:

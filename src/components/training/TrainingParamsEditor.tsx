@@ -74,6 +74,11 @@ interface AdvancedParams {
   use_8bit_adam: boolean;
   gradient_checkpointing: boolean;
   use_deepspeed: boolean;
+  packing: boolean;
+  neftune_noise_alpha: number;
+  use_dora: boolean;
+  use_rslora: boolean;
+  report_to: 'tensorboard' | 'none';
 }
 
 /** 导出/导入的完整配置结构 */
@@ -115,6 +120,11 @@ const DEFAULT_ADVANCED: AdvancedParams = {
   use_8bit_adam: true,
   gradient_checkpointing: true,
   use_deepspeed: false,
+  packing: true,
+  neftune_noise_alpha: 5.0,
+  use_dora: false,
+  use_rslora: false,
+  report_to: 'tensorboard',
 };
 
 interface Preset {
@@ -459,6 +469,11 @@ export function TrainingParamsEditor({
       use_gradient_checkpointing: advanced.gradient_checkpointing,
       use_8bit_adam: advanced.use_8bit_adam,
       use_deepspeed: advanced.use_deepspeed,
+      packing: advanced.packing,
+      neftune_noise_alpha: advanced.neftune_noise_alpha,
+      use_dora: advanced.use_dora,
+      use_rslora: advanced.use_rslora,
+      report_to: advanced.report_to,
     };
 
     try {
@@ -970,6 +985,38 @@ export function TrainingParamsEditor({
                         多卡训练或极限省显存时启用，需提前配置
                       </p>
                     </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border-t pt-3">
+                    <FieldRow label="NEFTune noise alpha" hint="0 disables embedding-noise regularization; 5 is the conservative default.">
+                      <Input
+                        type="number"
+                        min={0}
+                        step={0.5}
+                        value={advanced.neftune_noise_alpha}
+                        onChange={(e) => updateAdvanced('neftune_noise_alpha', parseFloat(e.target.value || '0'))}
+                      />
+                    </FieldRow>
+                    <FieldRow label="Training logs" hint="TensorBoard writes runs into the LoRA output directory.">
+                      <Select value={advanced.report_to} onValueChange={(v) => updateAdvanced('report_to', v as AdvancedParams['report_to'])}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="tensorboard">TensorBoard</SelectItem>
+                          <SelectItem value="none">Disabled</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </FieldRow>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <Checkbox id="sequence-packing" checked={advanced.packing} onCheckedChange={(v) => updateAdvanced('packing', v === true)} className="mt-0.5" />
+                    <Label htmlFor="sequence-packing" className="text-sm font-medium cursor-pointer">Sequence packing</Label>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <Checkbox id="use-dora" checked={advanced.use_dora} onCheckedChange={(v) => updateAdvanced('use_dora', v === true)} className="mt-0.5" />
+                    <Label htmlFor="use-dora" className="text-sm font-medium cursor-pointer">DoRA</Label>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <Checkbox id="use-rslora" checked={advanced.use_rslora} onCheckedChange={(v) => updateAdvanced('use_rslora', v === true)} className="mt-0.5" />
+                    <Label htmlFor="use-rslora" className="text-sm font-medium cursor-pointer">RSLoRA</Label>
                   </div>
                 </div>
               </div>

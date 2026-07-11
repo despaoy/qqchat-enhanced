@@ -45,6 +45,7 @@ except Exception:
 
 from datasets import Dataset, load_dataset
 from trl import SFTTrainer, SFTConfig
+from training.evaluator import write_training_evaluation_report
 
 try:
     from transformers import EarlyStoppingCallback
@@ -178,6 +179,10 @@ class LoRATrainingConfig:
         "gate_proj", "up_proj", "down_proj"
     ])
     lora_bias: str = "none"
+    use_dora: bool = False
+    use_rslora: bool = False
+    neftune_noise_alpha: float = 5.0
+    packing: bool = True
 
     learning_rate: float = 2e-4
     num_train_epochs: int = 12
@@ -218,7 +223,7 @@ class LoRATrainingConfig:
     load_in_8bit: bool = False
 
     logging_steps: int = 10
-    report_to: str = "none"
+    report_to: str = "tensorboard"
     logging_dir: Optional[str] = None
 
     system_prompt: str = "你是胡桃，保持你的风格"
@@ -247,8 +252,14 @@ class LoRATrainingConfig:
             errors.append(f"num_train_epochs必须大于0: {self.num_train_epochs}")
         if self.fp16 and self.bf16:
             errors.append("不能同时启用fp16和bf16")
-        if self.early_stopping_patience <= 0:
+        if self.early_stopping_patience < 0:
             errors.append(f"early_stopping_patience必须大于0: {self.early_stopping_patience}")
+        if self.neftune_noise_alpha < 0:
+            errors.append(f"neftune_noise_alpha cannot be negative: {self.neftune_noise_alpha}")
+        if self.use_dora and self.use_rslora:
+            errors.append("DoRA and RSLoRA cannot be enabled together")
+        if self.packing and self.max_seq_length < 128:
+            errors.append(f"max_seq_length must be at least 128 when packing is enabled: {self.max_seq_length}")
         return errors
 
     def to_dict(self) -> Dict[str, Any]:
@@ -617,6 +628,8 @@ class LoRATrainer:
             lora_dropout=self.config.lora_dropout,
             bias=self.config.lora_bias,
             task_type=TaskType.CAUSAL_LM,
+            use_dora=self.config.use_dora,
+            use_rslora=self.config.use_rslora,
         )
 
     def train(self) -> Path:
@@ -656,6 +669,9 @@ class LoRATrainer:
 
             output_dir = Path(self.config.output_dir)
             output_dir.mkdir(parents=True, exist_ok=True)
+
+            if self.config.report_to == "tensorboard" and not self.config.logging_dir:
+                self.config.logging_dir = str(output_dir / "runs")
 
             config_save_path = output_dir / "training_config.json"
             self.config.save(config_save_path)
@@ -716,7 +732,8 @@ class LoRATrainer:
                 gradient_checkpointing=self.config.gradient_checkpointing,
                 max_length=self.config.max_seq_length,
                 seed=self.config.seed,
-                packing=False,
+                packing=self.config.packing,
+                neftune_noise_alpha=self.config.neftune_noise_alpha or None,
             )
 
             data_collator = DataCollatorForSeq2Seq(
@@ -764,6 +781,13 @@ class LoRATrainer:
                     "best_model_checkpoint": str(trainer.state.best_model_checkpoint) if trainer.state.best_model_checkpoint else None,
                     "best_metric": float(trainer.state.best_metric) if trainer.state.best_metric else None,
                 }, f, indent=2, ensure_ascii=False)
+            evaluation_path = write_training_evaluation_report(
+                output_dir=output_dir,
+                eval_results=eval_results,
+                log_history=trainer.state.log_history,
+                config=self.config.to_dict(),
+            )
+            logger.info(f"Training evaluation report saved to: {evaluation_path}")
 
             logger.info(f"LoRA模型已保存到: {final_output}")
             logger.info(f"训练结果已保存到: {results_path}")

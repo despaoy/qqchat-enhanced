@@ -35,7 +35,7 @@ from .vector_db import get_vector_db
 
 def extract_metadata(file_path: Path, content: str) -> Dict[str, Any]:
     """
-    从文件路径和内容中提取元数据
+    从文件路径和内容中提取元数据（含 RAG 2.0 证据化字段 section/version）
     
     Args:
         file_path: 文件路径
@@ -57,6 +57,21 @@ def extract_metadata(file_path: Path, content: str) -> Dict[str, Any]:
     title = file_path.stem  # 默认使用文件名
     lines = content.strip().split('\n')
     
+    # 提取 section：尝试从内容首行或标题层级（# 开头）提取
+    section = ""
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            section = stripped.lstrip("#").strip()
+            break
+    if not section:
+        section = category
+    
+    # 提取 version：从文件名中的 vN.N 模式，或默认 "1.0"
+    import re as _re
+    version_match = _re.search(r'[vV](\d+\.\d+(?:\.\d+)?)', file_path.stem)
+    version = version_match.group(1) if version_match else "1.0"
+    
     # 计算基本统计
     lines = content.split('\n')
     non_empty_lines = [line for line in lines if line.strip()]
@@ -68,6 +83,8 @@ def extract_metadata(file_path: Path, content: str) -> Dict[str, Any]:
         "file_size_chars": len(content),
         "file_size_lines": len(lines),
         "non_empty_lines": len(non_empty_lines),
+        "section": section,
+        "version": version,
     }
 
 

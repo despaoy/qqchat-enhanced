@@ -4,6 +4,7 @@ import hashlib
 import os
 import time
 import logging
+from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, Depends
 from app.dependencies import get_current_user
 from db.models import MessageRequest, GenerateResponse
@@ -216,7 +217,7 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
     # ── 优先使用 vLLM 高并发推理 ──
     if await _ensure_vllm() and _vllm_client:
         try:
-            reply, used_rag = await _generate_with_vllm(request, vllm_effective_lora, vllm_lora_name)
+            reply, used_rag, rag_meta = await _generate_with_vllm(request, vllm_effective_lora, vllm_lora_name)
             cost_time = round(time.time() - start_time, 2)
 
             model_label = f"vllm/{os.getenv('VLLM_SERVED_MODEL_NAME', os.getenv('VLLM_MODEL', 'qwen2.5-7b-awq'))}"
@@ -228,7 +229,10 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
             result = GenerateResponse(
                 reply=reply,
                 model=f"vllm/{os.getenv('VLLM_SERVED_MODEL_NAME', os.getenv('VLLM_MODEL', 'qwen2.5-7b-awq'))}",
-                costTime=cost_time
+                costTime=cost_time,
+                citations=rag_meta.get("citations"),
+                confidence=rag_meta.get("confidence"),
+                abstained=rag_meta.get("abstained", False),
             )
 
             if response_cache:
@@ -430,8 +434,8 @@ async def _get_rag_prompt_cached(query: str, top_k: int, filters):
                 _rag_prompt_cache.pop(key, None)
     return result
 
-async def _generate_with_vllm(request: MessageRequest, lora_name: str | None, prompt_lora_name: str | None = None) -> tuple[str, bool]:
-    """使用 vLLM 客户端生成回复"""
+async def _generate_with_vllm(request: MessageRequest, lora_name: str | None, prompt_lora_name: str | None = None) -> tuple[str, bool, Dict[str, Any]]:
+    """使用 vLLM 客户端生成回复，返回 (reply, used_rag, rag_meta)。"""
     # 从数据库配置读取模型参数（设置页修改后实时生效）
     try:
         _cfg = db.config
@@ -521,7 +525,33 @@ async def _generate_with_vllm(request: MessageRequest, lora_name: str | None, pr
         temperature=_gen_temperature,
         max_tokens=_max_tokens,
     )
-    return reply, bool(rag_context)
+
+    # RAG 2.0: 构建引用元数据（citations/confidence/abstained）
+    rag_meta: Dict[str, Any] = {}
+    if rag_context and os.getenv("RAG_CITATIONS_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}:
+        try:
+            from knowledge.rag_helper import get_rag_helper
+            helper = get_rag_helper()
+            if os.getenv("CORRECTIVE_RAG_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}:
+                from knowledge.corrective_rag import get_corrective_rag
+                cited = get_corrective_rag().retrieve_with_correction(request.message, top_k=3)
+                rag_meta = {
+                    "citations": cited.get("citations", []),
+                    "confidence": cited.get("confidence"),
+                    "abstained": cited.get("abstained", False),
+                }
+            else:
+                cited = helper.retrieve_with_citations(request.message, top_k=3)
+                rag_meta = {
+                    "citations": cited.get("citations", []),
+                    "confidence": cited.get("confidence"),
+                    "abstained": cited.get("abstained", False),
+                }
+        except Exception as e:
+            logger.warning(f"RAG citations build failed: {e}")
+            rag_meta = {}
+
+    return reply, bool(rag_context), rag_meta
 
 
 def _get_system_prompt(lora_name: str) -> str:

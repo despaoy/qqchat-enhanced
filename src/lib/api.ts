@@ -1265,6 +1265,120 @@ class ApiClient {
   async getActiveKnowledgeBases(): Promise<{ success: boolean; active_kbs: { kbName: string; isActive: number }[] }> {
     return this.request<{ success: boolean; active_kbs: { kbName: string; isActive: number }[] }>('/knowledge/train-intent/active-kbs');
   }
+
+  // ============================================
+  // 研究与评估 API（LLM Research Enhancement）
+  // ============================================
+
+  /** 获取 Gold 评估集 */
+  async getGoldSet(): Promise<{ success: boolean; total: number; category_breakdown: Record<string, number>; prompts: any[] }> {
+    return this.request<{ success: boolean; total: number; category_breakdown: Record<string, number>; prompts: any[] }>('/evaluation/gold-set');
+  }
+
+  /** 运行评估 */
+  async runEvaluation(req: { adapter_name?: string; categories?: string[]; mock?: boolean }): Promise<any> {
+    return this.request<any>('/evaluation/run', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    });
+  }
+
+  /** 获取评估运行列表 */
+  async getEvaluationRuns(): Promise<{ runs: any[] }> {
+    return this.request<{ runs: any[] }>('/evaluation/runs');
+  }
+
+  /** 获取用户反馈列表 */
+  async getFeedback(rating?: string): Promise<{ success: boolean; feedbacks: any[]; total: number }> {
+    const query = rating ? `?rating=${encodeURIComponent(rating)}` : '';
+    return this.request<{ success: boolean; feedbacks: any[]; total: number }>(`/feedback${query}`);
+  }
+
+  /** 获取实验列表 */
+  async getExperiments(): Promise<{ experiments: any[] }> {
+    return this.request<{ experiments: any[] }>('/experiments/');
+  }
+
+  /** 启动实验 */
+  async startExperiment(type: string, req: { hypothesis?: string; mock?: boolean }): Promise<any> {
+    return this.request<any>(`/experiments/${type}`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    });
+  }
+
+  /** 获取实验报告 */
+  async getExperimentReport(expId: string): Promise<any> {
+    return this.request<any>(`/experiments/${expId}/report`);
+  }
+
+  /** 获取路由配置 */
+  async getRouterConfig(): Promise<any> {
+    return this.request<any>('/router/config');
+  }
+
+  /** 更新路由配置 */
+  async updateRouterConfig(req: any): Promise<any> {
+    return this.request<any>('/router/config', {
+      method: 'PUT',
+      body: JSON.stringify(req),
+    });
+  }
+
+  /** 获取路由适配器列表 */
+  async getRouterAdapters(): Promise<any> {
+    return this.request<any>('/router/adapters');
+  }
+
+  /** 获取路由日志 */
+  async getRouterLogs(): Promise<{ logs: any[] }> {
+    return this.request<{ logs: any[] }>('/router/logs');
+  }
+
+  /** 触发适配器兼容性检查 */
+  async checkAdapter(adapterName: string): Promise<any> {
+    return this.request<any>(`/router/check/${encodeURIComponent(adapterName)}`, {
+      method: 'POST',
+    });
+  }
+
+  /** 获取偏好对列表 */
+  async getPreferences(reviewStatus?: string): Promise<{ success: boolean; preferences: any[]; total: number }> {
+    const query = reviewStatus ? `?review_status=${encodeURIComponent(reviewStatus)}` : '';
+    return this.request<{ success: boolean; preferences: any[]; total: number }>(`/preferences/${query}`);
+  }
+
+  /** 创建偏好对 */
+  async createPreference(req: any): Promise<any> {
+    return this.request<any>('/preferences/', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    });
+  }
+
+  /** 更新偏好对 */
+  async updatePreference(id: string, req: any): Promise<any> {
+    return this.request<any>(`/preferences/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(req),
+    });
+  }
+
+  /** 导出偏好数据 */
+  async exportPreferences(req: { review_status?: string; format?: string }): Promise<any> {
+    return this.request<any>('/preferences/export', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    });
+  }
+
+  /** 从历史采样偏好对 */
+  async sampleFromHistory(req: { limit?: number; session_id?: string }): Promise<any> {
+    return this.request<any>('/preferences/sample-from-history', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    });
+  }
 }
 
 // 导出单例实例

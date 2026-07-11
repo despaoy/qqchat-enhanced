@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-07-11T00:00:00",
+  "description": "检索评估数据集 - 覆盖 persona/gameplay/lore/system 四类，用于 RAG 消融实验",
+  "questions": [
+    {"id": "q001", "question": "胡桃的元素战技是什么？", "expected_doc_ids": ["hutao_skill"], "expected_doc_titles": ["胡桃角色介绍 (角色)"], "gold_answer": "胡桃的元素战技是蝶引来生，消耗生命值对周围敌人造成火元素伤害。", "category": "persona"},
+    {"id": "q002", "question": "钟离的护盾怎么算？", "expected_doc_ids": ["zhongli_shield"], "expected_doc_titles": ["钟离角色介绍 (角色)"], "gold_answer": "钟离的护盾基于最大生命值，吸收量与生命值成正比。", "category": "persona"},
+    {"id": "q003", "question": "七七的治疗量受什么影响？", "expected_doc_ids": ["qiqi_heal"], "expected_doc_titles": ["七七角色介绍 (角色)"], "gold_answer": "七七的治疗量受攻击力影响，技能基于攻击力百分比回复生命值。", "category": "persona"},
+    {"id": "q004", "question": "魈的输出手法是什么？", "expected_doc_ids": ["xiao_combo"], "expected_doc_titles": ["魈角色介绍 (角色)"], "gold_answer": "魈开启大招后下落攻击是主要输出手法，配合风元素扩散。", "category": "persona"},
+    {"id": "q005", "question": "胡桃的命座效果有哪些？", "expected_doc_ids": ["hutao_const"], "expected_doc_titles": ["胡桃命座 (角色)"], "gold_answer": "胡桃的命座包括一命降低重击体力消耗，六命增加暴击率等。", "category": "persona"},
+    {"id": "q006", "question": "钟离的岩柱能存在多久？", "expected_doc_ids": ["zhongli_pillar"], "expected_doc_titles": ["钟离技能 (角色)"], "gold_answer": "钟离的岩柱默认存在30秒，可通过命座延长。", "category": "persona"},
+    {"id": "q007", "question": "七七的符咒怎么触发？", "expected_doc_ids": ["qiqi_talisman"], "expected_doc_titles": ["七七技能 (角色)"], "gold_answer": "七七的符咒通过普攻和技能命中触发，触发后回复生命值。", "category": "persona"},
+    {"id": "q008", "question": "魈的能量怎么回复？", "expected_doc_ids": ["xiao_energy"], "expected_doc_titles": ["魈技能 (角色)"], "gold_answer": "魈主要靠充能武器和队友辅助回复元素能量。", "category": "persona"},
+
+    {"id": "q009", "question": "圣遗物怎么选？", "expected_doc_ids": ["artifacts_guide"], "expected_doc_titles": ["圣遗物攻略 (世界)"], "gold_answer": "圣遗物选择根据角色定位，主C选攻击/暴击，辅助选充能/生命。", "category": "gameplay"},
+    {"id": "q010", "question": "深渊螺旋怎么配队？", "expected_doc_ids": ["abyss_team"], "expected_doc_titles": ["深渊攻略 (世界)"], "gold_answer": "深渊配队需要双输出队伍，配合聚怪、增伤、治疗角色。", "category": "gameplay"},
+    {"id": "q011", "question": "元素反应有哪些类型？", "expected_doc_ids": ["elemental_reactions"], "expected_doc_titles": ["元素反应系统 (世界)"], "gold_answer": "元素反应包括蒸发、融化、超载、感电、冻结、扩散等。", "category": "gameplay"},
+    {"id": "q012", "question": "武器怎么强化？", "expected_doc_ids": ["weapon_upgrade"], "expected_doc_titles": ["武器强化 (世界)"], "gold_answer": "武器通过消耗其他武器和矿石强化，最高90级。", "category": "gameplay"},
+    {"id": "q013", "question": "突破材料在哪刷？", "expected_doc_ids": ["ascension_materials"], "expected_doc_titles": ["突破材料 (世界)"], "gold_answer": "突破材料在对应秘境副本刷取，不同角色有不同的材料需求。", "category": "gameplay"},
+    {"id": "q014", "question": "命座怎么解锁？", "expected_doc_ids": ["constellation_unlock"], "expected_doc_titles": ["命座系统 (世界)"], "gold_answer": "命座通过重复获得角色转化为命星解锁。", "category": "gameplay"},
+    {"id": "q015", "question": "天赋怎么升级？", "expected_doc_ids": ["talent_upgrade"], "expected_doc_titles": ["天赋升级 (世界)"], "gold_answer": "天赋通过消耗天赋书和周本材料升级，最高10级（6命12级）。", "category": "gameplay"},
+    {"id": "q016", "question": "怎么快速刷摩拉？", "expected_doc_ids": ["mora_farming"], "expected_doc_titles": ["摩拉获取 (世界)"], "gold_answer": "摩拉通过藏金之花、每日委托、探索宝箱获取。", "category": "gameplay"},
+
+    {"id": "q017", "question": "璃月的历史背景是什么？", "expected_doc_ids": ["liyue_history"], "expected_doc_titles": ["璃月历史 (世界)"], "gold_answer": "璃月是岩神摩拉克斯守护的契约之国，有数千年历史。", "category": "lore"},
+    {"id": "q018", "question": "往生堂是做什么的？", "expected_doc_ids": ["wangsheng_inn"], "expected_doc_titles": ["往生堂介绍 (事件)"], "gold_answer": "往生堂是璃月的殡葬机构，第七十七代堂主为胡桃。", "category": "lore"},
+    {"id": "q019", "question": "岩王帝君是谁？", "expected_doc_ids": ["rex_lapis"], "expected_doc_titles": ["岩王帝君 (角色)"], "gold_answer": "岩王帝君即摩拉克斯，是岩神，也是钟离的化身。", "category": "lore"},
+    {"id": "q020", "question": "降魔大圣是什么身份？", "expected_doc_ids": ["xiao_lore"], "expected_doc_titles": ["魈背景 (角色)"], "gold_answer": "降魔大圣是魈的称号，他是护法夜叉之一。", "category": "lore"},
+    {"id": "q021", "question": "不卜庐在哪里？", "expected_doc_ids": ["bubu_pharmacy"], "expected_doc_titles": ["不卜庐 (事件)"], "gold_answer": "不卜庐是璃月港的药铺，七七在此工作。", "category": "lore"},
+    {"id": "q022", "question": "仙人指什么？", "expected_doc_ids": ["adepti"], "expected_doc_titles": ["仙人系统 (世界)"], "gold_answer": "仙人是璃月的超凡存在，受岩神委托守护璃月。", "category": "lore"},
+    {"id": "q023", "question": "璃月港的商会有哪些？", "expected_doc_ids": ["liyue_merchants"], "expected_doc_titles": ["璃月商会 (事件)"], "gold_answer": "璃月港有七星、新月轩、万民堂等商业组织。", "category": "lore"},
+    {"id": "q024", "question": "夜叉一族的历史？", "expected_doc_ids": ["yaksha_history"], "expected_doc_titles": ["夜叉历史 (世界)"], "gold_answer": "夜叉一族是岩神麾下的战将，因业障大多数已陨落。", "category": "lore"},
+
+    {"id": "q025", "question": "怎么切换角色？", "expected_doc_ids": ["party_switch"], "expected_doc_titles": ["队伍系统 (世界)"], "gold_answer": "通过队伍配置界面切换角色，最多4人编队。", "category": "system"},
+    {"id": "q026", "question": "联机怎么玩？", "expected_doc_ids": ["coop_guide"], "expected_doc_titles": ["联机系统 (世界)"], "gold_answer": "联机模式最多4人，通过UID添加好友后加入世界。", "category": "system"},
+    {"id": "q027", "question": "怎么查看冒险等级？", "expected_doc_ids": ["ar_system"], "expected_doc_titles": ["冒险等级 (世界)"], "gold_answer": "冒险等级显示在主界面右上角，通过获取冒险经验提升。", "category": "system"},
+    {"id": "q028", "question": "树脂怎么恢复？", "expected_doc_ids": ["resin_system"], "expected_doc_titles": ["树脂系统 (世界)"], "gold_answer": "树脂每8分钟恢复1点，也可用原石补充。", "category": "system"},
+    {"id": "q029", "question": "怎么获得原石？", "expected_doc_ids": ["primogem_sources"], "expected_doc_titles": ["原石获取 (世界)"], "gold_answer": "原石通过每日委托、成就、活动、深渊等获取。", "category": "system"},
+    {"id": "q030", "question": "祈愿系统怎么用？", "expected_doc_ids": ["wish_system"], "expected_doc_titles": ["祈愿系统 (世界)"], "gold_answer": "祈愿使用纠缠之缘或相遇之缘抽卡，有保底机制。", "category": "system"},
+
+    {"id": "q031", "question": "胡桃用什么武器好？", "expected_doc_ids": ["hutao_weapon"], "expected_doc_titles": ["胡桃武器推荐 (角色)"], "gold_answer": "胡桃推荐使用护摩之杖和匣里灭辰。", "category": "gameplay"},
+    {"id": "q032", "question": "钟离用什么圣遗物？", "expected_doc_ids": ["zhongli_artifacts"], "expected_doc_titles": ["钟离圣遗物 (角色)"], "gold_answer": "钟离推荐千岩牢固4件套，主词条选生命。", "category": "gameplay"},
+    {"id": "q033", "question": "七七怎么配队？", "expected_doc_ids": ["qiqi_team"], "expected_doc_titles": ["七七配队 (角色)"], "gold_answer": "七七适合搭配冰系角色走永冻流，或作为纯治疗。", "category": "gameplay"},
+    {"id": "q034", "question": "魈的圣遗物主词条选什么？", "expected_doc_ids": ["xiao_artifacts"], "expected_doc_titles": ["魈圣遗物 (角色)"], "gold_answer": "魈圣遗物主词条选攻击沙、风伤杯、暴击/暴伤头。", "category": "gameplay"},
+    {"id": "q035", "question": "蒸发反应怎么触发？", "expected_doc_ids": ["vaporize_reaction"], "expected_doc_titles": ["元素反应系统 (世界)"], "gold_answer": "蒸发是火+水或水+火触发，伤害倍率1.5或2.0。", "category": "gameplay"},
+    {"id": "q036", "question": "融化反应的倍率是多少？", "expected_doc_ids": ["melt_reaction"], "expected_doc_titles": ["元素反应系统 (世界)"], "gold_answer": "融化是火+冰或冰+火触发，倍率2.0或1.5。", "category": "gameplay"},
+    {"id": "q037", "question": "超载反应有什么效果？", "expected_doc_ids": ["overload_reaction"], "expected_doc_titles": ["元素反应系统 (世界)"], "gold_answer": "超载是火+雷触发，造成范围火元素爆炸伤害。", "category": "gameplay"},
+    {"id": "q038", "question": "冻结反应怎么利用？", "expected_doc_ids": ["freeze_reaction"], "expected_doc_titles": ["元素反应系统 (世界)"], "gold_answer": "冻结是水+冰触发，冻结敌人后可触发碎冰。", "category": "gameplay"},
+
+    {"id": "q039", "question": "璃月的节日有哪些？", "expected_doc_ids": ["liyue_festivals"], "expected_doc_titles": ["璃月节日 (事件)"], "gold_answer": "璃月有海灯节、逐月节等传统节日。", "category": "lore"},
+    {"id": "q040", "question": "胡桃的性格特点？", "expected_doc_ids": ["hutao_personality"], "expected_doc_titles": ["胡桃角色介绍 (角色)"], "gold_answer": "胡桃性格古灵精怪，喜欢恶作剧，但对生死有独到见解。", "category": "persona"},
+    {"id": "q041", "question": "钟离为什么没钱？", "expected_doc_ids": ["zhongli_lore"], "expected_doc_titles": ["钟离角色介绍 (角色)"], "gold_answer": "钟离作为凡人没有收入来源，常靠往生堂接济。", "category": "persona"},
+    {"id": "q042", "question": "七七为什么是僵尸？", "expected_doc_ids": ["qiqi_lore"], "expected_doc_titles": ["七七角色介绍 (角色)"], "gold_answer": "七七因意外死亡后被仙人救活成为僵尸。", "category": "persona"},
+    {"id": "q043", "question": "魈为什么戴面具？", "expected_doc_ids": ["xiao_mask"], "expected_doc_titles": ["魈角色介绍 (角色)"], "gold_answer": "魈戴面具是为了压制业障，防止被黑暗吞噬。", "category": "persona"},
+
+    {"id": "q044", "question": "怎么解锁秘境？", "expected_doc_ids": ["domain_unlock"], "expected_doc_titles": ["秘境系统 (世界)"], "gold_answer": "秘境通过到达指定冒险等级和完成前置任务解锁。", "category": "system"},
+    {"id": "q045", "question": "怎么获得纠缠之缘？", "expected_doc_ids": ["intertwined_fate"], "expected_doc_titles": ["祈愿系统 (世界)"], "gold_answer": "纠缠之缘通过商店购买、活动奖励、纪行获取。", "category": "system"},
+    {"id": "q046", "question": "怎么提升好感等级？", "expected_doc_ids": ["friendship_level"], "expected_doc_titles": ["好感度系统 (世界)"], "gold_answer": "好感等级通过带角色出战、完成每日委托提升。", "category": "system"},
+    {"id": "q047", "question": "尘歌壶怎么用？", "expected_doc_ids": ["teapot_system"], "expected_doc_titles": ["尘歌壶系统 (世界)"], "gold_answer": "尘歌壶是家园系统，可摆放家具、种植作物、邀请角色。", "category": "system"},
+
+    {"id": "q048", "question": "胡桃的元素爆发是什么？", "expected_doc_ids": ["hutao_burst"], "expected_doc_titles": ["胡桃技能 (角色)"], "gold_answer": "胡桃的元素爆发是安神秘法，造成火元素范围伤害并回复生命值。", "category": "persona"},
+    {"id": "q049", "question": "钟离的大招叫什么？", "expected_doc_ids": ["zhongli_burst"], "expected_doc_titles": ["钟离技能 (角色)"], "gold_answer": "钟离的元素爆发是天星，召唤陨石石化敌人。", "category": "persona"},
+    {"id": "q050", "question": "魈的大招持续多久？", "expected_doc_ids": ["xiao_burst"], "expected_doc_titles": ["魈技能 (角色)"], "gold_answer": "魈的元素爆发持续15秒，期间持续消耗生命值。", "category": "persona"}
+  ]
+}

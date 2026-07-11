@@ -363,6 +363,97 @@ class SQLiteDB:
             )
         ''')
 
+        # ============================================
+        # 研究与评估相关表（LLM Research Enhancement Roadmap）
+        # ============================================
+
+        # Gold 评估运行记录
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS gold_eval_runs (
+                id TEXT PRIMARY KEY,
+                run_at TEXT NOT NULL,
+                adapter_name TEXT,
+                model_label TEXT,
+                total_prompts INTEGER DEFAULT 0,
+                category_breakdown TEXT,
+                metrics TEXT,
+                config_snapshot TEXT,
+                notes TEXT
+            )
+        ''')
+
+        # 实验运行记录（LoRA消融/RAG消融/量化基准）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS experiment_runs (
+                id TEXT PRIMARY KEY,
+                experiment_type TEXT NOT NULL,
+                hypothesis TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                results TEXT,
+                config_path TEXT,
+                report_path TEXT
+            )
+        ''')
+
+        # 检索评估数据集
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS retrieval_eval_questions (
+                id TEXT PRIMARY KEY,
+                question TEXT NOT NULL,
+                expected_doc_ids TEXT,
+                expected_doc_titles TEXT,
+                gold_answer TEXT,
+                category TEXT,
+                created_at TEXT NOT NULL
+            )
+        ''')
+
+        # 偏好数据对（DPO/ORPO 训练用）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS preference_pairs (
+                id TEXT PRIMARY KEY,
+                prompt TEXT NOT NULL,
+                chosen TEXT NOT NULL,
+                rejected TEXT NOT NULL,
+                rubric TEXT,
+                annotator TEXT,
+                metadata TEXT,
+                review_status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL
+            )
+        ''')
+
+        # 适配器兼容性检查记录
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS adapter_compatibility (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                adapter_name TEXT NOT NULL,
+                checked_at TEXT NOT NULL,
+                compatible INTEGER NOT NULL,
+                checks TEXT,
+                warnings TEXT,
+                errors TEXT
+            )
+        ''')
+
+        # 用户反馈（在线反馈闭环）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trace_id TEXT,
+                message_id TEXT,
+                rating TEXT,
+                reason TEXT,
+                adapter_name TEXT,
+                kb_revision TEXT,
+                prompt_version TEXT,
+                detail TEXT,
+                created_at TEXT NOT NULL
+            )
+        ''')
+
         self._ensure_column(cursor, "messages", "platform", "TEXT NOT NULL DEFAULT 'qq'")
         self._ensure_column(cursor, "messages", "adapter", "TEXT NOT NULL DEFAULT 'nonebot'")
         self._ensure_column(cursor, "messages", "conversationId", "TEXT")
@@ -394,6 +485,10 @@ class SQLiteDB:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_integration_events_platform_created ON integration_events(platform, createdAt)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_model_invocations_trace ON model_invocations(traceId)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_model_invocations_created ON model_invocations(createdAt)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_experiment_runs_type ON experiment_runs(experiment_type)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_preference_pairs_status ON preference_pairs(review_status)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_adapter_compat_name ON adapter_compatibility(adapter_name)')
         except Exception:
             pass  # 索引已存在或 SQLite 版本不支，不影响功能
 

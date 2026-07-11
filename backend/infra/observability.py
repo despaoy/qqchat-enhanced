@@ -11,6 +11,25 @@ from typing import Any
 logger = logging.getLogger("observability")
 
 _COUNTERS: dict[str, int] = defaultdict(int)
+
+_SENSITIVE_FIELD_PARTS = {"token", "secret", "password", "authorization", "cookie", "openid", "unionid", "phone", "mobile"}
+
+
+def _redact_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            if any(part in str(key).lower() for part in _SENSITIVE_FIELD_PARTS):
+                result[str(key)] = "***" if item else item
+            else:
+                result[str(key)] = _redact_fields(item)
+        return result
+    if isinstance(value, list):
+        return [_redact_fields(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_fields(item) for item in value)
+    return value
+
 _RECENT: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=1000))
 _CONSECUTIVE: dict[str, int] = defaultdict(int)
 
@@ -60,7 +79,7 @@ def snapshot() -> dict[str, Any]:
 
 
 def log_event(event: str, level: str = "info", **fields: Any) -> None:
-    payload = {"event": event, **fields}
+    payload = {"event": event, **_redact_fields(fields)}
     message = json.dumps(payload, ensure_ascii=False, default=str, separators=(",", ":"))
     log_method = getattr(logger, level.lower(), logger.info)
     log_method(message)

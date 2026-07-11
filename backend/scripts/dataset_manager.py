@@ -130,6 +130,56 @@ class DatasetManager:
         print(f"存储位置: {self.datasets_dir}")
         print(f"索引文件: {self.index_path}")
 
+    def generate_dataset_card(self, dataset_path: Path, name: Optional[str] = None,
+                              source: str = "", license: str = "unknown",
+                              persona: Optional[str] = None, domain: str = "",
+                              risks: Optional[List[str]] = None,
+                              intended_use: str = "",
+                              preprocessing: Optional[List[str]] = None,
+                              train_val_test_split: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
+        """为数据集生成数据集卡片。"""
+        with open(dataset_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        content_hash = self._compute_hash(data)
+        size = len(data) if isinstance(data, list) else 1
+
+        card = {
+            "schema_version": 1,
+            "name": name or dataset_path.stem,
+            "source": source,
+            "license": license,
+            "language": ["zh-CN"],
+            "size": size,
+            "persona": persona,
+            "domain": domain,
+            "risks": risks or [],
+            "intended_use": intended_use,
+            "preprocessing": preprocessing or [],
+            "train_val_test_split": train_val_test_split or {},
+            "content_hash": content_hash,
+            "created_at": datetime.now().isoformat(),
+            "tags": [],
+        }
+        return card
+
+    def save_dataset_card(self, card: Dict[str, Any], dataset_dir: Path) -> Path:
+        """保存数据集卡片到数据集目录。"""
+        dataset_dir = Path(dataset_dir)
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+        card_path = dataset_dir / "dataset_card.json"
+        with open(card_path, 'w', encoding='utf-8') as f:
+            json.dump(card, f, indent=2, ensure_ascii=False)
+        print(f"数据集卡片已保存: {card_path}")
+        return card_path
+
+    def load_dataset_card(self, dataset_dir: Path) -> Optional[Dict[str, Any]]:
+        """加载数据集卡片。"""
+        card_path = Path(dataset_dir) / "dataset_card.json"
+        if not card_path.exists():
+            return None
+        with open(card_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+
 
 def main():
     parser = argparse.ArgumentParser(description="数据集存储管理工具")

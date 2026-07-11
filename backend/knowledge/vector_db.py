@@ -14,6 +14,7 @@ import faiss
 import pickle
 import logging
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional, Set
 from threading import RLock
@@ -504,16 +505,29 @@ class VectorDatabase:
         self._rebuild_id_mapping()
         self._save_index()
 
-    def add_documents(self, documents: List[Dict[str, Any]]):
+    def add_documents(self, documents: List[Dict[str, Any]], kb_revision: Optional[str] = None):
         """添加文档到向量数据库，自动生成嵌入向量并写入Faiss索引和BM25索引。
 
         如果文档数量超过自动切换阈值，会自动迁移索引类型（Flat -> IVF -> HNSW）。
+        同时为每个文档注入 RAG 2.0 证据化元数据（content_hash/kb_revision/section/version/import_time），
+        使用 setdefault 向后兼容已有字段。
 
         Args:
             documents: 文档列表，每个文档需包含id、title、content字段
+            kb_revision: 知识库版本标识，用于引用溯源。默认使用当日日期。
         """
         if not documents:
             return
+
+        rev = kb_revision or datetime.now().strftime("%Y%m%d")
+        now_iso = datetime.now().isoformat()
+        for doc in documents:
+            chunk_text = doc.get("content", "")
+            doc.setdefault("content_hash", hashlib.md5(chunk_text.encode("utf-8")).hexdigest()[:12])
+            doc.setdefault("kb_revision", rev)
+            doc.setdefault("section", doc.get("category", ""))
+            doc.setdefault("version", "1.0")
+            doc.setdefault("import_time", now_iso)
 
         with self._lock:
             self._ensure_index()

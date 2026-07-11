@@ -1,0 +1,192 @@
+"""适配器兼容性检查 - 在激活前验证 adapter_config.json 的兼容性。
+
+遵循路线图 guardrail：
+- 验证 base_model_id、tokenizer、target_modules、rank、PEFT version
+- 不兼容时阻止激活并降级到 default
+- 返回结构化报告供 API 和日志使用
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, Any, List, Optional
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class AdapterCompatibilityReport:
+    """适配器兼容性检查报告。"""
+    adapter_name: str
+    compatible: bool = False
+    checks: Dict[str, bool] = field(default_factory=dict)
+    warnings: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
+    checked_at: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "adapter_name": self.adapter_name,
+            "compatible": self.compatible,
+            "checks": self.checks,
+            "warnings": self.warnings,
+            "errors": self.errors,
+            "checked_at": self.checked_at,
+        }
+
+
+class AdapterChecker:
+    """适配器兼容性检查器。"""
+
+    def __init__(self, expected_base_model: str = "", lora_root: str = ""):
+        self.expected_base_model = expected_base_model or os.getenv("BASE_MODEL_PATH", "")
+        self.lora_root = lora_root or os.getenv("LORA_PATH", "")
+
+    def _find_adapter_dir(self, adapter_name: str) -> Optional[Path]:
+        """查找适配器目录（支持 final 子目录）。"""
+        if not self.lora_root:
+            return None
+        base = Path(self.lora_root) / adapter_name
+        if (base / "adapter_config.json").exists():
+            return base
+        final = base / "final"
+        if (final / "adapter_config.json").exists():
+            return final
+        return None
+
+    def check_adapter(self, adapter_path: str | Path) -> AdapterCompatibilityReport:
+        """检查单个适配器的兼容性。
+
+        Args:
+            adapter_path: 适配器目录路径，或适配器名称（自动解析）
+        """
+        from datetime import datetime
+        path = Path(adapter_path)
+
+        # 如果传入的是名称而非路径，尝试解析
+        if not path.exists() and self.lora_root:
+            resolved = self._find_adapter_dir(str(adapter_path))
+            if resolved:
+                path = resolved
+
+        adapter_name = path.name if path.name != "final" else path.parent.name
+        report = AdapterCompatibilityReport(
+            adapter_name=adapter_name,
+            checked_at=datetime.now().isoformat(),
+        )
+
+        config_path = path / "adapter_config.json"
+        if not config_path.exists():
+            report.errors.append("adapter_config.json 不存在")
+            report.checks["config_exists"] = False
+            return report
+
+        report.checks["config_exists"] = True
+
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except Exception as e:
+            report.errors.append(f"adapter_config.json 解析失败: {e}")
+            return report
+
+        # 1. 检查 base_model_name_or_path
+        base_model = cfg.get("base_model_name_or_path", "")
+        if not base_model:
+            report.errors.append("base_model_name_or_path 为空")
+            report.checks["base_model"] = False
+        elif self.expected_base_model and base_model != self.expected_base_model:
+            report.warnings.append(
+                f"base_model 不匹配: adapter={base_model}, expected={self.expected_base_model}"
+            )
+            report.checks["base_model"] = True  # 警告但不阻止
+        else:
+            report.checks["base_model"] = True
+
+        # 2. 检查 target_modules 非空
+        target_modules = cfg.get("target_modules", [])
+        if not target_modules:
+            report.errors.append("target_modules 为空")
+            report.checks["target_modules"] = False
+        else:
+            report.checks["target_modules"] = True
+
+        # 3. 检查 rank (r) > 0
+        rank = cfg.get("r", 0)
+        if rank <= 0:
+            report.errors.append(f"rank (r) 无效: {rank}")
+            report.checks["rank"] = False
+        else:
+            report.checks["rank"] = True
+
+        # 4. 检查 PEFT version
+        peft_version = cfg.get("version", cfg.get("peft_version", ""))
+        if not peft_version:
+            report.warnings.append("PEFT version 未记录")
+            report.checks["peft_version"] = True  # 警告但不阻止
+        else:
+            report.checks["peft_version"] = True
+
+        # 5. 检查 adapter 权重文件存在
+        weights_exist = (path / "adapter_model.safetensors").exists() or (path / "adapter_model.bin").exists()
+        if not weights_exist:
+            report.errors.append("adapter_model.safetensors / adapter_model.bin 不存在")
+            report.checks["weights_exist"] = False
+        else:
+            report.checks["weights_exist"] = True
+
+        # 6. 检查 tokenizer 文件
+        tokenizer_files = ["tokenizer.json", "tokenizer_config.json", "vocab.json"]
+        has_tokenizer = any((path / tf).exists() for tf in tokenizer_files)
+        if not has_tokenizer:
+            report.warnings.append("tokenizer 文件不在 adapter 目录（可能复用 base model tokenizer）")
+            report.checks["tokenizer"] = True  # 警告但不阻止
+        else:
+            report.checks["tokenizer"] = True
+
+        # 总体兼容性：无 errors 则兼容
+        report.compatible = len(report.errors) == 0
+        return report
+
+    def check_all_adapters(self) -> Dict[str, AdapterCompatibilityReport]:
+        """检查 lora_root 下所有适配器。"""
+        results: Dict[str, AdapterCompatibilityReport] = {}
+        if not self.lora_root:
+            return results
+        root = Path(self.lora_root)
+        if not root.exists():
+            return results
+        for d in root.iterdir():
+            if d.is_dir():
+                report = self.check_adapter(d)
+                results[d.name] = report
+        return results
+
+
+def safe_resolve_lora(name: str, checker: Optional[AdapterChecker] = None) -> str:
+    """安全解析 LoRA 名称：检查通过返回原名，否则降级到 default。
+
+    Args:
+        name: 请求的 LoRA 名称
+        checker: 适配器检查器实例（None 时创建默认）
+
+    Returns:
+        兼容则返回 name，不兼容则返回 "default"
+    """
+    if name == "default" or not name:
+        return "default"
+
+    if checker is None:
+        checker = AdapterChecker()
+
+    report = checker.check_adapter(name)
+    if not report.compatible:
+        logger.warning(
+            f"适配器 {name} 不兼容，降级到 default。errors={report.errors}"
+        )
+        return "default"
+
+    return name

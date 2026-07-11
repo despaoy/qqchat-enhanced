@@ -281,13 +281,21 @@ start_bare_metal() {
 
     # 启动 vLLM 实例 2
     log_step "启动 vLLM 实例 2 (GPU 1, 端口 ${VLLM_PORT2})..."
-    bash "${SCRIPT_DIR}/start_vllm.sh" 1 "${VLLM_PORT2}" "${MODEL_PATH}" "${LORA_PATH}" &
-    pids+=($!)
+    local gpu_count
+    gpu_count=$(nvidia-smi --list-gpus 2>/dev/null | wc -l)
+    if [[ "${VLLM_SECONDARY_ENABLED:-false}" == "true" && ${gpu_count} -gt 1 ]]; then
+        bash "${SCRIPT_DIR}/start_vllm.sh" 1 "${VLLM_PORT2}" "${MODEL_PATH}" "${LORA_PATH}" &
+        pids+=($!)
+    else
+        log_info "Single-GPU mode: secondary vLLM instance disabled"
 
+    fi
     # 等待 vLLM 就绪
     log_step "等待 vLLM 服务就绪..."
     wait_for_url "http://localhost:${VLLM_PORT1}/health" 120 "vLLM-1"
-    wait_for_url "http://localhost:${VLLM_PORT2}/health" 120 "vLLM-2"
+    if [[ "${VLLM_SECONDARY_ENABLED:-false}" == "true" && ${gpu_count} -gt 1 ]]; then
+        wait_for_url "http://localhost:${VLLM_PORT2}/health" 120 "vLLM-2"
+    fi
 
     # 启动 FastAPI 后端
     log_step "启动 FastAPI 后端 (端口 ${BACKEND_PORT})..."
@@ -301,7 +309,12 @@ start_bare_metal() {
     # 启动 Next.js 前端
     log_step "启动 Next.js 前端 (端口 ${FRONTEND_PORT})..."
     cd "${PROJECT_DIR}"
-    pnpm dev --port "${FRONTEND_PORT}" &
+    if [[ -f ".next/standalone/server.js" ]]; then
+        PORT="${FRONTEND_PORT}" HOSTNAME="0.0.0.0" node .next/standalone/server.js &
+    else
+        log_warn "Standalone frontend build is missing; using development server"
+        pnpm dev --port "${FRONTEND_PORT}" &
+    fi
     pids+=($!)
 
     # 等待前端就绪

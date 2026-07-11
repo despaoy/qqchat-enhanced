@@ -287,6 +287,84 @@ training_tasks_table = Table(
     Column("updatedAt", Text, nullable=False, server_default=""),
 )
 
+# ============================================
+# 研究与评估相关表（LLM Research Enhancement Roadmap）
+# ============================================
+gold_eval_runs_table = Table(
+    "gold_eval_runs", metadata,
+    Column("id", Text, primary_key=True),
+    Column("run_at", Text, nullable=False),
+    Column("adapter_name", Text),
+    Column("model_label", Text),
+    Column("total_prompts", Integer, server_default="0"),
+    Column("category_breakdown", Text),
+    Column("metrics", Text),
+    Column("config_snapshot", Text),
+    Column("notes", Text),
+)
+
+experiment_runs_table = Table(
+    "experiment_runs", metadata,
+    Column("id", Text, primary_key=True),
+    Column("experiment_type", Text, nullable=False),
+    Column("hypothesis", Text),
+    Column("status", Text, nullable=False, server_default="pending"),
+    Column("started_at", Text, nullable=False),
+    Column("completed_at", Text),
+    Column("results", Text),
+    Column("config_path", Text),
+    Column("report_path", Text),
+)
+
+retrieval_eval_questions_table = Table(
+    "retrieval_eval_questions", metadata,
+    Column("id", Text, primary_key=True),
+    Column("question", Text, nullable=False),
+    Column("expected_doc_ids", Text),
+    Column("expected_doc_titles", Text),
+    Column("gold_answer", Text),
+    Column("category", Text),
+    Column("created_at", Text, nullable=False),
+)
+
+preference_pairs_table = Table(
+    "preference_pairs", metadata,
+    Column("id", Text, primary_key=True),
+    Column("prompt", Text, nullable=False),
+    Column("chosen", Text, nullable=False),
+    Column("rejected", Text, nullable=False),
+    Column("rubric", Text),
+    Column("annotator", Text),
+    Column("metadata", Text),
+    Column("review_status", Text, nullable=False, server_default="pending"),
+    Column("created_at", Text, nullable=False),
+)
+
+adapter_compatibility_table = Table(
+    "adapter_compatibility", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("adapter_name", Text, nullable=False),
+    Column("checked_at", Text, nullable=False),
+    Column("compatible", Integer, nullable=False),
+    Column("checks", Text),
+    Column("warnings", Text),
+    Column("errors", Text),
+)
+
+feedback_table = Table(
+    "feedback", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("trace_id", Text),
+    Column("message_id", Text),
+    Column("rating", Text),
+    Column("reason", Text),
+    Column("adapter_name", Text),
+    Column("kb_revision", Text),
+    Column("prompt_version", Text),
+    Column("detail", Text),
+    Column("created_at", Text, nullable=False),
+)
+
 
 # ============================================
 # 辅助：将 Row 映射为 dict

@@ -114,6 +114,14 @@ def validate_deployment_environment(env: Mapping[str, str] | None = None) -> Dep
         warnings.append("Claw code execution is enabled; isolate the backend container and use a read-only filesystem")
 
     log_level = (_value(env, "LOG_LEVEL") or "INFO").upper()
+    lora_path = _value(env, "LORA_PATH")
+    vllm_lora_root = _value(env, "VLLM_LORA_ROOT")
+    if lora_path and vllm_lora_root and lora_path != vllm_lora_root:
+        (errors if production else warnings).append("LORA_PATH and VLLM_LORA_ROOT must match for runtime adapter switching")
+
+    if production and _is_truthy(_value(env, "RERANKER_ENABLED")) and not _value(env, "RERANKER_MODEL_PATH"):
+        errors.append("RERANKER_MODEL_PATH is required when RERANKER_ENABLED=true")
+
     if log_level not in _REQUIRED_LOG_LEVELS:
         errors.append("LOG_LEVEL must be one of DEBUG, INFO, WARNING, ERROR, CRITICAL")
 

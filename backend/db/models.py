@@ -33,6 +33,9 @@ class GenerateResponse(BaseModel):
     reply: str
     model: str = "Qwen/Qwen2.5-7B-Instruct"
     costTime: float
+    citations: Optional[List[Dict[str, Any]]] = None
+    confidence: Optional[float] = None
+    abstained: bool = False
 
 
 class StatsResponse(BaseModel):
@@ -208,3 +211,98 @@ class DialogueGenerateRequest(BaseModel):
     num_dialogues: int = 10
     style: Optional[str] = None
     custom_prompt: Optional[str] = None
+
+
+# ============================================
+# 研究与评估模型（LLM Research Enhancement Roadmap）
+# ============================================
+
+
+class GoldPromptSchema(BaseModel):
+    """Gold 评估集单条提示词"""
+    id: str
+    prompt: str
+    expected_behavior: str = ""
+    category: str = "persona"
+    tags: List[str] = Field(default_factory=list)
+    persona: Optional[str] = None
+    expected_refs: Optional[List[str]] = None
+    split: str = "eval"
+
+
+class EvalRunRequest(BaseModel):
+    """评估运行请求"""
+    adapter_name: Optional[str] = None
+    model_label: Optional[str] = None
+    categories: Optional[List[str]] = None
+    split: str = "eval"
+    max_prompts: Optional[int] = None
+    mock: bool = False
+
+
+class ExperimentStartRequest(BaseModel):
+    """实验启动请求"""
+    hypothesis: Optional[str] = None
+    config_overrides: Optional[Dict[str, Any]] = None
+    mock: bool = False
+
+
+class PreferencePairCreate(BaseModel):
+    """偏好对创建请求"""
+    prompt: str
+    chosen: str
+    rejected: str
+    rubric: Optional[Dict[str, float]] = None
+    annotator: str = "manual"
+    metadata: Optional[Dict[str, Any]] = None
+    review_status: str = "pending"
+
+
+class PreferencePairUpdate(BaseModel):
+    """偏好对更新请求"""
+    review_status: Optional[str] = None
+    rubric: Optional[Dict[str, float]] = None
+    annotator: Optional[str] = None
+
+
+class PreferenceExportRequest(BaseModel):
+    """偏好数据导出请求"""
+    review_status: str = "approved"
+    format: str = "jsonl"
+
+
+class SampleFromHistoryRequest(BaseModel):
+    """从消息历史采样偏好对"""
+    limit: int = 20
+    session_id: Optional[str] = None
+    min_length: int = 10
+
+
+class RouterConfigUpdate(BaseModel):
+    """路由配置更新请求"""
+    enabled: Optional[bool] = None
+    default_adapter: Optional[str] = None
+    rag_confidence_threshold: Optional[float] = None
+    persona_keywords: Optional[Dict[str, List[str]]] = None
+
+
+class FeedbackCreate(BaseModel):
+    """用户反馈创建请求"""
+    trace_id: Optional[str] = None
+    message_id: Optional[str] = None
+    rating: str  # "thumbs_up" | "thumbs_down"
+    reason: Optional[str] = None
+    adapter_name: Optional[str] = None
+    kb_revision: Optional[str] = None
+    prompt_version: Optional[str] = None
+    detail: Optional[str] = None
+
+
+class RetrievalEvalQuestionCreate(BaseModel):
+    """检索评估问题创建请求"""
+    id: Optional[str] = None
+    question: str
+    expected_doc_ids: List[str] = Field(default_factory=list)
+    expected_doc_titles: List[str] = Field(default_factory=list)
+    gold_answer: Optional[str] = None
+    category: Optional[str] = None

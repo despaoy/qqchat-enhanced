@@ -6,6 +6,7 @@ RAG辅助工具模块 - 优化版
 """
 
 import logging
+import os
 import time
 import re
 from typing import List, Dict, Any, Optional
@@ -170,6 +171,7 @@ class RAGHelper:
 
         self.enable_reranking = RERANKER_AVAILABLE
         self.reranker = None
+        self.enable_reranking = self.enable_reranking and os.getenv("RERANKER_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
         self.recall_multiplier = 4
         self.rerank_top_k = 5
 
@@ -364,6 +366,53 @@ class RAGHelper:
         except Exception as e:
             logger.error(f"RAG检索失败: {e}")
             return []
+
+    def compute_confidence(self, results: List[Dict[str, Any]]) -> float:
+        """计算检索置信度：top-1 归一化分数 × 结果覆盖率。范围 0-1。"""
+        if not results:
+            return 0.0
+        top1_score = results[0].get("normalized_score", results[0].get("score", 0))
+        top1_score = max(0.0, min(1.0, float(top1_score)))
+        coverage = len([r for r in results if r.get("normalized_score", r.get("score", 0)) > 0]) / max(len(results), 1)
+        return round(top1_score * coverage, 4)
+
+    def build_citations(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """从检索结果构建引用列表，供前端展示证据来源。"""
+        citations: List[Dict[str, Any]] = []
+        for r in results:
+            content = r.get("content", "")
+            citations.append({
+                "source_title": r.get("title", r.get("original_title", "未知来源")),
+                "evidence_excerpt": content[:200] + ("..." if len(content) > 200 else ""),
+                "score": round(r.get("normalized_score", r.get("score", 0)), 4),
+                "content_hash": r.get("content_hash", ""),
+                "kb_revision": r.get("kb_revision", ""),
+                "section": r.get("section", r.get("category", "")),
+                "version": r.get("version", "1.0"),
+            })
+        return citations
+
+    def should_abstain(self, confidence: float, threshold: float = 0.3) -> bool:
+        """判断是否应弃答（置信度低于阈值时返回 True）。"""
+        return confidence < threshold
+
+    def retrieve_with_citations(self, query: str, top_k: Optional[int] = None,
+                                threshold: float = 0.3) -> Dict[str, Any]:
+        """检索并返回带引用和置信度的结构化结果。
+
+        Returns:
+            {results, citations, confidence, abstained}
+        """
+        results = self.retrieve_context(query, top_k=top_k)
+        confidence = self.compute_confidence(results)
+        abstained = self.should_abstain(confidence, threshold)
+        citations = self.build_citations(results) if not abstained else []
+        return {
+            "results": results,
+            "citations": citations,
+            "confidence": confidence,
+            "abstained": abstained,
+        }
 
     def build_context_prompt(
         self,
