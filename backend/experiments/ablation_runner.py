@@ -276,6 +276,8 @@ def main():
     parser.add_argument("--output-dir", type=str, default="reports/ablation", help="报告输出目录")
     parser.add_argument("--base-model", type=str, default=None)
     parser.add_argument("--train-data", type=str, default=None)
+    parser.add_argument("--variants", type=str, default="",
+                        help="逗号分隔的变体名，如 lora_baseline,dora。留空运行全部")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -287,6 +289,14 @@ def main():
         overrides["train_data_path"] = args.train_data
 
     runner = AblationRunner.from_default_config(overrides)
+
+    if args.variants:
+        selected = [v.strip() for v in args.variants.split(",") if v.strip()]
+        runner.experiment.config_variants = {
+            k: v for k, v in runner.experiment.config_variants.items() if k in selected
+        }
+        logger.info(f"仅运行变体: {list(runner.experiment.config_variants.keys())}")
+
     report = runner.run_all(mock=args.mock)
 
     output_dir = _BACKEND_DIR / args.output_dir
