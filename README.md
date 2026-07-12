@@ -36,6 +36,7 @@ vLLM     RAG      PostgreSQL/Redis
 | Document | Purpose |
 | --- | --- |
 | [Project Status and Next Steps](PROJECT_STATUS_AND_NEXT_STEPS.md) | Current completion status, server operations, deployment and acceptance checklist |
+| [Personal Action and Learning Roadmap](PERSONAL_ACTION_AND_LEARNING_ROADMAP.md) | Step-by-step personal tasks and LLM learning plan |
 | [LLM Research Enhancement Roadmap](LLM_RESEARCH_ENHANCEMENT_ROADMAP.md) | Research experiments, milestones, and graduate-admission presentation plan |
 | [Optimization Strategy](OPTIMIZATION_STRATEGY.md) | Concurrency, reliability, security, observability, and deployment principles |
 | [Dataset Card](dataset-card.md) | Training-data provenance, usage constraints, and versioning requirements |
