@@ -664,6 +664,7 @@ class LoRATrainer:
             logger.info("配置LoRA...")
             lora_config = self._create_lora_config()
             model = get_peft_model(model, lora_config)
+            trainable_params = sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
             model.print_trainable_parameters()
             self.print_gpu_memory("LoRA配置后")
 
@@ -777,6 +778,7 @@ class LoRATrainer:
                 json.dump({
                     "eval_results": {k: float(v) if isinstance(v, (int, float)) else str(v)
                                      for k, v in eval_results.items()},
+                    "trainable_params": trainable_params,
                     "config": self.config.to_dict(),
                     "best_model_checkpoint": str(trainer.state.best_model_checkpoint) if trainer.state.best_model_checkpoint else None,
                     "best_metric": float(trainer.state.best_metric) if trainer.state.best_metric else None,

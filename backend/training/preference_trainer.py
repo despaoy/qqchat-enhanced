@@ -73,11 +73,12 @@ class PreferenceTrainResult:
     method: str
     output_dir: str
     train_loss: float = 0.0
-    eval_accuracy: float = 0.0
+    eval_accuracy: Optional[float] = None
     train_steps: int = 0
     duration_s: float = 0.0
     config_snapshot: Dict[str, Any] = field(default_factory=dict)
     error: str = ""
+    metric_note: str = ""
     timestamp: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
@@ -226,9 +227,13 @@ class PreferenceTrainer:
             result.duration_s = round(time.monotonic() - start, 2)
 
             # 评估：计算 chosen vs rejected 的准确率
-            result.eval_accuracy = self._evaluate(trainer, dataset)
-
-            logger.info(f"训练完成: loss={result.train_loss:.4f}, accuracy={result.eval_accuracy:.4f}")
+            # A preference win rate requires held-out pairs and explicit log-prob scoring.
+            # Do not fabricate one from training loss.
+            result.metric_note = (
+                "Preference win rate was not computed: provide a held-out preference "
+                "evaluation set and score chosen/rejected log probabilities separately."
+            )
+            logger.info(f"Training completed: loss={result.train_loss:.4f}; preference win rate not computed")
 
         except Exception as e:
             result.error = str(e)
@@ -237,32 +242,14 @@ class PreferenceTrainer:
 
         return result
 
-    def _evaluate(self, trainer, dataset) -> float:
-        """评估 chosen vs rejected 的 logprob 准确率。"""
-        try:
-            # 简化评估：取前 20 条计算 chosen logprob > rejected logprob 的比例
-            eval_sample = dataset.select(range(min(20, len(dataset))))
-            correct = 0
-            total = 0
-            for item in eval_sample:
-                try:
-                    metrics = trainer.evaluate()
-                    # 简化：使用训练损失作为代理指标
-                    return max(0.0, min(1.0, 0.5 + (0.65 - metrics.get("eval_loss", 0.65)) * 2))
-                except Exception:
-                    pass
-                total += 1
-            return 0.65  # 默认 mock 准确率
-        except Exception:
-            return 0.0
-
     def train_mock(self, pairs: List[Dict[str, Any]]) -> PreferenceTrainResult:
         """Mock 模式：跳过训练，返回预置指标用于 CPU 验证。"""
         return PreferenceTrainResult(
             method=self.config.method,
             output_dir=self.config.output_dir,
             train_loss=0.42,
-            eval_accuracy=0.67,
+            eval_accuracy=None,
+            metric_note="Mock run: no preference win rate was computed.",
             train_steps=len(pairs) * self.config.num_train_epochs,
             duration_s=0.1,
             config_snapshot=self.config.to_dict(),
@@ -305,8 +292,11 @@ def main():
     pairs = []
     if args.data and Path(args.data).exists():
         pairs_raw = load_jsonl(Path(args.data))
-        pairs = [p.to_jsonl_dict() for p in pairs_raw if p.review_status in ("approved", "pending")]
+        pairs = [p.to_jsonl_dict() for p in pairs_raw if p.review_status == "approved"]
         logger.info(f"加载 {len(pairs)} 条偏好对")
+        if not pairs:
+            logger.error("No approved preference pairs are available for training")
+            raise SystemExit(2)
     elif args.mock:
         pairs = [
             PreferencePair(
@@ -317,8 +307,8 @@ def main():
         ]
         logger.info("Mock 模式：使用预置偏好对")
     else:
-        logger.error("非 mock 模式需要提供 --data 参数")
-        return
+        logger.error("Non-mock runs require --data")
+        raise SystemExit(2)
 
     config = PreferenceTrainingConfig(
         method=args.method,
@@ -336,8 +326,11 @@ def main():
     else:
         result = trainer.train(pairs)
 
-    print(f"\n训练结果: method={result.method}, loss={result.train_loss}, accuracy={result.eval_accuracy}")
+    print(f"\nTraining result: method={result.method}, loss={result.train_loss}, preference_accuracy={result.eval_accuracy}")
     trainer.save_report(result, Path(args.output_dir))
+    if result.error:
+        logger.error(f"Training failed; report was saved: {result.error}")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

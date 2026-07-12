@@ -154,8 +154,10 @@ def generate_sft_data(gold_prompts_path: Path, vllm_url: str,
         else:
             response = call_vllm(vllm_url, system_prompt, prompt_text)
             if not response:
-                response = generate_mock_response(item)
-                logger.warning(f"vLLM 无响应，使用 mock 回复: {prompt_id}")
+                raise RuntimeError(
+                    f"vLLM did not produce a response for {prompt_id}; rerun explicitly with --mock "
+                    "or restore the inference service."
+                )
 
         turns = parse_multiturn_prompt(prompt_text)
         if len(turns) > 1 and category == "multiturn":
@@ -169,12 +171,14 @@ def generate_sft_data(gold_prompts_path: Path, vllm_url: str,
             results.append({
                 "id": prompt_id,
                 "system": system_prompt,
+                "generation_mode": "mock" if mock else "vllm",
                 "conversations": conversations,
             })
         else:
             results.append({
                 "id": prompt_id,
                 "system": system_prompt,
+                "generation_mode": "mock" if mock else "vllm",
                 "conversations": [
                     {"from": "human", "value": prompt_text},
                     {"from": "assistant", "value": response},

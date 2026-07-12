@@ -28,7 +28,7 @@ class AblationResult:
     config_snapshot: Dict[str, Any]
     training_eval: Dict[str, Any] = field(default_factory=dict)
     adapter_size_mb: float = 0.0
-    trainable_params: int = 0
+    trainable_params: Optional[int] = None
     peak_vram_gb: Optional[float] = None
     generation_metrics: Optional[Dict[str, Any]] = None
     error_cases: List[str] = field(default_factory=list)
@@ -108,10 +108,12 @@ class AblationRunner:
         """测量 adapter 目录大小（MB）。"""
         if not output_dir.exists():
             return 0.0
-        total = 0
-        for f in output_dir.rglob("*"):
-            if f.is_file():
-                total += f.stat().st_size
+        # Count adapter tensors only; checkpoints and tokenizer files are not adapter size.
+        total = sum(
+            f.stat().st_size
+            for f in output_dir.rglob("adapter_model.*")
+            if f.is_file()
+        )
         return round(total / (1024 * 1024), 2)
 
     def run_single(self, variant_name: str, config_overrides: Dict[str, Any],
@@ -164,17 +166,12 @@ class AblationRunner:
                 with open(eval_path, "r", encoding="utf-8") as f:
                     training_eval = json.load(f)
 
-            adapter_size = self._measure_adapter_size(Path(config.output_dir))
-            trainable_params = 0
-            try:
-                import torch
-                from peft import PeftModel
-                # trainable_params 从 config 推算
-                r = config.lora_r
-                target_count = len(config.target_modules) if config.target_modules else 7
-                trainable_params = r * r * target_count * 2  # 粗略估算
-            except Exception:
-                pass
+            adapter_size = self._measure_adapter_size(Path(config.output_dir) / "final")
+            trainable_params = None
+            results_path = Path(config.output_dir) / "training_results.json"
+            if results_path.exists():
+                with open(results_path, "r", encoding="utf-8") as f:
+                    trainable_params = json.load(f).get("trainable_params")
 
             return AblationResult(
                 variant_name=variant_name,

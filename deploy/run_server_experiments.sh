@@ -72,19 +72,19 @@ phase_0() {
 
     echo "Running mock ablation..."
     if ${PYTHON} -m backend.experiments.ablation_runner --mock --output-dir "${OUTPUT_DIR}/mock" >> "${OUTPUT_DIR}/phase0_log.txt" 2>&1; then
-        ((pass++)); else ((fail++)); fi
+        pass=$((pass + 1)); else fail=$((fail + 1)); fi
 
     echo "Running mock RAG ablation..."
     if ${PYTHON} -m backend.experiments.rag_ablation --mock --output-dir "${OUTPUT_DIR}/mock" >> "${OUTPUT_DIR}/phase0_log.txt" 2>&1; then
-        ((pass++)); else ((fail++)); fi
+        pass=$((pass + 1)); else fail=$((fail + 1)); fi
 
     echo "Running mock quantization benchmark..."
     if ${PYTHON} -m backend.experiments.quantization_benchmark --mock --output-dir "${OUTPUT_DIR}/mock" >> "${OUTPUT_DIR}/phase0_log.txt" 2>&1; then
-        ((pass++)); else ((fail++)); fi
+        pass=$((pass + 1)); else fail=$((fail + 1)); fi
 
     echo "Running mock preference trainer..."
     if ${PYTHON} -m backend.training.preference_trainer --mock --output-dir "${OUTPUT_DIR}/mock" >> "${OUTPUT_DIR}/phase0_log.txt" 2>&1; then
-        ((pass++)); else ((fail++)); fi
+        pass=$((pass + 1)); else fail=$((fail + 1)); fi
 
     echo -e "Mock 验证: ${GREEN}${pass} passed${NC}, ${RED}${fail} failed${NC}"
     if [[ ${fail} -gt 0 ]]; then

@@ -113,13 +113,13 @@ def generate_pairs(
             chosen=chosen,
             rejected=rejected,
             rubric={"persona_consistency": 1.0, "safety": 0.5},
-            annotator="script" if mock else "sft_generated",
+            annotator="script_mock" if mock else "sft_generated_unreviewed",
             metadata={
                 "source": "gold_prompts",
                 "category": category,
                 "gold_prompt_id": prompt_id,
             },
-            review_status="approved",
+            review_status="pending",
         )
         pairs.append(pair)
 
