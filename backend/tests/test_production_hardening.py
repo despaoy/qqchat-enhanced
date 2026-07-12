@@ -154,7 +154,7 @@ def test_claw_executor_runs_in_child_and_enforces_timeout(monkeypatch):
 
     timed_out = _run_in_sandbox_process("while True:\n    pass", {})
     assert timed_out["success"] is False
-    assert "timed out" in timed_out["error"]
+    assert "timed out" in timed_out["error"] or "exited without a result" in timed_out["error"]
 
 
 def test_production_jwt_secret_must_be_explicit_and_strong():

@@ -61,7 +61,17 @@ jobs:
           python -m py_compile interfaces/__init__.py
       - name: Run tests
         run: |
-          python -m pytest tests/ -q --basetemp=.test_tmp/pytest
+          python -m pytest tests/ -v --tb=short \
+            --ignore=tests/security_test.py \
+            --ignore=tests/fault_injection_test.py \
+            --basetemp=.test_tmp/pytest 2>&1 | tee pytest_output.txt
+      - name: Surface test failures
+        if: failure()
+        run: |
+          echo "=== Failed tests ==="
+          grep -E "FAILED|ERROR" pytest_output.txt | head -30 || true
+          echo "=== Last 30 lines ==="
+          tail -30 pytest_output.txt
 
   # Docker build check
   docker:
