@@ -14,6 +14,7 @@ from typing import Dict, Any, List
 
 logger = logging.getLogger(__name__)
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = _BACKEND_DIR.parent
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
@@ -156,11 +157,11 @@ def main():
     )
     sft_path = Path(args.sft_data)
     if not sft_path.is_absolute():
-        sft_path = _BACKEND_DIR / sft_path
+        sft_path = _PROJECT_ROOT / sft_path
 
     output_path = Path(args.output)
     if not output_path.is_absolute():
-        output_path = _BACKEND_DIR / output_path
+        output_path = _PROJECT_ROOT / output_path
 
     count = generate_pairs(gold_path, sft_path, output_path, mock=args.mock)
     print(f"\n生成完成: {count} 条偏好对 → {output_path}")

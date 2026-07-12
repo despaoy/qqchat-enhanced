@@ -18,6 +18,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = _BACKEND_DIR.parent
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
@@ -208,7 +209,7 @@ def main():
 
     output_path = Path(args.output)
     if not output_path.is_absolute():
-        output_path = _BACKEND_DIR / output_path
+        output_path = _PROJECT_ROOT / output_path
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, "w", encoding="utf-8") as f:

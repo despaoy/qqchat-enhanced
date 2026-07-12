@@ -162,6 +162,8 @@ phase_3() {
     if ${PYTHON} -m backend.experiments.quantization_benchmark \
         --vllm-url "${VLLM_URL}" \
         --model-path "${AWQ_MODEL_PATH}" \
+        --served-model-name "qwen2.5-7b-awq" \
+        --labels awq \
         --output-dir "${OUTPUT_DIR}" \
         >> "${OUTPUT_DIR}/phase3_log.txt" 2>&1; then
         echo -e "  ${GREEN}量化基准完成${NC}"

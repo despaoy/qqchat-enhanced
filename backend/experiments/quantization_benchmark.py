@@ -329,6 +329,10 @@ def main():
     parser.add_argument("--output-dir", type=str, default="deploy/results", help="报告输出目录")
     parser.add_argument("--vllm-url", type=str, default="http://localhost:8001", help="vLLM 服务地址")
     parser.add_argument("--model-path", type=str, default="", help="模型路径")
+    parser.add_argument("--served-model-name", type=str, default="qwen2.5-7b-awq",
+                        help="vLLM 注册的模型名（用于 API model 字段）")
+    parser.add_argument("--labels", type=str, default="",
+                        help="逗号分隔的配置标签，如 awq。留空运行全部")
     parser.add_argument("--prompts-file", type=str, default="", help="自定义 prompt 集 JSON 文件")
     args = parser.parse_args()
 
@@ -342,11 +346,20 @@ def main():
     benchmark = QuantizationBenchmark(vllm_url=args.vllm_url)
 
     configs = [
-        QuantizationConfig(label="fp16", model_path=args.model_path, quantization="fp16", vllm_url=args.vllm_url),
-        QuantizationConfig(label="awq", model_path=args.model_path, quantization="awq", vllm_url=args.vllm_url),
-        QuantizationConfig(label="nf4", model_path=args.model_path, quantization="nf4", vllm_url=args.vllm_url),
-        QuantizationConfig(label="int8", model_path=args.model_path, quantization="int8", vllm_url=args.vllm_url),
+        QuantizationConfig(label="fp16", model_path=args.model_path, quantization="fp16",
+                           vllm_url=args.vllm_url, served_model_name=args.served_model_name),
+        QuantizationConfig(label="awq", model_path=args.model_path, quantization="awq",
+                           vllm_url=args.vllm_url, served_model_name=args.served_model_name),
+        QuantizationConfig(label="nf4", model_path=args.model_path, quantization="nf4",
+                           vllm_url=args.vllm_url, served_model_name=args.served_model_name),
+        QuantizationConfig(label="int8", model_path=args.model_path, quantization="int8",
+                           vllm_url=args.vllm_url, served_model_name=args.served_model_name),
     ]
+
+    if args.labels:
+        selected = {l.strip() for l in args.labels.split(",") if l.strip()}
+        configs = [c for c in configs if c.label in selected]
+        logger.info(f"仅测试配置: {[c.label for c in configs]}")
 
     if args.mock:
         results = [benchmark.benchmark_model_mock(cfg) for cfg in configs]
