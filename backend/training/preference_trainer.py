@@ -32,16 +32,21 @@ class PreferenceTrainingConfig:
     learning_rate: float = 5e-6
     num_train_epochs: int = 1
     seed: int = 42
-    per_device_train_batch_size: int = 2
+    per_device_train_batch_size: int = 1
     gradient_accumulation_steps: int = 4
-    max_length: int = 1024
-    max_prompt_length: int = 512
+    max_length: int = 512
+    max_prompt_length: int = 256
     warmup_ratio: float = 0.1
     lr_scheduler_type: str = "cosine"
     base_model_path: str = ""
     adapter_path: str = ""  # SFT adapter 作为起点
     output_dir: str = "loras/preference_dpo"
     save_total_limit: int = 2
+    load_in_4bit: bool = True
+    gradient_checkpointing: bool = True
+    lora_r: int = 32
+    lora_alpha: int = 64
+    lora_dropout: float = 0.1
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -105,16 +110,25 @@ class PreferenceTrainer:
 
         try:
             import torch
-            from transformers import AutoModelForCausalLM, AutoTokenizer
-            from peft import PeftModel
+            from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+            from peft import (PeftModel, LoraConfig, get_peft_model,
+                              prepare_model_for_kbit_training, TaskType)
             from datasets import Dataset
             from trl import DPOTrainer, DPOConfig
             from training.trainer import GpuTemperatureCallback
 
             logger.info(f"加载基础模型: {self.config.base_model_path}")
+            quant_config = None
+            if self.config.load_in_4bit:
+                quant_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_compute_dtype=torch.bfloat16,
+                    bnb_4bit_use_double_quant=True,
+                )
             model = AutoModelForCausalLM.from_pretrained(
                 self.config.base_model_path,
-                torch_dtype=torch.bfloat16,
+                quantization_config=quant_config,
                 device_map="auto",
             )
             tokenizer = AutoTokenizer.from_pretrained(self.config.base_model_path)
@@ -125,6 +139,19 @@ class PreferenceTrainer:
             if self.config.adapter_path and Path(self.config.adapter_path).exists():
                 logger.info(f"加载 SFT adapter: {self.config.adapter_path}")
                 model = PeftModel.from_pretrained(model, self.config.adapter_path)
+            elif self.config.load_in_4bit:
+                model = prepare_model_for_kbit_training(model)
+                lora_config = LoraConfig(
+                    r=self.config.lora_r,
+                    lora_alpha=self.config.lora_alpha,
+                    lora_dropout=self.config.lora_dropout,
+                    bias="none",
+                    task_type=TaskType.CAUSAL_LM,
+                    target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                                    "gate_proj", "up_proj", "down_proj"],
+                )
+                model = get_peft_model(model, lora_config)
+                logger.info(f"已创建 DPO LoRA adapter: r={self.config.lora_r}, alpha={self.config.lora_alpha}")
 
             # 构建数据集
             dataset = Dataset.from_list([
@@ -152,6 +179,7 @@ class PreferenceTrainer:
                     save_total_limit=self.config.save_total_limit,
                     logging_steps=10,
                     report_to="none",
+                    gradient_checkpointing=self.config.gradient_checkpointing,
                 )
                 trainer = ORPOTrainer(
                     model=model,
@@ -174,6 +202,7 @@ class PreferenceTrainer:
                     save_total_limit=self.config.save_total_limit,
                     logging_steps=10,
                     report_to="none",
+                    gradient_checkpointing=self.config.gradient_checkpointing,
                 )
                 trainer = DPOTrainer(
                     model=model,

@@ -16,6 +16,7 @@ from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = _BACKEND_DIR.parent
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
@@ -299,7 +300,7 @@ def main():
 
     report = runner.run_all(mock=args.mock)
 
-    output_dir = _BACKEND_DIR / args.output_dir
+    output_dir = _PROJECT_ROOT / args.output_dir
     runner.save_report(report, output_dir)
     print(f"\n消融实验完成。报告: {output_dir / 'ablation_report.md'}")
 
