@@ -219,7 +219,7 @@ class AblationRunner:
         table = []
         for variant_name, result in results.items():
             training_eval = result.get("training_eval", {}) if isinstance(result, dict) else result.training_eval
-            gen_metrics = result.get("generation_metrics", {}) if isinstance(result, dict) else (result.generation_metrics or {})
+            gen_metrics = (result.get("generation_metrics") or {}) if isinstance(result, dict) else (result.generation_metrics or {})
             row = {
                 "variant": variant_name,
                 "status": result.get("status", "unknown") if isinstance(result, dict) else result.status,

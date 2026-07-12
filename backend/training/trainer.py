@@ -10,7 +10,7 @@ from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import Optional, Dict, Any, List
 
-_BACKEND_DIR = Path(__file__).parent
+_BACKEND_DIR = Path(__file__).parent.parent.parent  # project root
 
 
 def _resolve_path(p: str) -> str:
@@ -168,8 +168,8 @@ class LoRATrainingConfig:
     支持从/到JSON文件序列化，提供参数校验功能。
     """
     base_model_path: str = _resolve_path(_os.getenv("BASE_MODEL_PATH", "models/Qwen2.5-7B-Instruct"))
-    train_data_path: str = _resolve_path("hutao_dialogues.json")
-    output_dir: str = _resolve_path("loras/hutao_lora_7b")
+    train_data_path: str = _resolve_path("backend/hutao_dialogues.json")
+    output_dir: str = _resolve_path("backend/loras/hutao_lora_7b")
 
     lora_r: int = 32
     lora_alpha: int = 64
