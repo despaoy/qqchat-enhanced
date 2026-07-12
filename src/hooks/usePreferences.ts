@@ -7,30 +7,20 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '@/lib/api';
+import { api, type JsonRecord, type PreferencePairRecord, type PreferenceReviewStatus } from '@/lib/api';
 
-export interface PreferencePair {
-  id: string;
-  prompt: string;
-  chosen: string;
-  rejected: string;
-  rubric: Record<string, any>;
-  annotator: string;
-  metadata: Record<string, any>;
-  review_status: 'pending' | 'approved' | 'rejected';
-  created_at: string;
-}
+export type PreferencePair = PreferencePairRecord;
 
 export function usePreferences(enabled = true) {
   const [preferences, setPreferences] = useState<PreferencePair[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
-  const [filterStatus, setFilterStatus] = useState<string>('');
+  const [filterStatus, setFilterStatus] = useState<PreferenceReviewStatus | ''>('');
   const [exporting, setExporting] = useState(false);
   const [sampling, setSampling] = useState(false);
 
-  const fetchPreferences = useCallback(async (status?: string) => {
+  const fetchPreferences = useCallback(async (status?: PreferenceReviewStatus | '') => {
     if (!enabled) return;
     try {
       setLoading(true);
@@ -51,7 +41,7 @@ export function usePreferences(enabled = true) {
     chosen: string;
     rejected: string;
     annotator?: string;
-    rubric?: Record<string, any>;
+    rubric?: JsonRecord;
   }) => {
     try {
       const result = await api.createPreference(req);
@@ -64,7 +54,7 @@ export function usePreferences(enabled = true) {
     }
   }, [fetchPreferences, filterStatus]);
 
-  const updatePreference = useCallback(async (id: string, req: { review_status?: 'pending' | 'approved' | 'rejected'; rubric?: Record<string, any>; annotator?: string }) => {
+  const updatePreference = useCallback(async (id: string, req: { review_status?: PreferenceReviewStatus; rubric?: JsonRecord; annotator?: string }) => {
     try {
       await api.updatePreference(id, req);
       setPreferences(prev => prev.map(p => p.id === id ? { ...p, ...req } : p));
@@ -75,7 +65,7 @@ export function usePreferences(enabled = true) {
     }
   }, []);
 
-  const exportPreferences = useCallback(async (req: { review_status?: string; format?: string }) => {
+  const exportPreferences = useCallback(async (req: { review_status: PreferenceReviewStatus; format: 'jsonl' }) => {
     try {
       setExporting(true);
       return await api.exportPreferences(req);
@@ -101,7 +91,7 @@ export function usePreferences(enabled = true) {
     }
   }, []);
 
-  const changeFilter = useCallback((status: string) => {
+  const changeFilter = useCallback((status: PreferenceReviewStatus | '') => {
     setFilterStatus(status);
     fetchPreferences(status);
   }, [fetchPreferences]);

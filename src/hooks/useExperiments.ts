@@ -7,18 +7,9 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '@/lib/api';
+import { api, type ExperimentRecord } from '@/lib/api';
 
-export interface Experiment {
-  id: string;
-  experiment_type: string;
-  hypothesis: string;
-  status: 'running' | 'completed' | 'failed';
-  started_at: string;
-  completed_at?: string;
-  results: Record<string, any>;
-  report_path?: string;
-}
+export type Experiment = ExperimentRecord;
 
 export type ExperimentType = 'lora-ablation' | 'rag-ablation' | 'quantization-benchmark';
 

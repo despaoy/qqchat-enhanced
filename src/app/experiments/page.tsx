@@ -14,7 +14,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { FlaskConical, RefreshCw, AlertCircle, Play, Eye } from 'lucide-react';
-import { useExperiments, type ExperimentType } from '@/hooks/useExperiments';
+import { useExperiments, type Experiment, type ExperimentType } from '@/hooks/useExperiments';
+import type { JsonRecord } from '@/lib/api';
 import { toast } from 'sonner';
 
 const statusColors: Record<string, string> = {
@@ -43,7 +44,7 @@ function ExperimentsContent() {
   const [mockMode, setMockMode] = useState(true);
   const [hypothesis, setHypothesis] = useState('');
   const [startDialogOpen, setStartDialogOpen] = useState(false);
-  const [detailExperiment, setDetailExperiment] = useState<any | null>(null);
+  const [detailExperiment, setDetailExperiment] = useState<Experiment | null>(null);
   const [reportContent, setReportContent] = useState<string | null>(null);
 
   if (error) {
@@ -78,7 +79,7 @@ function ExperimentsContent() {
     }
   };
 
-  const handleViewDetail = async (exp: any) => {
+  const handleViewDetail = async (exp: Experiment) => {
     setDetailExperiment(exp);
     setReportContent(null);
     try {
@@ -89,9 +90,19 @@ function ExperimentsContent() {
     }
   };
 
-  const renderComparisonTable = (results: any) => {
-    const table = results?.comparison_table || results?.results?.comparison_table || [];
-    if (!Array.isArray(table) || table.length === 0) {
+  const getComparisonRows = (results: JsonRecord | JsonRecord[]): JsonRecord[] => {
+    const root = Array.isArray(results) ? undefined : results;
+    const nested = root?.results;
+    const candidate = root?.comparison_table ?? (typeof nested === 'object' && nested !== null && !Array.isArray(nested)
+      ? (nested as JsonRecord).comparison_table
+      : undefined);
+    if (!Array.isArray(candidate)) return [];
+    return candidate.filter((row): row is JsonRecord => typeof row === 'object' && row !== null && !Array.isArray(row));
+  };
+
+  const renderComparisonTable = (results: JsonRecord | JsonRecord[]) => {
+    const table = getComparisonRows(results);
+    if (table.length === 0) {
       return <p className="text-muted-foreground text-center py-4">无对比数据</p>;
     }
     const columns = Object.keys(table[0]);
@@ -103,7 +114,7 @@ function ExperimentsContent() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {table.map((row: any, i: number) => (
+          {table.map((row, i) => (
             <TableRow key={i}>
               {columns.map(col => (
                 <TableCell key={col} className="font-mono text-xs">

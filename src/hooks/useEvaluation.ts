@@ -7,36 +7,13 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '@/lib/api';
+import { api, type EvaluationRunRecord, type FeedbackRecord, type GoldPromptRecord } from '@/lib/api';
 
-export interface GoldPrompt {
-  id: string;
-  prompt: string;
-  category: string;
-  split?: string;
-  rubric?: any;
-}
+export type GoldPrompt = GoldPromptRecord;
 
-export interface EvalRun {
-  id: string;
-  run_at: string;
-  adapter_name: string;
-  model_label: string;
-  total_prompts: number;
-  metrics: Record<string, any>;
-  notes?: string;
-}
+export type EvalRun = EvaluationRunRecord;
 
-export interface Feedback {
-  trace_id: string;
-  message_id?: string;
-  rating: string;
-  reason?: string;
-  adapter_name?: string;
-  kb_revision?: string;
-  detail?: string;
-  created_at: string;
-}
+export type Feedback = FeedbackRecord;
 
 export function useEvaluation(enabled = true) {
   const [goldSet, setGoldSet] = useState<{ total: number; category_breakdown: Record<string, number>; prompts: GoldPrompt[] }>({

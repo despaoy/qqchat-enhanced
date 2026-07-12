@@ -71,38 +71,6 @@ async def run_evaluation(req: EvalRunRequest, current_user: dict = Depends(get_c
     schedule_generation_evaluation(run_id, req.model_dump(), db)
     return {"success": True, "run_id": run_id, "status": "queued", "mock": req.mock}
 
-    try:
-        if not req.mock:
-            from evaluation.generation_metrics import GenerationMetrics
-            from evaluation.gold_set_manager import get_gold_set_manager
-            mgr = get_gold_set_manager()
-            prompts = mgr.load_set()
-            if req.categories:
-                prompts = [p for p in prompts if p.get("category") in req.categories]
-            if req.split:
-                prompts = [p for p in prompts if p.get("split") == req.split]
-            if req.max_prompts:
-                prompts = prompts[:req.max_prompts]
-            metrics = GenerationMetrics()
-            results = {"total_prompts": len(prompts), "note": "evaluation scheduled - use /runs/{id} for results"}
-            db.execute_sql(
-                "UPDATE gold_eval_runs SET metrics=?, total_prompts=? WHERE id=?",
-                (json.dumps(results), len(prompts), run_id),
-            )
-        else:
-            mock_results = {"total_prompts": 0, "mock": True, "distinct_1": 0.0, "distinct_2": 0.0}
-            db.execute_sql(
-                "UPDATE gold_eval_runs SET metrics=?, total_prompts=0 WHERE id=?",
-                (json.dumps(mock_results), run_id),
-            )
-    except ImportError:
-        logger.info("evaluation 模块未初始化，仅记录 run 元数据")
-    except Exception as e:
-        logger.error(f"评估运行失败: {e}")
-
-    return {"success": True, "run_id": run_id, "status": "scheduled", "mock": req.mock}
-
-
 @router.get("/api/evaluation/runs")
 async def list_runs(limit: int = 20, current_user: dict = Depends(get_current_user)):
     """列出评估运行历史"""

@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Scale, RefreshCw, AlertCircle, Plus, Download, History, Eye } from 'lucide-react';
 import { usePreferences, type PreferencePair } from '@/hooks/usePreferences';
+import type { PreferenceCandidate, PreferenceReviewStatus } from '@/lib/api';
 import { toast } from 'sonner';
 
 const statusColors: Record<string, string> = {
@@ -40,11 +41,11 @@ function PreferencesContent() {
   const [exportOpen, setExportOpen] = useState(false);
   const [sampleOpen, setSampleOpen] = useState(false);
   const [detailPair, setDetailPair] = useState<PreferencePair | null>(null);
-  const [exportStatus, setExportStatus] = useState('approved');
+  const [exportStatus, setExportStatus] = useState<PreferenceReviewStatus>('approved');
   const [sampleLimit, setSampleLimit] = useState(20);
   const [sampleSessionId, setSampleSessionId] = useState('');
   const [createForm, setCreateForm] = useState({ prompt: '', chosen: '', rejected: '', annotator: '' });
-  const [sampleCandidates, setSampleCandidates] = useState<any[] | null>(null);
+  const [sampleCandidates, setSampleCandidates] = useState<PreferenceCandidate[] | null>(null);
 
   if (error) {
     return (
@@ -152,7 +153,7 @@ function PreferencesContent() {
           </Button>
           <div className="flex items-center gap-2 ml-auto">
             <span className="text-sm text-muted-foreground">过滤:</span>
-            <Select value={filterStatus || 'all'} onValueChange={(v) => setFilterStatus(v === 'all' ? '' : v)}>
+            <Select value={filterStatus || 'all'} onValueChange={(v) => setFilterStatus(v === 'all' ? '' : v as PreferenceReviewStatus)}>
               <SelectTrigger className="w-32">
                 <SelectValue />
               </SelectTrigger>
@@ -266,7 +267,7 @@ function PreferencesContent() {
             <div className="space-y-4 py-2">
               <div className="space-y-2">
                 <Label>审核状态</Label>
-                <Select value={exportStatus} onValueChange={setExportStatus}>
+                <Select value={exportStatus} onValueChange={(value) => setExportStatus(value as PreferenceReviewStatus)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>

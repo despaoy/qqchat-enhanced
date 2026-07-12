@@ -1270,118 +1270,268 @@ class ApiClient {
   // 研究与评估 API（LLM Research Enhancement）
   // ============================================
 
-  /** 获取 Gold 评估集 */
-  async getGoldSet(): Promise<{ success: boolean; total: number; category_breakdown: Record<string, number>; prompts: any[] }> {
-    return this.request<{ success: boolean; total: number; category_breakdown: Record<string, number>; prompts: any[] }>('/evaluation/gold-set');
+  /** Evaluation and research APIs */
+  async getGoldSet(): Promise<{ success: boolean; total: number; category_breakdown: Record<string, number>; prompts: GoldPromptRecord[] }> {
+    return this.request<{ success: boolean; total: number; category_breakdown: Record<string, number>; prompts: GoldPromptRecord[] }>('/evaluation/gold-set');
   }
 
-  /** 运行评估 */
-  async runEvaluation(req: { adapter_name?: string; categories?: string[]; mock?: boolean }): Promise<any> {
-    return this.request<any>('/evaluation/run', {
+  async runEvaluation(req: EvaluationRunRequest): Promise<EvaluationRunStartResponse> {
+    return this.request<EvaluationRunStartResponse>('/evaluation/run', {
       method: 'POST',
       body: JSON.stringify(req),
     });
   }
 
-  /** 获取评估运行列表 */
-  async getEvaluationRuns(): Promise<{ runs: any[] }> {
-    return this.request<{ runs: any[] }>('/evaluation/runs');
+  async getEvaluationRuns(): Promise<{ success: boolean; runs: EvaluationRunRecord[] }> {
+    return this.request<{ success: boolean; runs: EvaluationRunRecord[] }>('/evaluation/runs');
   }
 
-  /** 获取用户反馈列表 */
-  async getFeedback(rating?: string): Promise<{ success: boolean; feedbacks: any[]; total: number }> {
+  async getFeedback(rating?: string): Promise<{ success: boolean; feedbacks: FeedbackRecord[]; total: number }> {
     const query = rating ? `?rating=${encodeURIComponent(rating)}` : '';
-    return this.request<{ success: boolean; feedbacks: any[]; total: number }>(`/feedback${query}`);
+    return this.request<{ success: boolean; feedbacks: FeedbackRecord[]; total: number }>(`/feedback${query}`);
   }
 
-  /** 获取实验列表 */
-  async getExperiments(): Promise<{ experiments: any[] }> {
-    return this.request<{ experiments: any[] }>('/experiments/');
+  async getExperiments(): Promise<{ success: boolean; experiments: ExperimentRecord[]; total: number }> {
+    return this.request<{ success: boolean; experiments: ExperimentRecord[]; total: number }>('/experiments/');
   }
 
-  /** 启动实验 */
-  async startExperiment(type: string, req: { hypothesis?: string; mock?: boolean }): Promise<any> {
-    return this.request<any>(`/experiments/${type}`, {
+  async startExperiment(type: string, req: ExperimentStartRequest): Promise<ExperimentStartResponse> {
+    return this.request<ExperimentStartResponse>(`/experiments/${type}`, {
       method: 'POST',
       body: JSON.stringify(req),
     });
   }
 
-  /** 获取实验报告 */
-  async getExperimentReport(expId: string): Promise<any> {
-    return this.request<any>(`/experiments/${expId}/report`);
+  async getExperimentReport(expId: string): Promise<{ success: boolean; report: string }> {
+    return this.request<{ success: boolean; report: string }>(`/experiments/${expId}/report`);
   }
 
-  /** 获取路由配置 */
-  async getRouterConfig(): Promise<any> {
-    return this.request<any>('/router/config');
+  async getRouterConfig(): Promise<{ success: boolean; config: RouterConfigRecord }> {
+    return this.request<{ success: boolean; config: RouterConfigRecord }>('/router/config');
   }
 
-  /** 更新路由配置 */
-  async updateRouterConfig(req: any): Promise<any> {
-    return this.request<any>('/router/config', {
+  async updateRouterConfig(req: Partial<RouterConfigRecord>): Promise<{ success: boolean; config: RouterConfigRecord }> {
+    return this.request<{ success: boolean; config: RouterConfigRecord }>('/router/config', {
       method: 'PUT',
       body: JSON.stringify(req),
     });
   }
 
-  /** 获取路由适配器列表 */
-  async getRouterAdapters(): Promise<any> {
-    return this.request<any>('/router/adapters');
+  async getRouterAdapters(): Promise<{ success: boolean; adapters: RouterAdapterRecord[]; total: number }> {
+    return this.request<{ success: boolean; adapters: RouterAdapterRecord[]; total: number }>('/router/adapters');
   }
 
-  /** 获取路由日志 */
-  async getRouterLogs(): Promise<{ logs: any[] }> {
-    return this.request<{ logs: any[] }>('/router/logs');
+  async getRouterLogs(): Promise<{ success: boolean; logs: RoutingLogRecord[]; total: number }> {
+    return this.request<{ success: boolean; logs: RoutingLogRecord[]; total: number }>('/router/logs');
   }
 
-  /** 触发适配器兼容性检查 */
-  async checkAdapter(adapterName: string): Promise<any> {
-    return this.request<any>(`/router/check/${encodeURIComponent(adapterName)}`, {
+  async checkAdapter(adapterName: string): Promise<AdapterCheckResponse> {
+    return this.request<AdapterCheckResponse>(`/router/check/${encodeURIComponent(adapterName)}`, {
       method: 'POST',
     });
   }
 
-  /** 获取偏好对列表 */
-  async getPreferences(reviewStatus?: string): Promise<{ success: boolean; preferences: any[]; total: number }> {
+  async getPreferences(reviewStatus?: PreferenceReviewStatus): Promise<{ success: boolean; preferences: PreferencePairRecord[]; total: number }> {
     const query = reviewStatus ? `?review_status=${encodeURIComponent(reviewStatus)}` : '';
-    return this.request<{ success: boolean; preferences: any[]; total: number }>(`/preferences/${query}`);
+    return this.request<{ success: boolean; preferences: PreferencePairRecord[]; total: number }>(`/preferences/${query}`);
   }
 
-  /** 创建偏好对 */
-  async createPreference(req: any): Promise<any> {
-    return this.request<any>('/preferences/', {
+  async createPreference(req: PreferenceCreateRequest): Promise<{ success: boolean; id: string }> {
+    return this.request<{ success: boolean; id: string }>('/preferences/', {
       method: 'POST',
       body: JSON.stringify(req),
     });
   }
 
-  /** 更新偏好对 */
-  async updatePreference(id: string, req: any): Promise<any> {
-    return this.request<any>(`/preferences/${id}`, {
+  async updatePreference(id: string, req: PreferenceUpdateRequest): Promise<{ success: boolean; id: string; note?: string }> {
+    return this.request<{ success: boolean; id: string; note?: string }>(`/preferences/${id}`, {
       method: 'PUT',
       body: JSON.stringify(req),
     });
   }
 
-  /** 导出偏好数据 */
-  async exportPreferences(req: { review_status?: string; format?: string }): Promise<any> {
-    return this.request<any>('/preferences/export', {
+  async exportPreferences(req: PreferenceExportRequest): Promise<{ success: boolean; format: string; count: number; data: PreferenceExportRecord[] }> {
+    return this.request<{ success: boolean; format: string; count: number; data: PreferenceExportRecord[] }>('/preferences/export', {
       method: 'POST',
       body: JSON.stringify(req),
     });
   }
 
-  /** 从历史采样偏好对 */
-  async sampleFromHistory(req: { limit?: number; session_id?: string }): Promise<any> {
-    return this.request<any>('/preferences/sample-from-history', {
+  async sampleFromHistory(req: PreferenceSampleRequest): Promise<{ success: boolean; candidates: PreferenceCandidate[]; total: number }> {
+    return this.request<{ success: boolean; candidates: PreferenceCandidate[]; total: number }>('/preferences/sample-from-history', {
       method: 'POST',
       body: JSON.stringify(req),
     });
   }
+
 }
 
 // 导出单例实例
 export const api = new ApiClient();
 
 export default api;
+export type JsonRecord = Record<string, unknown>;
+
+export interface GoldPromptRecord {
+  id: string;
+  prompt: string;
+  category: string;
+  split?: string;
+  rubric?: JsonRecord;
+}
+
+export interface EvaluationRunRecord {
+  id: string;
+  run_at: string;
+  adapter_name: string;
+  model_label: string;
+  total_prompts: number;
+  metrics: JsonRecord;
+  notes?: string;
+}
+
+export interface FeedbackRecord {
+  trace_id: string;
+  message_id?: string;
+  rating: string;
+  reason?: string;
+  adapter_name?: string;
+  kb_revision?: string;
+  detail?: string;
+  created_at: string;
+}
+
+export interface ExperimentRecord {
+  id: string;
+  experiment_type: string;
+  hypothesis: string;
+  status: 'running' | 'completed' | 'failed';
+  started_at: string;
+  completed_at?: string;
+  results: JsonRecord | JsonRecord[];
+  report_path?: string;
+}
+
+export interface ExperimentStartResponse {
+  success: boolean;
+  experiment_id: string;
+  status: 'running' | 'completed' | 'failed';
+  mock?: boolean;
+  results?: JsonRecord | JsonRecord[];
+  error?: string;
+}
+
+export interface RouterConfigRecord {
+  enabled: boolean;
+  default_adapter: string;
+  rag_confidence_threshold: number;
+  persona_keywords: Record<string, string[]>;
+}
+
+export interface RouterAdapterRecord {
+  name: string;
+  path: string;
+  compatibility: {
+    compatible: boolean;
+    checked_at: string;
+    checks: Record<string, boolean>;
+    warnings: string[];
+    errors: string[];
+  } | null;
+}
+
+export interface RoutingLogRecord {
+  timestamp: string;
+  trace_id: string;
+  target: string;
+  adapter_name: string;
+  confidence: number;
+  reason: string;
+  fallback: boolean;
+}
+
+export type PreferenceReviewStatus = 'pending' | 'approved' | 'rejected';
+
+export interface PreferencePairRecord {
+  id: string;
+  prompt: string;
+  chosen: string;
+  rejected: string;
+  rubric: JsonRecord;
+  annotator: string;
+  metadata: JsonRecord;
+  review_status: PreferenceReviewStatus;
+  created_at: string;
+}
+
+export interface PreferenceCandidate {
+  prompt: string;
+  response: string;
+  lora_name?: string;
+  trace_id?: string;
+  needs_annotation: boolean;
+}
+
+export interface EvaluationRunRequest {
+  adapter_name?: string;
+  model_label?: string;
+  categories?: string[];
+  split?: string;
+  max_prompts?: number;
+  mock?: boolean;
+}
+
+export interface EvaluationRunStartResponse {
+  success: boolean;
+  run_id: string;
+  status: 'queued' | 'scheduled';
+  mock: boolean;
+}
+
+export interface ExperimentStartRequest {
+  hypothesis?: string;
+  mock?: boolean;
+  config_overrides?: JsonRecord;
+}
+
+export interface AdapterCheckResponse {
+  success: boolean;
+  adapter_name: string;
+  compatible: boolean;
+  checks: Record<string, boolean>;
+  warnings: string[];
+  errors: string[];
+}
+
+export interface PreferenceCreateRequest {
+  prompt: string;
+  chosen: string;
+  rejected: string;
+  annotator?: string;
+  rubric?: JsonRecord;
+  metadata?: JsonRecord;
+  review_status?: PreferenceReviewStatus;
+}
+
+export interface PreferenceUpdateRequest {
+  review_status?: PreferenceReviewStatus;
+  rubric?: JsonRecord;
+  annotator?: string;
+}
+
+export interface PreferenceExportRequest {
+  review_status: PreferenceReviewStatus;
+  format: 'jsonl';
+}
+
+export interface PreferenceExportRecord {
+  prompt: string;
+  chosen: string;
+  rejected: string;
+  rubric: JsonRecord;
+}
+
+export interface PreferenceSampleRequest {
+  limit?: number;
+  session_id?: string;
+}
