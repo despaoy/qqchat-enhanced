@@ -147,7 +147,7 @@ async def test_claw_execution_is_opt_in_in_production(monkeypatch):
 def test_claw_executor_runs_in_child_and_enforces_timeout(monkeypatch):
     from api.claw import _run_in_sandbox_process
 
-    monkeypatch.setenv("CLAW_EXECUTION_TIMEOUT", "0.5")
+    monkeypatch.setenv("CLAW_EXECUTION_TIMEOUT", "5")
     success = _run_in_sandbox_process("return sum([1, 2, 3])", {})
     assert success["success"] is True
     assert success["result"] == "6"

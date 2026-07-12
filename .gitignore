@@ -101,6 +101,7 @@ __pycache__/
 venv/
 .venv/
 backend/venv/
+backend/.test_tmp/
 
 # === 模型文件（大文件，不提交）===
 backend/models/
