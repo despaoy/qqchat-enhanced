@@ -7,7 +7,6 @@ import json
 import logging
 import multiprocessing
 import os
-import queue
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends
@@ -186,13 +185,13 @@ def _validate_tool_code(code: str) -> None:
             raise ValueError("global and nonlocal statements are not allowed")
 
 
-def _sandbox_worker(code: str, args: dict, result_queue) -> None:
+def _sandbox_worker(code: str, args: dict, result_channel) -> None:
     stdout = _CappedWriter()
     stderr = _CappedWriter()
     try:
         try:
             import resource
-            memory_limit = int(os.getenv("CLAW_MEMORY_LIMIT_MB", "512")) * 1024 * 1024
+            memory_limit = int(os.getenv("CLAW_MEMORY_LIMIT_MB", "4096")) * 1024 * 1024
             cpu_limit = max(1, int(float(os.getenv("CLAW_EXECUTION_TIMEOUT", "3"))))
             resource.setrlimit(resource.RLIMIT_AS, (memory_limit, memory_limit))
             resource.setrlimit(resource.RLIMIT_CPU, (cpu_limit, cpu_limit + 1))
@@ -200,8 +199,10 @@ def _sandbox_worker(code: str, args: dict, result_queue) -> None:
             pass
 
         import contextlib
-        local_vars = {"args": args, "result": None}
-        restricted_globals = {"__builtins__": _safe_builtins()}
+        # exec-defined functions resolve names through the globals mapping.
+        # Use one restricted namespace so _claw_main and args remain visible
+        # to the generated module-level invocation.
+        restricted_globals = {"__builtins__": _safe_builtins(), "args": args, "result": None}
         wrapped_code = (
             "def _claw_main(**kwargs):\n"
             + "\n".join("    " + line for line in code.splitlines())
@@ -209,16 +210,16 @@ def _sandbox_worker(code: str, args: dict, result_queue) -> None:
             "_result = _claw_main(**args)\n"
         )
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            exec(wrapped_code, restricted_globals, local_vars)  # noqa: S102
-        value = local_vars.get("_result")
-        result_queue.put({
+            exec(wrapped_code, restricted_globals, restricted_globals)  # noqa: S102
+        value = restricted_globals.get("_result")
+        result_channel.send({
             "success": True,
             "output": stdout.getvalue(),
             "error": stderr.getvalue(),
             "result": "" if value is None else str(value)[:_MAX_OUTPUT_CHARS],
         })
     except BaseException as exc:
-        result_queue.put({
+        result_channel.send({
             "success": False,
             "output": stdout.getvalue(),
             "error": f"{type(exc).__name__}: {exc}"[:_MAX_OUTPUT_CHARS],
@@ -229,9 +230,10 @@ def _sandbox_worker(code: str, args: dict, result_queue) -> None:
 def _run_in_sandbox_process(code: str, args: dict) -> dict:
     timeout = min(10.0, max(0.5, float(os.getenv("CLAW_EXECUTION_TIMEOUT", "3"))))
     context = multiprocessing.get_context("spawn")
-    result_queue = context.Queue(maxsize=1)
-    process = context.Process(target=_sandbox_worker, args=(code, args, result_queue), daemon=True)
+    result_reader, result_writer = context.Pipe(duplex=False)
+    process = context.Process(target=_sandbox_worker, args=(code, args, result_writer), daemon=True)
     process.start()
+    result_writer.close()
     process.join(timeout)
     if process.is_alive():
         process.terminate()
@@ -239,8 +241,11 @@ def _run_in_sandbox_process(code: str, args: dict) -> dict:
         return {"success": False, "output": "", "error": "execution timed out", "result": ""}
 
     try:
-        return result_queue.get(timeout=0.5)
-    except queue.Empty:
+        if result_reader.poll(0.5):
+            try:
+                return result_reader.recv()
+            except EOFError:
+                pass
         return {
             "success": False,
             "output": "",
@@ -248,7 +253,7 @@ def _run_in_sandbox_process(code: str, args: dict) -> dict:
             "result": "",
         }
     finally:
-        result_queue.close()
+        result_reader.close()
 
 
 @router.post("/api/claw/tools/execute")
