@@ -110,8 +110,21 @@ function originsMatch(actualOrigin: string, expectedOrigin: string): boolean {
   }
 }
 
+function requestVisibleOrigin(request: Request): string {
+  const internalUrl = new URL(request.url);
+  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
+  const host = forwardedHost || request.headers.get('host');
+  if (!host) return internalUrl.origin;
+
+  const forwardedProtocol = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim();
+  const protocol = forwardedProtocol || internalUrl.protocol.replace(':', '');
+  return `${protocol}://${host}`;
+}
+
 function isSameOriginRequest(request: Request): boolean {
-  const expectedOrigin = new URL(request.url).origin;
+  // request.url may contain Next's internal listening port when accessed through
+  // an SSH/reverse-proxy tunnel. Host preserves the browser-visible origin.
+  const expectedOrigin = requestVisibleOrigin(request);
   const origin = request.headers.get('Origin');
   if (origin) {
     return originsMatch(origin, expectedOrigin);
