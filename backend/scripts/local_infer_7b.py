@@ -1,6 +1,6 @@
 """
 本地4bit推理脚本
-使用Qwen2.5-7B基础模型加载胡桃LoRA适配器进行本地推理，适用于RTX 4060 Laptop 8GB。
+使用Qwen3-8B基础模型加载胡桃LoRA适配器进行本地推理，适用于RTX 4060 Laptop 8GB。
 通过BitsAndBytes的NF4量化将推理显存控制在~4GB。
 
 使用方法：
@@ -16,7 +16,7 @@ from pathlib import Path
 import os as _os
 
 BASE = Path(__file__).parent.parent
-BASE_MODEL_PATH = _os.getenv("BASE_MODEL_PATH", str(BASE / "models/Qwen2.5-7B-Instruct"))
+BASE_MODEL_PATH = _os.getenv("BASE_MODEL_PATH", str(BASE / "models/Qwen3-8B-Instruct"))
 LORA_PATH = str(Path(__file__).parent.parent / "loras/hutao_lora_7b/final")
 
 SYSTEM_PROMPT = """严格按照以下角色回复用户：
@@ -28,7 +28,7 @@ SYSTEM_PROMPT = """严格按照以下角色回复用户：
 
 
 class HutaoInferencer:
-    """胡桃推理器，加载4bit量化的Qwen2.5-7B + 胡桃LoRA模型，
+    """胡桃推理器，加载4bit量化的Qwen3-8B + 胡桃LoRA模型，
     提供单轮对话生成和交互式多轮对话功能。"""
 
     def __init__(self):
@@ -45,11 +45,11 @@ class HutaoInferencer:
         """
         vram = torch.cuda.get_device_properties(0).total_memory / 1024**3
         print(f"GPU: {torch.cuda.get_device_name(0)} ({vram:.0f}GB)")
-        print("加载 Qwen2.5-7B (4bit量化)...")
+        print("加载 Qwen3-8B (4bit量化)...")
 
         if not Path(BASE_MODEL_PATH).exists():
             print(f"基础模型不存在: {BASE_MODEL_PATH}")
-            print("请先下载: huggingface-cli download Qwen/Qwen2.5-7B-Instruct --local-dir models/Qwen2.5-7B-Instruct")
+            print("请先下载: huggingface-cli download Qwen/Qwen3-8B --local-dir models/Qwen3-8B-Instruct")
             return False
 
         if not Path(LORA_PATH).exists():
@@ -123,7 +123,7 @@ def interactive_chat():
 
     print()
     print("=" * 50)
-    print("胡桃 (Qwen2.5-7B + LoRA) - 对话模式")
+    print("胡桃 (Qwen3-8B + LoRA) - 对话模式")
     print("输入 'quit' 退出, 'clear' 清除上下文")
     print("=" * 50)
 

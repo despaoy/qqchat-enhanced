@@ -44,8 +44,8 @@ services:
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
       - VLLM_ALLOW_RUNTIME_LORA_UPDATING=True
     command: >
-      --model /models/Qwen2.5-7B-Instruct-AWQ
-      --served-model-name qwen2.5-7b-awq
+      --model /models/Qwen3-8B-Instruct-AWQ
+      --served-model-name qwen3-8b-instruct-awq
       --quantization awq_marlin
       --enable-lora
       --max-loras 4
@@ -89,7 +89,7 @@ services:
       - models:/app/models:ro
     environment:
       - VLLM_BASE_URLS=http://vllm:8000
-      - VLLM_SERVED_MODEL_NAME=qwen2.5-7b-awq
+      - VLLM_SERVED_MODEL_NAME=qwen3-8b-instruct-awq
       - VLLM_LORA_ROOT=/loras
       - BACKEND_WORKERS=1
       - VLLM_TIMEOUT=120

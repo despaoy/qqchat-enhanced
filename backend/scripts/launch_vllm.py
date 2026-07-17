@@ -2,17 +2,17 @@
 """
 QQ智能助手 - vLLM 推理服务启动脚本
 
-在 RTX 3090 (24GB) 上使用 vLLM 启动 Qwen2.5-7B 推理服务。
+在 RTX 3090 (24GB) 上使用 vLLM 启动 Qwen3-8B 推理服务。
 
 硬件适配:
-  - 单卡 24GB: Qwen2.5-7B-Instruct FP16 可直接运行
+  - 单卡 24GB: Qwen3-8B-Instruct FP16 可直接运行
   - 双卡 24GB×2: 可使用张量并行 (tensor-parallel-size=2) 提升吞吐
   - AWQ 4bit: 显存降至 ~6GB，适合多 LoRA 并存
 
 启动:
   python scripts/launch_vllm.py                              # FP16 默认
   python scripts/launch_vllm.py --quant awq                 # AWQ 4bit 量化
-  python scripts/launch_vllm.py --model Qwen/Qwen2.5-7B-Instruct
+  python scripts/launch_vllm.py --model Qwen/Qwen3-8B
   python scripts/launch_vllm.py --lora-path ./loras/hutao_lora_7b/final
   python scripts/launch_vllm.py --tensor-parallel 1         # 单卡模式
 
@@ -72,9 +72,9 @@ def main():
     parser = argparse.ArgumentParser(description="vLLM 推理服务启动器 (QQ智能助手)")
     parser.add_argument("--host", default="0.0.0.0", help="监听地址")
     parser.add_argument("--port", type=int, default=8001, help="监听端口 (不要让 FastAPI 占用)")
-    parser.add_argument("--model", default="Qwen/Qwen2.5-7B-Instruct",
+    parser.add_argument("--model", default="Qwen/Qwen3-8B",
                         help="模型名称或本地路径")
-    parser.add_argument("--served-name", default="qwen2.5-7b",
+    parser.add_argument("--served-name", default="qwen3-8b",
                         help="对外暴露的模型名")
     parser.add_argument("--max-model-len", type=int, default=4096,
                         help="最大上下文长度 (RTX 3090 24GB 推荐 4096-8192)")

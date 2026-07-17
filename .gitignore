@@ -173,3 +173,14 @@ FILE_AUDIT.md
 PROJECT_OVERVIEW.md
 TECHNICAL_DOC.md
 改进方法.txt
+
+# === 临时 SSH 调试脚本和隧道脚本 ===
+ssh_*.py
+.qqchat_*.py
+
+# === pnpm 本地缓存 ===
+.pnpm-store/
+
+# === 一次性生成的 Wiki/报告（可选保留）===
+# docs/architecture/CODE_WIKI.md
+# docs/research/REAL_VLLM_BENCHMARK_REPORT.md

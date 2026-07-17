@@ -93,7 +93,7 @@ export interface TrainingConfigFile {
 // ============================================
 
 const DEFAULT_REQUIRED: RequiredParams = {
-  baseModel: 'models/Qwen2.5-7B-Instruct',
+  baseModel: 'models/Qwen3-8B-Instruct',
   outputModelName: 'my-lora-chat',
   outputDir: './lora_output',
   datasetName: '',

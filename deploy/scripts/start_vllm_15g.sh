@@ -10,7 +10,7 @@ set -euo pipefail
 # ---- 配置 ----
 GPU_ID="${1:-0}"
 PORT="${2:-8001}"
-MODEL_PATH="${3:-./models/Qwen2.5-7B-Instruct-AWQ}"
+MODEL_PATH="${3:-./models/Qwen3-8B-Instruct-AWQ}"
 LORA_PATH="${4:-./loras}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -40,7 +40,7 @@ check_model() {
     log_info "检查模型: ${MODEL_PATH}"
     if [[ ! -f "${MODEL_PATH}/config.json" ]]; then
         log_error "模型 config.json 未找到，请先下载 AWQ 量化模型:"
-        log_error "  huggingface-cli download Qwen/Qwen2.5-7B-Instruct-AWQ --local-dir ${MODEL_PATH}"
+        log_error "  huggingface-cli download Qwen/Qwen3-8B-AWQ --local-dir ${MODEL_PATH}"
         exit 1
     fi
     log_info "模型检查通过 ✓"
@@ -55,7 +55,7 @@ start_vllm() {
 
     python -m vllm.entrypoints.openai.api_server \
         --model "${MODEL_PATH}" \
-        --served-model-name qwen2.5-7b-awq \
+        --served-model-name qwen3-8b-instruct-awq \
         --quantization awq_marlin \
         --enable-lora \
         --max-loras 4 \

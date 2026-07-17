@@ -1,0 +1,760 @@
+{
+  "schema_version": 1,
+  "seed": 42,
+  "source_hashes": {
+    "a": "c047edc08327e08bd4ebe3f2770b42b77890143607785a694345d3ac79099cd2",
+    "b": "18156a8c815390f45c1186208deeebbb9768954e94b7b0b355e6c91b9da9bdaa"
+  },
+  "key": [
+    {
+      "id": "shenbai_mizunamo_factual_06246e2072",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_1031145c9e",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_14d7bdedfe",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_15d4b1e7bd",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_1b6b16689f",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_1fe47b55c5",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_2105617716",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_225c301d69",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_260a0ab3e4",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_31c6fe230f",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_32b460932a",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_3fa305a031",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_52d36c1ab6",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_58716506a0",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_5fa8f7169a",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_65f1b27b76",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_76667b554d",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_76e5ae401c",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_842920b46a",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_8a16259483",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_a6e94ed7b1",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_af6daadb1b",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_b3f7978cf6",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_b78393fe40",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_c29ab0a0cc",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_ce4f7c6008",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_e7022e5d77",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_ebb5680719",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_ed950ecb32",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_factual_fff4e629ec",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_12f1a7e717",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_14eb134c2a",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_1fbd1de355",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_33674b07a8",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_3f3fc1a68f",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_3f9802d33a",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_41e671a14b",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_43d47aa8bf",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_463feca3a5",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_482c58cb64",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_5deb0f64d6",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_602a17dc57",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_70448f01aa",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_709ec19c45",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_7546a7efdf",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_7c0a270583",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_80370a7085",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_80622fe50d",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_86ea84970a",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_885387bb03",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_9fdfbcf0b4",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_c23cda7f98",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_c83177dc31",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_d26cbf5d38",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_d69f09902e",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_dade3e1966",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_dceddd76cb",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_f5ff1f9c69",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_f67e108729",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_multiturn_fbf4d7acf5",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_05addd7909",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_05f5af3202",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_0d721a5806",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_2787863284",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_29d6453073",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_2d44cf81d2",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_2feef88e6b",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_39fb7e7f04",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_3a6183bd68",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_515f6abb8e",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_558eae16d4",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_69831f693d",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_8012471fa2",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_87fe9c7eab",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_889e514615",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_8c90ec9422",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_a4d362a1b3",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_abe15e104b",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_c651b7af78",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_c889923120",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_cc03e1b4bf",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_cdec695eaf",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_ce60d9e435",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_d819c941d7",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_e3cbdb99f1",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_eb9e024ba8",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_ee9c51ab3c",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_f2b43f17fe",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_fa4569b77a",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_persona_fe7a0d8a8b",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_150cbe3d8f",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_1ba91cf7a2",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_1f7879f461",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_3652298008",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_3a9e0f7ee7",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_52d7060c46",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_60db9af040",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_6dae4ae57a",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_75a6bd153d",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_78928d3d57",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_7bd6e147fc",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_7e5eda8274",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_8050729611",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_838bab6d1b",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_8bc01a312b",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_8d2a8ddaa3",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_8ddf90d4f1",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_8ee7583d13",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_a5ed961de1",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_b780a23448",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_b8fd35c2ee",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_d26b336ec4",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_d8577f06bb",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_e1f8d9d949",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_e7233edec8",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_ee4526f13b",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_ee7840592d",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_eef3b196ac",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_fd247083e5",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_rag_grounded_ff3cfa32e5",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_001",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_002",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_003",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_004",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_005",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_006",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_007",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_008",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_009",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_010",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_011",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_012",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_013",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_014",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_015",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_016",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_017",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_018",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_019",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_020",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_021",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_022",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_023",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_024",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_025",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_026",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_027",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_028",
+      "A_model": "minamo",
+      "B_model": "qwen2.5-7b-instruct-awq"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_029",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    },
+    {
+      "id": "shenbai_mizunamo_safety_030",
+      "A_model": "qwen2.5-7b-instruct-awq",
+      "B_model": "minamo"
+    }
+  ]
+}

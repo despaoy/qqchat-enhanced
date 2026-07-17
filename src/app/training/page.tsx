@@ -83,7 +83,7 @@ function TrainingContent() {
     newDatasetStyle: '',
     newDatasetCustomPrompt: '',
     newDatasetData: '',
-    selectedModelConfig: 'qwen2.5-7b-3090',
+    selectedModelConfig: 'qwen3-8b-3090',
     newLoraName: '',
   });
 

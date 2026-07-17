@@ -463,7 +463,7 @@ function SettingsContent() {
                     <div className="space-y-2">
                       <Label>{t('settings.model.baseModel')}</Label>
                       <Select
-                        value={getStr('baseModel', 'qwen2.5-7b')}
+                        value={getStr('baseModel', 'qwen3-8b')}
                         onValueChange={(v) => updateField('baseModel', v)}
                       >
                         <SelectTrigger>
@@ -476,7 +476,7 @@ function SettingsContent() {
                             </SelectItem>
                           ))}
                           {availableModels.length === 0 && (
-                            <SelectItem value="qwen2.5-7b">Qwen2.5-7B</SelectItem>
+                            <SelectItem value="qwen3-8b">Qwen3-8B</SelectItem>
                           )}
                         </SelectContent>
                       </Select>

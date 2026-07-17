@@ -229,7 +229,11 @@ def _sandbox_worker(code: str, args: dict, result_channel) -> None:
 
 def _run_in_sandbox_process(code: str, args: dict) -> dict:
     timeout = min(10.0, max(0.5, float(os.getenv("CLAW_EXECUTION_TIMEOUT", "3"))))
-    context = multiprocessing.get_context("spawn")
+    # ``spawn`` re-imports the active test runner on POSIX, which can make a
+    # healthy sandbox worker exit before it writes to the result pipe. ``fork``
+    # keeps the same process boundary and timeout semantics without that import path.
+    start_method = "fork" if os.name == "posix" else "spawn"
+    context = multiprocessing.get_context(start_method)
     result_reader, result_writer = context.Pipe(duplex=False)
     process = context.Process(target=_sandbox_worker, args=(code, args, result_writer), daemon=True)
     process.start()

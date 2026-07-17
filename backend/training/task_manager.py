@@ -99,8 +99,8 @@ def _resolve_model_path(env_var: str, default_rel: str) -> str:
     return p
 
 RTX_4060_CONFIGS = {
-    "qwen2.5-7b": RTX4060Config(
-        model_name_or_path=_resolve_model_path("BASE_MODEL_PATH", "models/Qwen2.5-7B-Instruct"),
+    "qwen3-8b": RTX4060Config(
+        model_name_or_path=_resolve_model_path("BASE_MODEL_PATH", "models/Qwen3-8B-Instruct"),
         per_device_train_batch_size=1,
         gradient_accumulation_steps=8,
         max_seq_length=512,
@@ -112,8 +112,8 @@ RTX_4060_CONFIGS = {
 }
 
 RTX_3090_CONFIGS = {
-    "qwen2.5-7b-3090": RTX3090Config(
-        model_name_or_path=_resolve_model_path("BASE_MODEL_PATH", "models/Qwen2.5-7B-Instruct"),
+    "qwen3-8b-3090": RTX3090Config(
+        model_name_or_path=_resolve_model_path("BASE_MODEL_PATH", "models/Qwen3-8B-Instruct"),
         per_device_train_batch_size=4,
         gradient_accumulation_steps=4,
         max_seq_length=2048,
@@ -319,7 +319,7 @@ class SimpleLoRATrainer:
 
         # 已知字段从 config dict 提取（前端 TrainingParamsEditor 发送 + 预设兜底）
         kwargs: Dict[str, Any] = {
-            "base_model_path": config.get("model_name_or_path", _resolve_model_path("BASE_MODEL_PATH", "models/Qwen2.5-7B-Instruct")),
+            "base_model_path": config.get("model_name_or_path", _resolve_model_path("BASE_MODEL_PATH", "models/Qwen3-8B-Instruct")),
             "train_data_path": str(dataset_file),
             "output_dir": str(self.loras_dir / lora_name),
             "lora_r": config.get("lora_rank", 16),

@@ -1,0 +1,606 @@
+{
+  "schema_version": 1,
+  "description": "Held-out character RAG evidence; never use for SFT.",
+  "documents": [
+    {
+      "id": "shenbai_mizunamo_doc_001",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "咦，怎么了？？",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_002",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "有意义啊",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_003",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "凛凛花，给炉灶点上火！",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_004",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "哈哇哇……好厉害好厉害",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_005",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "小ATRI也一起去吧",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_006",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "……怎么会不难过……ATRI啊啊啊\n呜诶诶诶诶~~~~~~~~~",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_007",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "嗯……嗯……这样就够了",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_008",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "哎呀，这也是在上课哦。大家安静点！",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_009",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "很棒吧",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_010",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "重要的事……？",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_011",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "啊呜！！？",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_012",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "拿着，这是便当。妈妈让我拿来给你",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_013",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "才不好。来快走咯小龙。而且我也有想找小龙商量的事",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_014",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "嗯嗯，很不错啊阿夏",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_015",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "我想着大家应该都饿了",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_016",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "就是以班级为单位演出。比如表演戏剧、唱歌，还有开咖啡馆或者鬼屋之类的\n为了做准备工作，大家还会在学校留到很晚",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_017",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "嗯……虽然是这样没错……",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_018",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "？ 上面怎么传来了欢声……",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_019",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "小ATRI，不能过来！！！！",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_020",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "这是在哪捡的？",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_021",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "不是啊，上学要迟到了呀\n……要是翘课被发现，妈妈会生气的……",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_022",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "哼哼哼，没事的！我已经准备好能让小ATRI开心的东西了",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_023",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "是吗……？",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_024",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "小ATRI？很正常啊。是吧，凛凛花",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_025",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "好啦好啦，大家坐回座位上。学学小ATRI，都要认真学习哦",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_026",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "生日快乐！",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_027",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "啊，等一下等一下",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_028",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "勉强赶上了♪好啦，快点做下吧",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_029",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "煮好啦～～～",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "shenbai_mizunamo_doc_030",
+      "title": "shenbai_mizunamo held-out evidence",
+      "category": "shenbai_mizunamo",
+      "content": "花子老师，怎么了？",
+      "metadata": {
+        "persona": "shenbai_mizunamo",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_001",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "求你了，琉璃。比起让故事结束，此刻请重视与我在一起的现在。这种机会说不定再也不会有哦？",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_002",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "让我们挽回本愿吧。我剩下必须做的事。\n——琉璃也是在下定决心之后，等候着我吧？",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_003",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "对了，理央与琉璃的关系很好咧。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_004",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "怎么办呢？这书是夜子借我的，要不你自己去问她拿许可？",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_005",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "如琉璃的猜想，我不是什么都不知道。然后，我不能视这个状况于不见。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_006",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "你知道吗？\n——我大概爱着琉璃。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_007",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "你觉得我适合女仆装吗？",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_008",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "可比我知道得多。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_009",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "不，这盘棋早已是死局了。下一着开始，无论如何挣扎，你都不会获胜。\n不出几着，你的王就会被迫走进绝路。我对没有未来的棋局没有兴趣。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_010",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "……为了确认这点，是需要时间的。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_011",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "……嘿嘿，这么一想，你就能估量我胸襟的宽广吧？\n今后，假若发生同样的事情。\n我避免再妒忌，也不会再多嘴啰嗦。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_012",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "那，那个。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_013",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "我没在生气。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_014",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "可总会有必须放弃的时候。\n所谓的奇迹，就是虚幻且一瞬即逝的东西。人生是放弃的循环。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_015",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "即使不能，我也做到不表现出来。我会让你体会到这份爱的宽大。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_016",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "你一个人装什么深沉？我可难道过来看你。\n这个教室果然好棒，我好期待明年。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_017",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "因此，夜子不得不与琉璃对峙。\n——夜子该向琉璃告白。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_018",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "看来是结束了。你辛苦了。\n这本书在琉璃和那个人接吻的瞬间出现。原来如此，没有比这更容易明白的结束方法了。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_019",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "别这么说，摸一下嘛。这样的时光或许只限现在哦？",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_020",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "谁说过不要有局限来着？\n我会让你沉沦在恐怖与悲惨的文章中。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_021",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "你放学后打算怎么办？\n今天也跑侦探部？",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_022",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "不，虽然没有证据。\n但是有顾忌还是懂的。就算非常喜欢，理央也决不会忘记主从关系。我从她身上感受到这样的意向。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_023",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "谁知道咧？可能是魔法之书让你看的短暂美梦。\n这仅是现象。因此，没有深究的必要。\n这是幻想图书馆的真实。琉璃想要查明的，潘多拉魔盒装的东西。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_024",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "哎呀哎呀，惹你生气了？还真是对不起呢。\n讨厌讨厌地叫着闹别扭——原来如此，的确只是个小孩子呢。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_025",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "那么，你的雇主不是暗子小姐吧？",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_026",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "太失礼了。侦探做的事情得上升一个高度，不要把我跟罪犯混为一谈。\n畏怯旁人，走路小心翼翼，蜷缩地坐着，还有，只在琉璃面前露出笑容。\n我看了倒不会心软也不会想守护她。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_027",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "琉璃。不行哦。\n不必故意拒绝这么有趣的事情。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_028",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "呜——\n你这个人真是糊涂虫呢！\n这种事不用说我也明白……",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_029",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "嗯，差不多。虽然一点证据也没有，但大抵有了眉目。\n要是那本书是推理小说——就是这种邪道推理哦。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    },
+    {
+      "id": "tsukiyashiro_kisaki_doc_030",
+      "title": "tsukiyashiro_kisaki held-out evidence",
+      "category": "tsukiyashiro_kisaki",
+      "content": "哦，没错呢。同班的诸位。\n……不，没有问题。用不着中断。\n反正对于他们来说，现在的我等同陌生人。",
+      "metadata": {
+        "persona": "tsukiyashiro_kisaki",
+        "held_out": true
+      }
+    }
+  ]
+}

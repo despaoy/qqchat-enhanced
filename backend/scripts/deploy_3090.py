@@ -9,13 +9,13 @@
   ┌──────────────────────────────────────────────┐
   │  GPU 0 (RTX 3090 24GB)                       │
   │  ├── vLLM Worker (TP rank 0)                 │
-  │  │   ├── Qwen2.5-7B 模型权重 (分片1)          │
+  │  │   ├── Qwen3-8B 模型权重 (分片1)          │
   │  │   └── KV-Cache 分页 (~12GB)               │
   │  └── 剩余显存: LoRA 适配器池                  │
   ├──────────────────────────────────────────────┤
   │  GPU 1 (RTX 3090 24GB)                       │
   │  ├── vLLM Worker (TP rank 1)                 │
-  │  │   ├── Qwen2.5-7B 模型权重 (分片2)          │
+  │  │   ├── Qwen3-8B 模型权重 (分片2)          │
   │  │   └── KV-Cache 分页 (~12GB)               │
   │  └── 剩余显存: LoRA 适配器池                  │
   └──────────────────────────────────────────────┘
@@ -48,7 +48,7 @@ CUDA_ENV = {
 # vLLM 配置
 VLLM_CONFIG = {
     # 模型
-    "model": "Qwen/Qwen2.5-7B-Instruct",
+    "model": "Qwen/Qwen3-8B",
     # 显存优化
     "gpu_memory_utilization": 0.92,  # 3090 可设更高
     "max_model_len": 4096,           # QQ 聊天不需要过长 context
@@ -156,7 +156,7 @@ DOTENV_EXAMPLE = """
 # 本地推理使用 vLLM（推荐）
 MODEL_PROVIDER=vllm
 VLLM_BASE_URL=http://localhost:8001/v1
-VLLM_MODEL=Qwen2.5-7B-Instruct
+VLLM_MODEL=Qwen3-8B-Instruct
 VLLM_TIMEOUT=120
 
 # ── 并发配置 ──

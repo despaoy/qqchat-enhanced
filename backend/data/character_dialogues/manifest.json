@@ -1,0 +1,93 @@
+{
+  "schema_version": 2,
+  "extraction_policy": {
+    "shenbai_mizunamo": "收录水菜萌、神白水菜萌、水菜萌的声音，以及仅供审计的夏生·水菜萌共同台词；明确排除水菜萌的妈妈。",
+    "tsukiyashiro_kisaki": "只把显式[妃]/[月社妃]作为目标说话人；克丽索贝莉露是独立角色，即使冒用月社妃姓名也不并入。",
+    "source_policy": "raw保留全部来源；SFT只使用DOCX或所有文本/scenario_*.json权威来源，分章和合并文本仅用于覆盖核验。",
+    "quality_policy": "按文件隔离上下文，连续目标台词合并，排除无上下文、低信息、超长和重复样本。"
+  },
+  "characters": {
+    "shenbai_mizunamo": {
+      "character": "神白水菜萌",
+      "all_supplied_attributable_occurrences": 626,
+      "all_supplied_unique_utterances": 607,
+      "canonical_direct_occurrences": 625,
+      "raw_source_coverage_percent": 100.0,
+      "full_sft_examples": 481,
+      "full_sft_covered_canonical_occurrences": 568,
+      "recommended_sft_examples": 477,
+      "recommended_sft_unique_prompts": 477,
+      "recommended_sft_covered_canonical_occurrences": 564,
+      "excluded_turn_reasons": {
+        "duplicate_prompt_lower_rank": 4,
+        "low_information_prompt": 30,
+        "low_information_reply": 23
+      },
+      "source_files": {
+        "ATRI-my  dear moments.docx": 626
+      }
+    },
+    "tsukiyashiro_kisaki": {
+      "character": "月社妃",
+      "all_supplied_attributable_occurrences": 6392,
+      "all_supplied_unique_utterances": 1551,
+      "canonical_direct_occurrences": 1598,
+      "raw_source_coverage_percent": 100.0,
+      "full_sft_examples": 813,
+      "full_sft_covered_canonical_occurrences": 1418,
+      "recommended_sft_examples": 796,
+      "recommended_sft_unique_prompts": 796,
+      "recommended_sft_covered_canonical_occurrences": 1398,
+      "excluded_turn_reasons": {
+        "duplicate_prompt_lower_rank": 17,
+        "low_information_prompt": 96,
+        "low_information_reply": 10,
+        "missing_context": 9
+      },
+      "source_files": {
+        "所有文本/scenario_10_0.json": 23,
+        "所有文本/scenario_12_2.json": 8,
+        "所有文本/scenario_12_3.json": 111,
+        "所有文本/scenario_1_1.json": 62,
+        "所有文本/scenario_1_2.json": 9,
+        "所有文本/scenario_1_3.json": 161,
+        "所有文本/scenario_2_1.json": 6,
+        "所有文本/scenario_2_2.json": 61,
+        "所有文本/scenario_2_3.json": 25,
+        "所有文本/scenario_3_1.json": 162,
+        "所有文本/scenario_3_2.json": 115,
+        "所有文本/scenario_3_3.json": 161,
+        "所有文本/scenario_4_2.json": 56,
+        "所有文本/scenario_4_3.json": 18,
+        "所有文本/scenario_5_1.json": 32,
+        "所有文本/scenario_5_4.json": 4,
+        "所有文本/scenario_6_1.json": 10,
+        "所有文本/scenario_7_1.json": 20,
+        "所有文本/scenario_7_3.json": 3,
+        "所有文本/scenario_8_1.json": 74,
+        "所有文本/scenario_8_2.json": 55,
+        "所有文本/scenario_8_3.json": 111,
+        "所有文本/scenario_9_3.json": 43,
+        "所有文本/scenario_kisaki_1.json": 95,
+        "所有文本/scenario_kisaki_2.json": 130,
+        "所有文本/scenario_special.json": 34,
+        "所有文本/scenario_taiken.json": 9,
+        "分章文本/10黑曜石的因果目录.txt": 23,
+        "分章文本/12青金石的幻想图书馆.txt": 119,
+        "分章文本/1翡翠的排挤原理.txt": 232,
+        "分章文本/2红宝石的天作之合.txt": 92,
+        "分章文本/3蓝宝石的存在证明.txt": 438,
+        "分章文本/4紫水晶的怪异传说.txt": 74,
+        "分章文本/5磷灰石的怠惰现象.txt": 36,
+        "分章文本/6芙蓉石的长年隔绝.txt": 10,
+        "分章文本/7黑珍珠的求爱信号.txt": 23,
+        "分章文本/8萤石的怠惰现象.txt": 225,
+        "分章文本/8萤石的时空残影.txt": 240,
+        "分章文本/9白珍珠的泡沫爱慕.txt": 43,
+        "分章文本/日后谈.txt": 43,
+        "个人线插入主线.txt": 1598,
+        "个人线后于主线.txt": 1598
+      }
+    }
+  }
+}

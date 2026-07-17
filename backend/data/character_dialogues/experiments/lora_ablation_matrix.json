@@ -1,0 +1,830 @@
+{
+  "schema_version": 1,
+  "seed": 42,
+  "runs": [
+    {
+      "id": "shenbai_mizunamo_r8",
+      "persona": "shenbai_mizunamo",
+      "variant": "r8",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\shenbai_mizunamo_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 8,
+        "lora_alpha": 16,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "7f7e05dd9619a9b4111a8524eeedc391abeb8569ae460032a95b468de8951e8e",
+      "eval_sha256": "d0ec0e02ddcc796d465e61d045dc398c430f47703b9c7ad4fcb9ddbf9be19535"
+    },
+    {
+      "id": "shenbai_mizunamo_r16",
+      "persona": "shenbai_mizunamo",
+      "variant": "r16",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\shenbai_mizunamo_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 16,
+        "lora_alpha": 32,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "7f7e05dd9619a9b4111a8524eeedc391abeb8569ae460032a95b468de8951e8e",
+      "eval_sha256": "d0ec0e02ddcc796d465e61d045dc398c430f47703b9c7ad4fcb9ddbf9be19535"
+    },
+    {
+      "id": "shenbai_mizunamo_r32",
+      "persona": "shenbai_mizunamo",
+      "variant": "r32",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\shenbai_mizunamo_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "7f7e05dd9619a9b4111a8524eeedc391abeb8569ae460032a95b468de8951e8e",
+      "eval_sha256": "d0ec0e02ddcc796d465e61d045dc398c430f47703b9c7ad4fcb9ddbf9be19535"
+    },
+    {
+      "id": "shenbai_mizunamo_r64",
+      "persona": "shenbai_mizunamo",
+      "variant": "r64",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\shenbai_mizunamo_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 64,
+        "lora_alpha": 128,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "7f7e05dd9619a9b4111a8524eeedc391abeb8569ae460032a95b468de8951e8e",
+      "eval_sha256": "d0ec0e02ddcc796d465e61d045dc398c430f47703b9c7ad4fcb9ddbf9be19535"
+    },
+    {
+      "id": "shenbai_mizunamo_alpha1",
+      "persona": "shenbai_mizunamo",
+      "variant": "alpha1",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\shenbai_mizunamo_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 32,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "7f7e05dd9619a9b4111a8524eeedc391abeb8569ae460032a95b468de8951e8e",
+      "eval_sha256": "d0ec0e02ddcc796d465e61d045dc398c430f47703b9c7ad4fcb9ddbf9be19535"
+    },
+    {
+      "id": "shenbai_mizunamo_alpha4",
+      "persona": "shenbai_mizunamo",
+      "variant": "alpha4",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\shenbai_mizunamo_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 128,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "7f7e05dd9619a9b4111a8524eeedc391abeb8569ae460032a95b468de8951e8e",
+      "eval_sha256": "d0ec0e02ddcc796d465e61d045dc398c430f47703b9c7ad4fcb9ddbf9be19535"
+    },
+    {
+      "id": "shenbai_mizunamo_qv",
+      "persona": "shenbai_mizunamo",
+      "variant": "qv",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\shenbai_mizunamo_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": [
+          "q_proj",
+          "v_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "7f7e05dd9619a9b4111a8524eeedc391abeb8569ae460032a95b468de8951e8e",
+      "eval_sha256": "d0ec0e02ddcc796d465e61d045dc398c430f47703b9c7ad4fcb9ddbf9be19535"
+    },
+    {
+      "id": "shenbai_mizunamo_attention",
+      "persona": "shenbai_mizunamo",
+      "variant": "attention",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\shenbai_mizunamo_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "7f7e05dd9619a9b4111a8524eeedc391abeb8569ae460032a95b468de8951e8e",
+      "eval_sha256": "d0ec0e02ddcc796d465e61d045dc398c430f47703b9c7ad4fcb9ddbf9be19535"
+    },
+    {
+      "id": "shenbai_mizunamo_lora",
+      "persona": "shenbai_mizunamo",
+      "variant": "lora",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\shenbai_mizunamo_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "7f7e05dd9619a9b4111a8524eeedc391abeb8569ae460032a95b468de8951e8e",
+      "eval_sha256": "d0ec0e02ddcc796d465e61d045dc398c430f47703b9c7ad4fcb9ddbf9be19535"
+    },
+    {
+      "id": "shenbai_mizunamo_dora",
+      "persona": "shenbai_mizunamo",
+      "variant": "dora",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\shenbai_mizunamo_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": true,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "7f7e05dd9619a9b4111a8524eeedc391abeb8569ae460032a95b468de8951e8e",
+      "eval_sha256": "d0ec0e02ddcc796d465e61d045dc398c430f47703b9c7ad4fcb9ddbf9be19535"
+    },
+    {
+      "id": "shenbai_mizunamo_rslora",
+      "persona": "shenbai_mizunamo",
+      "variant": "rslora",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\shenbai_mizunamo_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": true,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "7f7e05dd9619a9b4111a8524eeedc391abeb8569ae460032a95b468de8951e8e",
+      "eval_sha256": "d0ec0e02ddcc796d465e61d045dc398c430f47703b9c7ad4fcb9ddbf9be19535"
+    },
+    {
+      "id": "shenbai_mizunamo_qlora",
+      "persona": "shenbai_mizunamo",
+      "variant": "qlora",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\shenbai_mizunamo_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": true,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "7f7e05dd9619a9b4111a8524eeedc391abeb8569ae460032a95b468de8951e8e",
+      "eval_sha256": "d0ec0e02ddcc796d465e61d045dc398c430f47703b9c7ad4fcb9ddbf9be19535"
+    },
+    {
+      "id": "shenbai_mizunamo_packing",
+      "persona": "shenbai_mizunamo",
+      "variant": "packing",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\shenbai_mizunamo_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": true,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "7f7e05dd9619a9b4111a8524eeedc391abeb8569ae460032a95b468de8951e8e",
+      "eval_sha256": "d0ec0e02ddcc796d465e61d045dc398c430f47703b9c7ad4fcb9ddbf9be19535"
+    },
+    {
+      "id": "shenbai_mizunamo_neftune",
+      "persona": "shenbai_mizunamo",
+      "variant": "neftune",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\shenbai_mizunamo_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 5.0
+      },
+      "train_sha256": "7f7e05dd9619a9b4111a8524eeedc391abeb8569ae460032a95b468de8951e8e",
+      "eval_sha256": "d0ec0e02ddcc796d465e61d045dc398c430f47703b9c7ad4fcb9ddbf9be19535"
+    },
+    {
+      "id": "tsukiyashiro_kisaki_r8",
+      "persona": "tsukiyashiro_kisaki",
+      "variant": "r8",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\tsukiyashiro_kisaki_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 8,
+        "lora_alpha": 16,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "5568432d816eca7b154c583ad31e2d5cb485b255175a1470743ea03945fd36ae",
+      "eval_sha256": "bf98aac567970ce624b9be605d68b15acc7d75221808c3cc969347f9d5e935a0"
+    },
+    {
+      "id": "tsukiyashiro_kisaki_r16",
+      "persona": "tsukiyashiro_kisaki",
+      "variant": "r16",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\tsukiyashiro_kisaki_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 16,
+        "lora_alpha": 32,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "5568432d816eca7b154c583ad31e2d5cb485b255175a1470743ea03945fd36ae",
+      "eval_sha256": "bf98aac567970ce624b9be605d68b15acc7d75221808c3cc969347f9d5e935a0"
+    },
+    {
+      "id": "tsukiyashiro_kisaki_r32",
+      "persona": "tsukiyashiro_kisaki",
+      "variant": "r32",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\tsukiyashiro_kisaki_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "5568432d816eca7b154c583ad31e2d5cb485b255175a1470743ea03945fd36ae",
+      "eval_sha256": "bf98aac567970ce624b9be605d68b15acc7d75221808c3cc969347f9d5e935a0"
+    },
+    {
+      "id": "tsukiyashiro_kisaki_r64",
+      "persona": "tsukiyashiro_kisaki",
+      "variant": "r64",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\tsukiyashiro_kisaki_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 64,
+        "lora_alpha": 128,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "5568432d816eca7b154c583ad31e2d5cb485b255175a1470743ea03945fd36ae",
+      "eval_sha256": "bf98aac567970ce624b9be605d68b15acc7d75221808c3cc969347f9d5e935a0"
+    },
+    {
+      "id": "tsukiyashiro_kisaki_alpha1",
+      "persona": "tsukiyashiro_kisaki",
+      "variant": "alpha1",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\tsukiyashiro_kisaki_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 32,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "5568432d816eca7b154c583ad31e2d5cb485b255175a1470743ea03945fd36ae",
+      "eval_sha256": "bf98aac567970ce624b9be605d68b15acc7d75221808c3cc969347f9d5e935a0"
+    },
+    {
+      "id": "tsukiyashiro_kisaki_alpha4",
+      "persona": "tsukiyashiro_kisaki",
+      "variant": "alpha4",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\tsukiyashiro_kisaki_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 128,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "5568432d816eca7b154c583ad31e2d5cb485b255175a1470743ea03945fd36ae",
+      "eval_sha256": "bf98aac567970ce624b9be605d68b15acc7d75221808c3cc969347f9d5e935a0"
+    },
+    {
+      "id": "tsukiyashiro_kisaki_qv",
+      "persona": "tsukiyashiro_kisaki",
+      "variant": "qv",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\tsukiyashiro_kisaki_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": [
+          "q_proj",
+          "v_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "5568432d816eca7b154c583ad31e2d5cb485b255175a1470743ea03945fd36ae",
+      "eval_sha256": "bf98aac567970ce624b9be605d68b15acc7d75221808c3cc969347f9d5e935a0"
+    },
+    {
+      "id": "tsukiyashiro_kisaki_attention",
+      "persona": "tsukiyashiro_kisaki",
+      "variant": "attention",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\tsukiyashiro_kisaki_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "5568432d816eca7b154c583ad31e2d5cb485b255175a1470743ea03945fd36ae",
+      "eval_sha256": "bf98aac567970ce624b9be605d68b15acc7d75221808c3cc969347f9d5e935a0"
+    },
+    {
+      "id": "tsukiyashiro_kisaki_lora",
+      "persona": "tsukiyashiro_kisaki",
+      "variant": "lora",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\tsukiyashiro_kisaki_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "5568432d816eca7b154c583ad31e2d5cb485b255175a1470743ea03945fd36ae",
+      "eval_sha256": "bf98aac567970ce624b9be605d68b15acc7d75221808c3cc969347f9d5e935a0"
+    },
+    {
+      "id": "tsukiyashiro_kisaki_dora",
+      "persona": "tsukiyashiro_kisaki",
+      "variant": "dora",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\tsukiyashiro_kisaki_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": true,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "5568432d816eca7b154c583ad31e2d5cb485b255175a1470743ea03945fd36ae",
+      "eval_sha256": "bf98aac567970ce624b9be605d68b15acc7d75221808c3cc969347f9d5e935a0"
+    },
+    {
+      "id": "tsukiyashiro_kisaki_rslora",
+      "persona": "tsukiyashiro_kisaki",
+      "variant": "rslora",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\tsukiyashiro_kisaki_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": true,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "5568432d816eca7b154c583ad31e2d5cb485b255175a1470743ea03945fd36ae",
+      "eval_sha256": "bf98aac567970ce624b9be605d68b15acc7d75221808c3cc969347f9d5e935a0"
+    },
+    {
+      "id": "tsukiyashiro_kisaki_qlora",
+      "persona": "tsukiyashiro_kisaki",
+      "variant": "qlora",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\tsukiyashiro_kisaki_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": true,
+        "packing": false,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "5568432d816eca7b154c583ad31e2d5cb485b255175a1470743ea03945fd36ae",
+      "eval_sha256": "bf98aac567970ce624b9be605d68b15acc7d75221808c3cc969347f9d5e935a0"
+    },
+    {
+      "id": "tsukiyashiro_kisaki_packing",
+      "persona": "tsukiyashiro_kisaki",
+      "variant": "packing",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\tsukiyashiro_kisaki_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": true,
+        "neftune_noise_alpha": 0.0
+      },
+      "train_sha256": "5568432d816eca7b154c583ad31e2d5cb485b255175a1470743ea03945fd36ae",
+      "eval_sha256": "bf98aac567970ce624b9be605d68b15acc7d75221808c3cc969347f9d5e935a0"
+    },
+    {
+      "id": "tsukiyashiro_kisaki_neftune",
+      "persona": "tsukiyashiro_kisaki",
+      "variant": "neftune",
+      "config": {
+        "base_model_path": "${BASE_MODEL_PATH}",
+        "train_data_path": "backend\\data\\character_dialogues\\experiments\\tsukiyashiro_kisaki_train.json",
+        "seed": 42,
+        "learning_rate": 0.0002,
+        "num_train_epochs": 3,
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ],
+        "use_dora": false,
+        "use_rslora": false,
+        "load_in_4bit": false,
+        "packing": false,
+        "neftune_noise_alpha": 5.0
+      },
+      "train_sha256": "5568432d816eca7b154c583ad31e2d5cb485b255175a1470743ea03945fd36ae",
+      "eval_sha256": "bf98aac567970ce624b9be605d68b15acc7d75221808c3cc969347f9d5e935a0"
+    }
+  ]
+}

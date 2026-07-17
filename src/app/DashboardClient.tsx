@@ -186,7 +186,7 @@ export default function DashboardClient() {
                     <h4 className="text-sm font-semibold mb-2 text-muted-foreground">模型信息</h4>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-sm">基座模型</span>
-                      <span className="text-sm font-medium">Qwen2.5-7B</span>
+                      <span className="text-sm font-medium">Qwen3-8B</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-sm">当前LoRA</span>

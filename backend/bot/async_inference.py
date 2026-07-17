@@ -123,7 +123,7 @@ class AsyncInferenceService:
         vllm_url: str = "http://localhost:8001/v1",
         openai_url: str = "https://api.deepseek.com",
         openai_key: str = "",
-        model_name: str = "qwen2.5-7b",
+        model_name: str = "qwen3-8b",
         timeout: float = 120.0,
     ):
         self.backend = backend

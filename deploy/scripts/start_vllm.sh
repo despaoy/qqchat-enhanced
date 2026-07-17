@@ -1,7 +1,7 @@
 #!/bin/bash
 # vLLM startup script for the verified AutoDL RTX 3090 baseline.
 # Usage: ./start_vllm.sh <GPU_ID> <PORT> <MODEL_PATH> [LORA_PATH]
-# Example: ./start_vllm.sh 0 8001 /models/Qwen2.5-7B-Instruct-AWQ /loras
+# Example: ./start_vllm.sh 0 8001 /models/Qwen3-8B-Instruct-AWQ /loras
 
 set -euo pipefail
 
@@ -10,7 +10,7 @@ PORT="${2:?missing port}"
 MODEL_PATH="${3:?missing model path}"
 LORA_PATH="${4:-/loras}"
 
-SERVED_MODEL_NAME="${VLLM_SERVED_MODEL_NAME:-qwen2.5-7b-awq}"
+SERVED_MODEL_NAME="${VLLM_SERVED_MODEL_NAME:-qwen3-8b-instruct-awq}"
 QUANTIZATION="${VLLM_QUANTIZATION:-awq_marlin}"
 GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-0.82}"
 MAX_LORAS="${VLLM_MAX_LORAS:-4}"
@@ -44,7 +44,7 @@ check_gpu() {
     local gpu_mem
     gpu_mem=$(nvidia-smi -i "${GPU_ID}" --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
     if [[ -n "${gpu_mem}" && ${gpu_mem} -lt 12000 ]]; then
-        log_warn "GPU ${GPU_ID} free memory is ${gpu_mem}MB; Qwen2.5-7B-AWQ may fail to load."
+        log_warn "GPU ${GPU_ID} free memory is ${gpu_mem}MB; Qwen3-8B-AWQ may fail to load."
     else
         log_info "GPU ${GPU_ID} free memory: ${gpu_mem}MB"
     fi

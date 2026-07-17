@@ -216,13 +216,13 @@ async def test_vllm_runtime_lora_load_uses_official_endpoint(monkeypatch):
 
     class FakeClient:
         async def get(self, url, **kwargs):
-            return FakeResponse(200, {"data": [{"id": "qwen2.5-7b-awq"}]})
+            return FakeResponse(200, {"data": [{"id": "qwen3-8b-instruct-awq"}]})
 
         async def post(self, url, **kwargs):
             requests.append((url, kwargs.get("json")))
             return FakeResponse(200)
 
-    client = VLLMClient(base_urls="http://vllm:8001", model="qwen2.5-7b-awq")
+    client = VLLMClient(base_urls="http://vllm:8001", model="qwen3-8b-instruct-awq")
 
     async def fake_ensure_client():
         return FakeClient()

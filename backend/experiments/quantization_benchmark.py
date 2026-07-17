@@ -329,7 +329,7 @@ def main():
     parser.add_argument("--output-dir", type=str, default="deploy/results", help="报告输出目录")
     parser.add_argument("--vllm-url", type=str, default="http://localhost:8001", help="vLLM 服务地址")
     parser.add_argument("--model-path", type=str, default="", help="模型路径")
-    parser.add_argument("--served-model-name", type=str, default="qwen2.5-7b-awq",
+    parser.add_argument("--served-model-name", type=str, default="qwen3-8b-instruct-awq",
                         help="vLLM 注册的模型名（用于 API model 字段）")
     parser.add_argument("--labels", type=str, default="",
                         help="逗号分隔的配置标签，如 awq。留空运行全部")

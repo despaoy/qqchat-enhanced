@@ -220,7 +220,7 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
             reply, used_rag, rag_meta = await _generate_with_vllm(request, vllm_effective_lora, vllm_lora_name)
             cost_time = round(time.time() - start_time, 2)
 
-            model_label = f"vllm/{os.getenv('VLLM_SERVED_MODEL_NAME', os.getenv('VLLM_MODEL', 'qwen2.5-7b-awq'))}"
+            model_label = f"vllm/{os.getenv('VLLM_SERVED_MODEL_NAME', os.getenv('VLLM_MODEL', 'qwen3-8b-instruct-awq'))}"
             await _record_model_invocation(request, model_label, lora_name, cost_time, used_rag=used_rag, completion_text=reply)
             await _save_message(request, reply, "vllm", lora_name, cost_time)
             set_consecutive("model_failure", True)
@@ -228,7 +228,7 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
 
             result = GenerateResponse(
                 reply=reply,
-                model=f"vllm/{os.getenv('VLLM_SERVED_MODEL_NAME', os.getenv('VLLM_MODEL', 'qwen2.5-7b-awq'))}",
+                model=f"vllm/{os.getenv('VLLM_SERVED_MODEL_NAME', os.getenv('VLLM_MODEL', 'qwen3-8b-instruct-awq'))}",
                 costTime=cost_time,
                 citations=rag_meta.get("citations"),
                 confidence=rag_meta.get("confidence"),
@@ -247,7 +247,7 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
             return result
         except Exception as e:
             failed_cost = round(time.time() - start_time, 2)
-            model_label = f"vllm/{os.getenv('VLLM_SERVED_MODEL_NAME', os.getenv('VLLM_MODEL', 'qwen2.5-7b-awq'))}"
+            model_label = f"vllm/{os.getenv('VLLM_SERVED_MODEL_NAME', os.getenv('VLLM_MODEL', 'qwen3-8b-instruct-awq'))}"
             await _record_model_invocation(
                 request,
                 model_label,

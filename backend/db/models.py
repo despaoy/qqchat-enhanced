@@ -31,7 +31,7 @@ class MessageRequest(BaseModel):
 
 class GenerateResponse(BaseModel):
     reply: str
-    model: str = "Qwen/Qwen2.5-7B-Instruct"
+    model: str = "Qwen/Qwen3-8B"
     costTime: float
     citations: Optional[List[Dict[str, Any]]] = None
     confidence: Optional[float] = None
@@ -75,7 +75,7 @@ class TrainingStartRequest(BaseModel):
     """训练启动请求"""
     lora_name: str
     dataset_name: str
-    model_type: str = "qwen2.5-7b"
+    model_type: str = "qwen3-8b"
     custom_config: Optional[Dict[str, Any]] = None
 
 

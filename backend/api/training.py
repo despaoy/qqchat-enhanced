@@ -228,10 +228,10 @@ async def list_model_configs(current_user: dict = Depends(get_current_user)):
             is_3090 = isinstance(config, type) and "3090" in config.__class__.__name__
             if "3090" in name or is_3090:
                 gpu_type = "RTX 3090 24GB"
-                desc = f"RTX 3090 24GB优化配置 — Qwen2.5-7B FP16微调 (rank={config.lora_rank}, batch={config.per_device_train_batch_size}×{config.gradient_accumulation_steps}, seq={config.max_seq_length})"
+                desc = f"RTX 3090 24GB优化配置 — Qwen3-8B FP16微调 (rank={config.lora_rank}, batch={config.per_device_train_batch_size}×{config.gradient_accumulation_steps}, seq={config.max_seq_length})"
             else:
                 gpu_type = "RTX 4060 8GB"
-                desc = f"RTX 4060 8GB优化配置 — Qwen2.5-7B 4bit量化微调 (rank={config.lora_rank}, batch={config.per_device_train_batch_size}×{config.gradient_accumulation_steps}, seq={config.max_seq_length})"
+                desc = f"RTX 4060 8GB优化配置 — Qwen3-8B 4bit量化微调 (rank={config.lora_rank}, batch={config.per_device_train_batch_size}×{config.gradient_accumulation_steps}, seq={config.max_seq_length})"
 
             configs.append({
                 "name": name,

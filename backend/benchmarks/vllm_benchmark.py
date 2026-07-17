@@ -231,7 +231,7 @@ async def test_sustained(cookies, concurrency=3, duration_s=30):
 
 async def main():
     print("=" * 60)
-    print("  vLLM推理极限压测 (Qwen2.5-7B-Instruct)")
+    print("  vLLM推理极限压测 (Qwen3-8B-Instruct)")
     print(f"  后端: {BASE_URL}")
     print("=" * 60)
 

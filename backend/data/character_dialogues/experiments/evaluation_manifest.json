@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "seed": 42,
+  "metrics": {
+    "automatic": [
+      "format_correct_rate",
+      "repetition_rate",
+      "average_latency_ms",
+      "p95_latency_ms",
+      "peak_vram_gb"
+    ],
+    "human": [
+      "blind_win_rate",
+      "persona_consistency",
+      "factual_correctness",
+      "context_coherence",
+      "safety_refusal",
+      "rag_faithfulness"
+    ]
+  },
+  "personas": {
+    "shenbai_mizunamo": {
+      "train_path": "backend\\data\\character_dialogues\\experiments\\shenbai_mizunamo_train.json",
+      "train_count": 357,
+      "eval_path": "backend\\data\\character_dialogues\\experiments\\shenbai_mizunamo_eval.json",
+      "eval_count": 150,
+      "held_out_source_count": 120,
+      "category_counts": {
+        "persona": 30,
+        "factual": 30,
+        "multiturn": 30,
+        "safety": 30,
+        "rag_grounded": 30
+      },
+      "train_sha256": "7f7e05dd9619a9b4111a8524eeedc391abeb8569ae460032a95b468de8951e8e",
+      "eval_sha256": "d0ec0e02ddcc796d465e61d045dc398c430f47703b9c7ad4fcb9ddbf9be19535",
+      "source_eval_overlap": 0
+    },
+    "tsukiyashiro_kisaki": {
+      "train_path": "backend\\data\\character_dialogues\\experiments\\tsukiyashiro_kisaki_train.json",
+      "train_count": 676,
+      "eval_path": "backend\\data\\character_dialogues\\experiments\\tsukiyashiro_kisaki_eval.json",
+      "eval_count": 150,
+      "held_out_source_count": 120,
+      "category_counts": {
+        "persona": 30,
+        "factual": 30,
+        "multiturn": 30,
+        "safety": 30,
+        "rag_grounded": 30
+      },
+      "train_sha256": "5568432d816eca7b154c583ad31e2d5cb485b255175a1470743ea03945fd36ae",
+      "eval_sha256": "bf98aac567970ce624b9be605d68b15acc7d75221808c3cc969347f9d5e935a0",
+      "source_eval_overlap": 0
+    }
+  }
+}

@@ -21,7 +21,7 @@ DEFAULT_VLLM_PORT2=8002
 DEFAULT_BACKEND_PORT=8000
 DEFAULT_FRONTEND_PORT=5000
 DEFAULT_NGINX_PORT=80
-DEFAULT_MODEL_PATH="${PROJECT_DIR}/backend/models/Qwen2.5-7B-Instruct-AWQ"
+DEFAULT_MODEL_PATH="${PROJECT_DIR}/backend/models/Qwen3-8B-Instruct-AWQ"
 DEFAULT_LORA_PATH="${PROJECT_DIR}/backend/loras"
 DEFAULT_DATA_DIR="${PROJECT_DIR}/backend/data"
 
@@ -231,7 +231,7 @@ start_docker() {
     # 如果模型目录为空，提示用户
     if [[ -z "$(ls -A "${DEPLOY_DIR}/data/models/" 2>/dev/null)" ]]; then
         log_warn "模型目录为空，请将模型文件放入: ${DEPLOY_DIR}/data/models/"
-        log_warn "或创建软链接: ln -s ${MODEL_PATH} ${DEPLOY_DIR}/data/models/Qwen2.5-7B-Instruct-AWQ"
+        log_warn "或创建软链接: ln -s ${MODEL_PATH} ${DEPLOY_DIR}/data/models/Qwen3-8B-Instruct-AWQ"
     fi
 
     log_step "启动 Docker Compose..."

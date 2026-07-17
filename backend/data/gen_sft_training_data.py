@@ -96,7 +96,7 @@ def call_vllm(vllm_url: str, system_prompt: str, user_message: str,
               max_retries: int = 3) -> Optional[str]:
     url = f"{vllm_url.rstrip('/')}/v1/chat/completions"
     payload = {
-        "model": "qwen2.5-7b-awq",
+        "model": "qwen3-8b-instruct-awq",
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},

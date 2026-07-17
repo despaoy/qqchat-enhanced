@@ -736,7 +736,7 @@ class SQLiteDB:
             "privateReply": "true",
             "replyDelay": "1",
             "modelProvider": "mock",
-            "baseModel": "qwen2.5-7b",
+            "baseModel": "qwen3-8b",
             "temperature": "0.7",
             "maxTokens": "2048",
             "contextWindow": "8k",

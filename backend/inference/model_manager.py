@@ -87,12 +87,12 @@ class ModelConfig:
 
 
 MODEL_CONFIGS: Dict[str, ModelConfig] = {
-    "qwen2.5-7b": ModelConfig(
-        name="Qwen2.5-7B-Instruct",
-        repo_id="Qwen/Qwen2.5-7B-Instruct",
+    "qwen3-8b": ModelConfig(
+        name="Qwen3-8B-Instruct",
+        repo_id="Qwen/Qwen3-8B",
         model_type="qwen",
         size="7b",
-        description="Qwen2.5 7B参数指令微调模型",
+        description="Qwen3 8B参数指令微调模型",
         required_files=[
             "config.json",
             "model.safetensors.index.json",
@@ -409,12 +409,12 @@ class TransformersPeftProvider(BaseProvider):
         self._tokenizer = None
         self._lora_path: Optional[str] = None
         self._load_lock = threading.Lock()  # 线程安全锁
-        base_model_path = os.getenv("BASE_MODEL_PATH", "models/Qwen2.5-7B-Instruct")
+        base_model_path = os.getenv("BASE_MODEL_PATH", "models/Qwen3-8B-Instruct")
         if not os.path.isabs(base_model_path):
             # 相对路径基于 backend 根目录（项目根目录下的 backend/）
             base_model_path = str(Path(__file__).parent.parent / base_model_path)
         self._base_model_path = base_model_path
-        self._model_name = "Qwen2.5-7B-Instruct"
+        self._model_name = "Qwen3-8B-Instruct"
         self._loaded = False
 
     def _ensure_loaded(self):
@@ -445,7 +445,7 @@ class TransformersPeftProvider(BaseProvider):
             base_model = None
             for strategy_name, load_fn in load_strategies:
                 try:
-                    logger.info(f"尝试 {strategy_name} 加载 Qwen2.5-7B...")
+                    logger.info(f"尝试 {strategy_name} 加载 Qwen3-8B...")
                     base_model = load_fn(base_path)
                     logger.info(f"✅ {strategy_name} 加载成功")
                     break
@@ -589,7 +589,7 @@ class VLLMProvider(BaseProvider):
     def __init__(self):
         super().__init__("vllm")
         self.base_url = os.getenv("VLLM_BASE_URL", "http://localhost:8001/v1")
-        self.model = os.getenv("VLLM_SERVED_MODEL_NAME", os.getenv("VLLM_MODEL", "qwen2.5-7b-awq"))
+        self.model = os.getenv("VLLM_SERVED_MODEL_NAME", os.getenv("VLLM_MODEL", "qwen3-8b-instruct-awq"))
         self.timeout = float(os.getenv("VLLM_TIMEOUT", "120.0"))
         self._model_name = self.model
         self._loaded = True

@@ -1,6 +1,6 @@
 """
 胡桃风格LoRA训练核心脚本
-基于Qwen2.5-7B-Instruct的LoRA微调，包含完整训练配置、GPU温度保护、早停机制。
+基于Qwen3-8B-Instruct的LoRA微调，包含完整训练配置、GPU温度保护、早停机制。
 """
 import os as _os
 import logging
@@ -167,7 +167,7 @@ class LoRATrainingConfig:
 
     支持从/到JSON文件序列化，提供参数校验功能。
     """
-    base_model_path: str = _resolve_path(_os.getenv("BASE_MODEL_PATH", "models/Qwen2.5-7B-Instruct"))
+    base_model_path: str = _resolve_path(_os.getenv("BASE_MODEL_PATH", "models/Qwen3-8B-Instruct"))
     train_data_path: str = _resolve_path("backend/hutao_dialogues.json")
     output_dir: str = _resolve_path("backend/loras/hutao_lora_7b")
 
@@ -256,8 +256,6 @@ class LoRATrainingConfig:
             errors.append(f"early_stopping_patience必须大于0: {self.early_stopping_patience}")
         if self.neftune_noise_alpha < 0:
             errors.append(f"neftune_noise_alpha cannot be negative: {self.neftune_noise_alpha}")
-        if self.use_dora and self.use_rslora:
-            errors.append("DoRA and RSLoRA cannot be enabled together")
         if self.packing and self.max_seq_length < 128:
             errors.append(f"max_seq_length must be at least 128 when packing is enabled: {self.max_seq_length}")
         return errors
@@ -604,8 +602,9 @@ class LoRATrainer:
             load_kwargs["torch_dtype"] = torch_dtype
             load_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
         else:
-            # 非量化模型：使用 dtype（transformers 推荐，避免 torch_dtype 弃用警告）
-            load_kwargs["dtype"] = torch_dtype
+            # transformers 4.x forwards unknown kwargs to the model constructor.
+            # Use torch_dtype here; dtype is only accepted by newer releases.
+            load_kwargs["torch_dtype"] = torch_dtype
 
         model = AutoModelForCausalLM.from_pretrained(
             str(self.config.base_model_path),
@@ -632,6 +631,14 @@ class LoRATrainer:
             use_rslora=self.config.use_rslora,
         )
 
+    def _configure_lora_model(self, model):
+        model = get_peft_model(model, self._create_lora_config())
+        if self.config.gradient_checkpointing:
+            if hasattr(model, "enable_input_require_grads"):
+                model.enable_input_require_grads()
+            if getattr(model, "config", None) is not None:
+                model.config.use_cache = False
+        return model
     def train(self) -> Path:
         """执行完整的LoRA训练流程。
 
@@ -662,8 +669,7 @@ class LoRATrainer:
             model = self._load_model()
 
             logger.info("配置LoRA...")
-            lora_config = self._create_lora_config()
-            model = get_peft_model(model, lora_config)
+            model = self._configure_lora_model(model)
             trainable_params = sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
             model.print_trainable_parameters()
             self.print_gpu_memory("LoRA配置后")
@@ -731,7 +737,7 @@ class LoRATrainer:
                 optim=self.config.optim,
                 report_to=self.config.report_to,
                 gradient_checkpointing=self.config.gradient_checkpointing,
-                max_length=self.config.max_seq_length,
+                max_seq_length=self.config.max_seq_length,
                 seed=self.config.seed,
                 packing=self.config.packing,
                 neftune_noise_alpha=self.config.neftune_noise_alpha or None,

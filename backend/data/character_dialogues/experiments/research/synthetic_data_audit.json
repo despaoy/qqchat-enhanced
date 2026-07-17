@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "policy": "合成偏好对仅为待审核候选，approved前禁止训练。",
+  "checks": [
+    "训练集prompt去重",
+    "chosen与rejected非空且不同",
+    "跨角色负例人工确认",
+    "偏好候选不得与留出评测source id重叠",
+    "争议样本双人盲审"
+  ],
+  "datasets": {
+    "shenbai_mizunamo": {
+      "path": "backend\\data\\character_dialogues\\experiments\\research\\shenbai_mizunamo_preference_candidates.jsonl",
+      "count": 100,
+      "sha256": "877eb6be31b17baca54276159af31954f0d125d39e0fca63f9d012b573471f14",
+      "approved_count": 0
+    },
+    "tsukiyashiro_kisaki": {
+      "path": "backend\\data\\character_dialogues\\experiments\\research\\tsukiyashiro_kisaki_preference_candidates.jsonl",
+      "count": 100,
+      "sha256": "4b58975279add0d1c9629a17e4c50510244fab37a7c6803294102bdf1e535001",
+      "approved_count": 0
+    }
+  }
+}

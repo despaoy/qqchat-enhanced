@@ -40,3 +40,65 @@ def test_training_evaluation_handles_invalid_or_extreme_losses():
 
     assert report["metrics"]["final_train_loss"] is None
     assert report["metrics"]["eval_perplexity"] is None
+
+def test_training_config_allows_dora_and_rslora_together():
+    from training.trainer import LoRATrainingConfig
+
+    errors = LoRATrainingConfig(
+        use_dora=True,
+        use_rslora=True,
+    ).validate()
+
+    assert "DoRA and RSLoRA cannot be enabled together" not in errors
+
+def test_non_quantized_model_uses_transformers_4_compatible_dtype(monkeypatch, tmp_path: Path):
+    import torch
+    import training.trainer as trainer_module
+
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    (model_dir / "config.json").write_text('{"model_type":"qwen2"}', encoding="utf-8")
+    captured = {}
+    sentinel = object()
+
+    def fake_from_pretrained(path, **kwargs):
+        captured["path"] = path
+        captured.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(
+        trainer_module.AutoModelForCausalLM,
+        "from_pretrained",
+        fake_from_pretrained,
+    )
+    config = trainer_module.LoRATrainingConfig(base_model_path=str(model_dir))
+    loaded = trainer_module.LoRATrainer(config)._load_model()
+
+    assert loaded is sentinel
+    assert captured["torch_dtype"] is torch.float16
+    assert "dtype" not in captured
+
+def test_gradient_checkpointing_enables_input_grads_and_disables_cache(monkeypatch):
+    import training.trainer as trainer_module
+
+    class DummyConfig:
+        use_cache = True
+
+    class DummyModel:
+        config = DummyConfig()
+        input_grads_enabled = False
+
+        def enable_input_require_grads(self):
+            self.input_grads_enabled = True
+
+    model = DummyModel()
+    monkeypatch.setattr(trainer_module, "get_peft_model", lambda value, config: value)
+    trainer = trainer_module.LoRATrainer(
+        trainer_module.LoRATrainingConfig(gradient_checkpointing=True)
+    )
+
+    configured = trainer._configure_lora_model(model)
+
+    assert configured is model
+    assert configured.input_grads_enabled is True
+    assert configured.config.use_cache is False

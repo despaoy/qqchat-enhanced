@@ -488,7 +488,7 @@ LORA_NAMES = list(LORA_REGISTRY.keys())
 
 
 def _load_7b_model(lora_name: str = None):
-    """加载 Qwen2.5-7B 4bit + 指定 LoRA 适配器（支持热切换）"""
+    """加载 Qwen3-8B 4bit + 指定 LoRA 适配器（支持热切换）"""
     global _hutao_7b_model, _hutao_7b_tokenizer, _current_lora
 
     lora_name = lora_name or _current_lora
@@ -502,7 +502,7 @@ def _load_7b_model(lora_name: str = None):
 
     # 首次加载
     if _hutao_7b_model is None:
-        base_model_path = os.getenv("BASE_MODEL_PATH", "models/Qwen2.5-7B-Instruct")
+        base_model_path = os.getenv("BASE_MODEL_PATH", "models/Qwen3-8B-Instruct")
         if not os.path.isabs(base_model_path):
             base_model_path = str(Path(__file__).parent / base_model_path)
         base_model_path = str(Path(base_model_path).resolve())
@@ -516,7 +516,7 @@ def _load_7b_model(lora_name: str = None):
             bnb_4bit_use_double_quant=True,
         )
 
-        logger.info(f"加载 Qwen2.5-7B (4bit)...")
+        logger.info(f"加载 Qwen3-8B (4bit)...")
         _hutao_7b_tokenizer = AutoTokenizer.from_pretrained(base_model_path)
 
         base_model = AutoModelForCausalLM.from_pretrained(
@@ -554,9 +554,9 @@ def is_superuser(event: MessageEvent) -> bool:
 
 
 async def generate_with_local_model(prompt: str, session_id: Optional[str] = None, is_claw: bool = False, lora_name: str = None) -> str:
-    """使用 Qwen2.5-7B 生成回复 - 优先vLLM，回退transformers"""
+    """使用 Qwen3-8B 生成回复 - 优先vLLM，回退transformers"""
     lora_name = lora_name or _current_lora
-    logger.info(f"使用 Qwen2.5-7B + LoRA={lora_name} 生成回复")
+    logger.info(f"使用 Qwen3-8B + LoRA={lora_name} 生成回复")
 
     # ── 优先使用 vLLM 高并发推理 ──
     _use_vllm = os.getenv("VLLM_ENABLED", "false").lower() == "true"
@@ -808,7 +808,7 @@ async def process_message(event: MessageEvent) -> str:
 
     # 生成回复
     if config.USE_LORA_STYLE:
-        logger.info(f"使用 Qwen2.5-7B + LoRA={_current_lora} 生成回复")
+        logger.info(f"使用 Qwen3-8B + LoRA={_current_lora} 生成回复")
         try:
             reply = await generate_with_local_model(user_message, session_id, lora_name=_current_lora)
         except FileNotFoundError:

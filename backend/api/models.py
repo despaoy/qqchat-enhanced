@@ -93,7 +93,7 @@ async def check_and_download_7b_model(current_user: dict = Depends(get_current_u
         from inference.model_manager import get_model_manager
         manager = get_model_manager()
 
-        model_name = "qwen2.5-7b"
+        model_name = "qwen3-8b"
 
         if manager.check_model_exists(model_name):
             return {

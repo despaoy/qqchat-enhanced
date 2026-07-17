@@ -251,7 +251,7 @@ class VLLMClient:
         ]
         self._api_key: str = api_key or os.getenv("VLLM_API_KEY", "")
         self._model: str = model or os.getenv(
-            "VLLM_SERVED_MODEL_NAME", os.getenv("VLLM_MODEL", "qwen2.5-7b-awq")
+            "VLLM_SERVED_MODEL_NAME", os.getenv("VLLM_MODEL", "qwen3-8b-instruct-awq")
         )
         self._timeout: float = timeout or float(os.getenv("VLLM_TIMEOUT", "120"))
         self._max_retries: int = max_retries or int(os.getenv("VLLM_MAX_RETRIES", "3"))
