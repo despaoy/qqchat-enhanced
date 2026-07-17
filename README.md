@@ -79,6 +79,7 @@ bash scripts/lab-start-vllm-daemon.sh
 | [研究与学习路线图](docs/research/RESEARCH_AND_LEARNING_ROADMAP.md) | **合并文档**：项目定位、当前状态、9 项研究方向、10 周实施计划（含 Learn/Do/Deliver/Pass）、部署验收、学习资源、研究诚信 Guardrails |
 | [真实 vLLM 基准报告](docs/research/REAL_VLLM_BENCHMARK_REPORT.md) | 2026-07-14 RTX 3090 真实实验报告：Minamo/月社妃 LoRA 训练与评测、质量门禁、根因分析 |
 | [初学者真实 LLM 实验指南](docs/research/BEGINNER_REAL_LLM_EXPERIMENT_GUIDE.md) | 面向初学者的实验操作指南：盲评、偏好审核、训练、挂载 vLLM、真实评测 |
+| [月社妃 LoRA 重训科研路径](docs/research/KISAKI_LORA_RETRAIN_PLAN.md) | **保研科研主线**：v1 失败诊断→数据治理（游戏文本+LLM增强+人工审核）→四组消融（LoRA/DoRA/RSLoRA/NEFTune）→部署→DPO pilot |
 
 ### 数据与评测（docs/data/）
 
