@@ -1,24 +1,24 @@
 # qqchat_gateway
 
-AstrBot plugin for qqchat-enhanced. It keeps AstrBot as the multi-platform gateway and forwards normalized text messages to FastAPI:
+AstrBot 插件，用于 qqchat-enhanced。它将 AstrBot 保持为多平台网关，并将归一化后的文本消息转发至 FastAPI：
 
 `POST /api/integrations/astrbot/messages`
 
-Environment variables:
+环境变量：
 
-- `QQCHAT_BACKEND_URL`: FastAPI base URL, default `http://127.0.0.1:8000`
-- `ASTRBOT_INTEGRATION_TOKEN`: shared token. Must match backend when configured.
-- `QQCHAT_TRIGGER_PREFIXES`: group trigger prefixes, default `/ai,/chat,@bot`
-- `QQCHAT_REPLY_GROUP_ALL`: set `true` to forward all group messages
-- `QQCHAT_BACKEND_TIMEOUT`: request timeout seconds, default `60`
-- `QQCHAT_DEDUP_TTL`: in-memory event deduplication TTL seconds, default `300`
-- `QQCHAT_QQ_ADAPTER`: adapter label for QQ events, default `napcat`
-- `QQCHAT_WECHAT_ADAPTER`: adapter label for personal WeChat events, default `gewechat`; recommended values: `gewechat`, `wechatpadpro`, `other`
+- `QQCHAT_BACKEND_URL`：FastAPI 基础 URL，默认 `http://127.0.0.1:8000`
+- `ASTRBOT_INTEGRATION_TOKEN`：共享令牌，必须与后端配置一致
+- `QQCHAT_TRIGGER_PREFIXES`：群触发前缀，默认 `/ai,/chat,@bot`
+- `QQCHAT_REPLY_GROUP_ALL`：设为 `true` 时转发所有群消息
+- `QQCHAT_BACKEND_TIMEOUT`：请求超时秒数，默认 `60`
+- `QQCHAT_DEDUP_TTL`：内存事件去重 TTL 秒数，默认 `300`
+- `QQCHAT_QQ_ADAPTER`：QQ 事件的适配器标签，默认 `napcat`
+- `QQCHAT_WECHAT_ADAPTER`：个人微信事件的适配器标签，默认 `gewechat`；推荐值：`gewechat`、`wechatpadpro`、`other`
 
-Personal WeChat notes:
+个人微信说明：
 
-- Personal WeChat login and credentials stay inside AstrBot and the selected adapter.
-- This plugin only normalizes AstrBot events. If AstrBot reports a platform name containing `wechat` or `gewechat`, the event is forwarded as `platform=wechat_personal`.
-- Production deployments should prefer WeCom or Official Account where possible; personal WeChat adapters are best treated as experimental.
+- 个人微信的登录和凭证保留在 AstrBot 和所选适配器内部。
+- 本插件仅归一化 AstrBot 事件。若 AstrBot 上报的平台名包含 `wechat` 或 `gewechat`，事件以 `platform=wechat_personal` 转发。
+- 生产部署应优先使用企业微信或公众号；个人微信适配器最好视为实验性。
 
-The plugin intentionally does not implement RAG, LoRA, or model inference. Those remain in qqchat-enhanced backend.
+本插件有意不实现 RAG、LoRA 或模型推理。这些能力保留在 qqchat-enhanced 后端。

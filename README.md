@@ -69,31 +69,31 @@ bash scripts/lab-start-vllm-daemon.sh
 
 | 文档 | 用途 |
 | --- | --- |
-| [Code Wiki](docs/architecture/CODE_WIKI.md) | **权威技术文档**：项目整体架构、模块职责、关键类与函数、依赖关系（1300+ 行结构化知识库） |
-| [Optimization Strategy](docs/architecture/OPTIMIZATION_STRATEGY.md) | 性能、可靠性、安全、部署的工程优化执行基线（P0-P3 优先级原则） |
+| [代码知识库](docs/architecture/CODE_WIKI.md) | **权威技术文档**：项目整体架构、模块职责、关键类与函数、依赖关系（1300+ 行结构化知识库） |
+| [优化策略](docs/architecture/OPTIMIZATION_STRATEGY.md) | 性能、可靠性、安全、部署的工程优化执行基线（P0-P3 优先级原则） |
 
 ### 研究与实验（docs/research/）
 
 | 文档 | 用途 |
 | --- | --- |
-| [Research and Learning Roadmap](docs/research/RESEARCH_AND_LEARNING_ROADMAP.md) | **合并文档**：项目定位、当前状态、9 项研究方向、10 周实施计划（含 Learn/Do/Deliver/Pass）、部署验收、学习资源、研究诚信 Guardrails |
-| [Real vLLM Benchmark Report](docs/research/REAL_VLLM_BENCHMARK_REPORT.md) | 2026-07-14 RTX 3090 真实实验报告：Minamo/月社妃 LoRA 训练与评测、质量门禁、根因分析 |
-| [Beginner Real LLM Experiment Guide](docs/research/BEGINNER_REAL_LLM_EXPERIMENT_GUIDE.md) | 面向初学者的实验操作指南：盲评、偏好审核、训练、挂载 vLLM、真实评测 |
+| [研究与学习路线图](docs/research/RESEARCH_AND_LEARNING_ROADMAP.md) | **合并文档**：项目定位、当前状态、9 项研究方向、10 周实施计划（含 Learn/Do/Deliver/Pass）、部署验收、学习资源、研究诚信 Guardrails |
+| [真实 vLLM 基准报告](docs/research/REAL_VLLM_BENCHMARK_REPORT.md) | 2026-07-14 RTX 3090 真实实验报告：Minamo/月社妃 LoRA 训练与评测、质量门禁、根因分析 |
+| [初学者真实 LLM 实验指南](docs/research/BEGINNER_REAL_LLM_EXPERIMENT_GUIDE.md) | 面向初学者的实验操作指南：盲评、偏好审核、训练、挂载 vLLM、真实评测 |
 
 ### 数据与评测（docs/data/）
 
 | 文档 | 用途 |
 | --- | --- |
-| [Dataset Card](docs/data/dataset-card.md) | QQChat Persona SFT 训练数据集卡片 v1.0：来源、预处理、分割、角色定义、版权 |
-| [Human Scoring Rubric](docs/data/human-scoring-rubric.md) | Gold Set 105 条 prompt 的人工评分标准（5 分制，5 类别） |
+| [数据集卡片](docs/data/dataset-card.md) | QQChat Persona SFT 训练数据集卡片 v1.0：来源、预处理、分割、角色定义、版权 |
+| [人工评分标准](docs/data/human-scoring-rubric.md) | Gold Set 105 条 prompt 的人工评分标准（5 分制，5 类别） |
 
 ### 子目录文档
 
 | 文档 | 用途 |
 | --- | --- |
-| [AstrBot Gateway Plugin](astrbot_plugins/qqchat_gateway/README.md) | AstrBot 插件安装与环境变量配置 |
-| [Character Dialogues](backend/data/character_dialogues/README.md) | 角色对话训练数据目录结构说明 |
-| [Preference Review Guide](backend/data/character_dialogues/experiments/research/PREFERENCE_REVIEW_GUIDE.md) | 偏好数据人工审核操作指南（chosen/rejected 判定） |
+| [AstrBot 网关插件](astrbot_plugins/qqchat_gateway/README.md) | AstrBot 插件安装与环境变量配置 |
+| [角色对话数据](backend/data/character_dialogues/README.md) | 角色对话训练数据目录结构说明 |
+| [偏好审核指南](backend/data/character_dialogues/experiments/research/PREFERENCE_REVIEW_GUIDE.md) | 偏好数据人工审核操作指南（chosen/rejected 判定） |
 
 ## 仓库结构
 
@@ -153,6 +153,6 @@ gametext/                角色语料（纸上魔法使系列）
 - 启动参数添加 `--enforce-eager`（绕过 Triton 编译 `-lcuda` 问题）
 - 旧 LoRA 已备份，需基于 Qwen3-8B 重新训练
 
-## License
+## 许可证
 
 详见 [LICENSE](LICENSE)。

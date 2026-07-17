@@ -1,4 +1,4 @@
-# Dataset Card: QQChat Enhanced Persona Training Data
+# 数据集卡片：QQChat Enhanced 角色训练数据
 
 > 本文件遵循 `backend/evaluation/dataset_card_schema.py` 的 `DatasetCard` Schema。
 > 版本：v1.0 ｜ 创建时间：2026-07-12 ｜ 维护者：项目作者

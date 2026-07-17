@@ -1,97 +1,97 @@
-# Optimization Strategy
+# 优化策略
 
-## Scope and Priorities
+## 范围与优先级
 
-This document is the execution baseline for performance, reliability, security, and deployment work. Priorities are P0 (data loss, security boundary, or service outage), P1 (incorrect user-visible behavior), P2 (capacity and operability), and P3 (quality improvements).
+本文档是性能、可靠性、安全和部署工作的执行基线。优先级定义：P0（数据丢失、安全边界或服务中断），P1（用户可见的错误行为），P2（容量与可运维性），P3（质量改进）。
 
-## Cross-Module Rules
+## 跨模块规则
 
-- Keep application code, model weights, and persistent data in separate directories.
-- Treat every external boundary as unreliable: IM platforms, vLLM, Redis, PostgreSQL, vector storage, and model files.
-- Use one configuration source: environment variables validated at startup, never frontend-exposed secrets.
-- Attach `traceId`, platform, conversation, sender, model, latency, and error type to each request log.
-- Preserve idempotency with `platform + adapter + messageId`; use a stable fallback hash only when the platform has no message id.
+- 应用代码、模型权重和持久化数据必须存放在相互独立的目录中。
+- 所有外部边界均视为不可靠：IM 平台、vLLM、Redis、PostgreSQL、向量存储和模型文件。
+- 仅使用单一配置源：在启动时校验的环境变量，绝不通过前端暴露密钥。
+- 每条请求日志必须附带 `traceId`、平台、会话、发送者、模型、延迟和错误类型。
+- 通过 `platform + adapter + messageId` 保持幂等；仅在平台无消息 ID 时使用稳定的回退哈希。
 
 ## LoRA
 
-- P0: Use one canonical `LORA_PATH` for scan, training output, backend loading, and `VLLM_LORA_ROOT`.
-- P0: Serialize adapter load/unload operations and update database state only after vLLM confirms success.
-- P1: Validate `adapter_config.json`, adapter weights, rank, tokenizer compatibility, and base-model family before activation.
-- P1: Keep training artifacts and runtime adapters in persistent storage outside the Git checkout.
-- P2: Track adapter load time, GPU memory delta, active adapter, and rollback result in model invocation logs.
-- P2: Apply quotas for concurrent training and inference; training must not start while inference GPU headroom is below a configured floor.
+- P0：扫描、训练输出、后端加载和 `VLLM_LORA_ROOT` 使用同一个规范 `LORA_PATH`。
+- P0：串行化 adapter 加载/卸载操作，仅在 vLLM 确认成功后更新数据库状态。
+- P1：在激活前校验 `adapter_config.json`、adapter 权重、rank、tokenizer 兼容性和基座模型族。
+- P1：训练产物和运行时 adapter 必须存放在 Git 检出目录之外的持久化存储中。
+- P2：在模型调用日志中记录 adapter 加载时间、GPU 显存增量、当前激活 adapter 和回滚结果。
+- P2：对并发训练和推理施加配额；推理 GPU 余量低于配置阈值时不得启动训练。
 
-## RAG and Intent Routing
+## RAG 与意图路由
 
-- P0: Respect `VECTOR_DB_PATH` everywhere and rebuild or delete vector entries atomically with source documents.
-- P0: Load embeddings only from `EMBEDDING_MODEL_PATH` in offline deployments; remote model download is opt-in.
-- P1: Enable reranking only when an explicitly configured local model exists; use hybrid retrieval as the safe fallback.
-- P1: Bound query expansion, cache by normalized query plus knowledge-base revision, and invalidate cache on document mutation.
-- P2: Record retrieval candidate count, rerank latency, context length, cache hit, and retrieval failure type.
-- P2: Train intent routing asynchronously with cancellation and versioned persistent artifacts.
+- P0：所有位置遵守 `VECTOR_DB_PATH`，并在源文档变更时原子化重建或删除向量条目。
+- P0：离线部署仅从 `EMBEDDING_MODEL_PATH` 加载嵌入模型；远程模型下载为可选开启。
+- P1：仅在显式配置的本地模型存在时启用重排序；以混合检索作为安全回退。
+- P1：限制查询扩展，按规范化查询加知识库版本号缓存，并在文档变更时失效缓存。
+- P2：记录检索候选数量、重排序延迟、上下文长度、缓存命中和检索失败类型。
+- P2：异步训练意图路由，支持取消并产出版本化持久化产物。
 
-## AstrBot and Platform Gateways
+## AstrBot 与平台网关
 
-- P0: AstrBot remains a thin gateway. It normalizes events, enforces trigger policy, calls the backend once, and sends one reply at most.
-- P0: Require integration token authentication in production and support timestamp, nonce, and signature replay protection.
-- P1: Keep each platform independently switchable; group messages default to mention or prefix triggers.
-- P1: Correlate AstrBot and backend logs through `traceId`; duplicate events must return the original result without a second reply.
-- P2: Report gateway reachability separately from platform activity so idle is never confused with disconnected.
+- P0：AstrBot 保持薄网关定位。它归一化事件、执行触发策略、调用后端一次，最多发送一条回复。
+- P0：生产环境必须使用集成令牌认证，并支持时间戳、nonce 和签名防重放保护。
+- P1：每个平台独立可开关；群消息默认使用 @或前缀触发。
+- P1：通过 `traceId` 关联 AstrBot 和后端日志；重复事件必须返回原始结果，不再发送第二条回复。
+- P2：分别上报网关可达性和平台活跃度，避免将空闲误判为断连。
 
-## High Concurrency
+## 高并发
 
-- P0: Apply global, platform/conversation, and sender token buckets before model work.
-- P0: Queue generation with admin, private, channel, and group priorities; reject full queues with a controlled response.
-- P1: Serialize each conversation while allowing unrelated conversations to proceed.
-- P1: Align backend queue workers, vLLM client concurrency, and GPU capacity through environment variables.
-- P2: Export queue length, active workers, rejection rate, latency percentiles, and cache hit rate.
+- P0：在模型工作之前应用全局、平台/会话、发送者三层令牌桶。
+- P0：按管理员、私聊、频道、群组优先级排队生成；队列满时按受控响应拒绝。
+- P1：每个会话串行处理，同时允许无关会话并行推进。
+- P1：通过环境变量对齐后端队列 worker、vLLM 客户端并发和 GPU 容量。
+- P2：导出队列长度、活跃 worker 数、拒绝率、延迟分位数和缓存命中率。
 
-## Reliability
+## 可靠性
 
-- P0: Use timeout and circuit-breaker boundaries around vLLM, RAG, database writes, Redis, and AstrBot HTTP calls.
-- P0: Do not repeat inference because a database write failed; record the failure and return the generated response once.
-- P1: PostgreSQL is the production default. SQLite is development/small-scale only and must use WAL, busy timeout, and retry.
-- P1: Use graceful degradation: group chats are silent on upstream failure; private chats get a short retry-safe message.
-- P2: Back up persistent data before deployment and make migrations idempotent.
+- P0：在 vLLM、RAG、数据库写入、Redis 和 AstrBot HTTP 调用周围设置超时和熔断边界。
+- P0：不因数据库写入失败而重复推理；记录失败并仅返回一次已生成响应。
+- P1：PostgreSQL 为生产默认。SQLite 仅用于开发/小规模场景，必须启用 WAL、busy timeout 和重试。
+- P1：使用优雅降级：群聊在上游失败时静默；私聊返回简短的重试安全消息。
+- P2：部署前备份持久化数据，并使迁移操作幂等。
 
-## Security
+## 安全
 
-- P0: Keep JWT, integration tokens, cookies, platform credentials, and personal identifiers out of logs, frontend bundles, and Git.
-- P0: Enforce authenticated administration, origin/CSRF validation, request size limits, schema validation, and command authorization.
-- P1: Separate user text, retrieved documents, and system prompts. Block requests for secrets, config export, and privilege escalation.
-- P1: Disable Claw code execution by default; if enabled, isolate it in a restricted container with a timeout and read-only filesystem.
-- P2: Rotate integration tokens with overlap support and alert on repeated authentication failures.
+- P0：JWT、集成令牌、Cookie、平台凭证和个人标识符不得出现在日志、前端 bundle 和 Git 中。
+- P0：强制认证管理操作，校验来源/CSRF、请求大小限制、Schema 校验和命令授权。
+- P1：分离用户文本、检索文档和系统提示词。拦截对密钥、配置导出和提权的请求。
+- P1：默认禁用 Claw 代码执行；如启用，需在受限容器中隔离，附带超时和只读文件系统。
+- P2：支持集成令牌轮换（含重叠期），并对连续认证失败告警。
 
-## Deployment and Operations
+## 部署与运维
 
-- P0: A single-GPU deployment starts exactly one vLLM process; dual vLLM is opt-in and requires two GPUs.
-- P0: Start Next.js standalone output with `node .next/standalone/server.js` after a successful build.
-- P1: Run Redis, vLLM, backend, frontend, and AstrBot as separate supervised services with health checks and bounded restart policy.
-- P1: Validate production environment variables before startup and run smoke tests after each deployment.
-- P2: Use Nginx or Caddy for TLS, trusted-network management access, and request-size limits.
+- P0：单 GPU 部署仅启动一个 vLLM 进程；双 vLLM 为可选，需双 GPU。
+- P0：构建成功后使用 `node .next/standalone/server.js` 启动 Next.js standalone 输出。
+- P1：将 Redis、vLLM、后端、前端和 AstrBot 作为独立受监管服务运行，配置健康检查和有界重启策略。
+- P1：启动前校验生产环境变量，并在每次部署后运行冒烟测试。
+- P2：使用 Nginx 或 Caddy 提供 TLS、可信网络管理访问和请求大小限制。
 
-## Logging and Observability
+## 日志与可观测性
 
-- P0: Emit JSON logs with redaction for token, password, cookie, phone, openid, and unionid fields.
-- P1: Keep application, audit, model, and gateway logs in persistent directories with rotation and retention.
-- P1: Surface message/reply counts, P95/P99, model and RAG failure rate, queue state, AstrBot state, and platform state.
-- P2: Alert on sustained model failure, database write failure, gateway degradation, queue saturation, slow P95, and auth attacks.
+- P0：输出 JSON 日志，并对 token、密码、cookie、手机号、openid 和 unionid 字段脱敏。
+- P1：将应用、审计、模型和网关日志存入持久化目录，配置轮换和保留策略。
+- P1：展示消息/回复计数、P95/P99、模型与 RAG 失败率、队列状态、AstrBot 状态和平台状态。
+- P2：对持续模型失败、数据库写入失败、网关退化、队列饱和、P95 慢响应和认证攻击告警。
 
-## Verification Matrix
+## 验证矩阵
 
-| Area | Automated checks | Production acceptance |
+| 领域 | 自动化检查 | 生产验收 |
 | --- | --- | --- |
-| LoRA | adapter scan and activation contract tests | load Minamo/Hutao, generate, rollback |
-| RAG | vector path, deletion, cache invalidation tests | import, search, update, delete |
-| AstrBot | schema, auth, idempotency tests | private/group gateway message |
-| Concurrency | token bucket and session serialization tests | bounded concurrent requests |
-| Security | token, signature, input, CSRF tests | unauthorized request rejection |
-| Deployment | syntax, unit tests, frontend build | health, ready, vLLM models, UI smoke |
+| LoRA | adapter 扫描与激活契约测试 | 加载 Minamo/Hutao、生成、回滚 |
+| RAG | 向量路径、删除、缓存失效测试 | 导入、搜索、更新、删除 |
+| AstrBot | Schema、认证、幂等测试 | 私聊/群聊网关消息 |
+| 并发 | 令牌桶与会话串行化测试 | 有界并发请求 |
+| 安全 | token、签名、输入、CSRF 测试 | 未授权请求被拒绝 |
+| 部署 | 语法、单元测试、前端构建 | health、ready、vLLM 模型、UI 冒烟 |
 
-## Execution Order
+## 执行顺序
 
-1. Fix P0 configuration and deployment defaults.
-2. Add or extend focused regression tests for each fixed boundary.
-3. Validate local mock mode, then a real vLLM deployment.
-4. Enable platforms one at a time and monitor correlated logs.
-5. Promote only after metrics remain stable under a bounded concurrency test.
+1. 修复 P0 配置和部署默认值。
+2. 为每个修复的边界添加或扩展聚焦回归测试。
+3. 先验证本地 mock 模式，再验证真实 vLLM 部署。
+4. 逐个启用平台并监控关联日志。
+5. 仅在有界并发测试下指标保持稳定后才推进上线。

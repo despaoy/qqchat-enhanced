@@ -1,4 +1,4 @@
-# QQChat Enhanced — Code Wiki
+# QQChat Enhanced — 代码知识库
 
 > 本文档为 `qqchat-enhanced` 项目的结构化代码知识库（Code Wiki），涵盖项目整体架构、模块职责、关键类与函数、依赖关系与运行方式。
 >
