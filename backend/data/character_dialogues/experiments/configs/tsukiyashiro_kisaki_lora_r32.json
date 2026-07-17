@@ -1,7 +1,7 @@
 {
-  "base_model_path": "/home/szw/lhm2/runtime/models/Qwen2.5-7B-Instruct",
+  "base_model_path": "/home/szw/lhm2/runtime/models/Qwen3-8B-Instruct",
   "train_data_path": "backend/data/character_dialogues/experiments/tsukiyashiro_kisaki_train.json",
-  "output_dir": "/home/szw/lhm2/runtime/loras/kisaki/lora_r32",
+  "output_dir": "/home/szw/lhm2/runtime/loras/kisaki/lora_r32_qwen3",
   "lora_r": 32,
   "lora_alpha": 64,
   "lora_dropout": 0.1,
@@ -27,8 +27,8 @@
   "eval_steps": 50,
   "save_steps": 50,
   "save_total_limit": 2,
-  "fp16": true,
-  "bf16": false,
+  "fp16": false,
+  "bf16": true,
   "gradient_checkpointing": true,
   "load_in_4bit": false,
   "load_in_8bit": false,
@@ -36,5 +36,6 @@
   "report_to": "tensorboard",
   "system_prompt": "你是月社妃，请根据训练对话保持角色的说话方式、人物关系与世界观，不要编造训练材料之外的事实。",
   "train_test_split": 0.9,
-  "seed": 42
+  "seed": 42,
+  "_note": "Updated for Qwen3-8B-Instruct. Train data pending v2 rebuild."
 }

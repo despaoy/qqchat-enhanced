@@ -1,24 +1,4 @@
 {
-  "shenbai_mizunamo": {
-    "character": "神白水菜萌",
-    "all_supplied_attributable_occurrences": 626,
-    "all_supplied_unique_utterances": 607,
-    "canonical_direct_occurrences": 625,
-    "raw_source_coverage_percent": 100.0,
-    "full_sft_examples": 481,
-    "full_sft_covered_canonical_occurrences": 568,
-    "recommended_sft_examples": 477,
-    "recommended_sft_unique_prompts": 477,
-    "recommended_sft_covered_canonical_occurrences": 564,
-    "excluded_turn_reasons": {
-      "duplicate_prompt_lower_rank": 4,
-      "low_information_prompt": 30,
-      "low_information_reply": 23
-    },
-    "source_files": {
-      "ATRI-my  dear moments.docx": 626
-    }
-  },
   "tsukiyashiro_kisaki": {
     "character": "月社妃",
     "all_supplied_attributable_occurrences": 6392,
@@ -79,6 +59,7 @@
       "分章文本/日后谈.txt": 43,
       "个人线插入主线.txt": 1598,
       "个人线后于主线.txt": 1598
-    }
+    },
+    "_note": "v1 metadata (Qwen2.5-7B baseline), pending v2 rebuild on Qwen3-8B"
   }
 }

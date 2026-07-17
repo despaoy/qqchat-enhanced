@@ -1,34 +1,4 @@
 {
-  "shenbai_mizunamo": {
-    "dpo": {
-      "model_name_or_path": "${BASE_MODEL_PATH}",
-      "dataset_path": "backend\\data\\character_dialogues\\experiments\\research\\shenbai_mizunamo_preference_candidates.jsonl",
-      "seed": 42,
-      "learning_rate": 5e-07,
-      "num_train_epochs": 1,
-      "beta": 0.1,
-      "lora_r": 32,
-      "lora_alpha": 64,
-      "require_review_status": "approved",
-      "claim": "preference_alignment_not_RLHF",
-      "method": "dpo",
-      "output_dir": "backend/loras/shenbai_mizunamo_dpo"
-    },
-    "orpo": {
-      "model_name_or_path": "${BASE_MODEL_PATH}",
-      "dataset_path": "backend\\data\\character_dialogues\\experiments\\research\\shenbai_mizunamo_preference_candidates.jsonl",
-      "seed": 42,
-      "learning_rate": 5e-07,
-      "num_train_epochs": 1,
-      "beta": 0.1,
-      "lora_r": 32,
-      "lora_alpha": 64,
-      "require_review_status": "approved",
-      "claim": "preference_alignment_not_RLHF",
-      "method": "orpo",
-      "output_dir": "backend/loras/shenbai_mizunamo_orpo"
-    }
-  },
   "tsukiyashiro_kisaki": {
     "dpo": {
       "model_name_or_path": "${BASE_MODEL_PATH}",

@@ -23,56 +23,6 @@
     "safety_pass_rate"
   ],
   "personas": {
-    "shenbai_mizunamo": {
-      "train_sha256": "7f7e05dd9619a9b4111a8524eeedc391abeb8569ae460032a95b468de8951e8e",
-      "eval_sha256": "d0ec0e02ddcc796d465e61d045dc398c430f47703b9c7ad4fcb9ddbf9be19535",
-      "variants": [
-        {
-          "id": "lora",
-          "overrides": {
-            "packing": false,
-            "neftune_noise_alpha": 0,
-            "use_dora": false,
-            "use_rslora": false
-          }
-        },
-        {
-          "id": "packing",
-          "overrides": {
-            "packing": true
-          }
-        },
-        {
-          "id": "neftune",
-          "overrides": {
-            "neftune_noise_alpha": 5
-          }
-        },
-        {
-          "id": "dora",
-          "overrides": {
-            "use_dora": true
-          }
-        },
-        {
-          "id": "rslora",
-          "overrides": {
-            "use_rslora": true
-          }
-        },
-        {
-          "id": "qlora",
-          "overrides": {
-            "load_in_4bit": true
-          }
-        },
-        {
-          "id": "qa_lora",
-          "status": "not_implemented",
-          "reason": "需要真正的量化感知分组算子，不能以QLoRA冒充"
-        }
-      ]
-    },
     "tsukiyashiro_kisaki": {
       "train_sha256": "5568432d816eca7b154c583ad31e2d5cb485b255175a1470743ea03945fd36ae",
       "eval_sha256": "bf98aac567970ce624b9be605d68b15acc7d75221808c3cc969347f9d5e935a0",
@@ -121,7 +71,8 @@
           "status": "not_implemented",
           "reason": "需要真正的量化感知分组算子，不能以QLoRA冒充"
         }
-      ]
+      ],
+      "_note": "v1 metadata (Qwen2.5-7B baseline), pending v2 rebuild on Qwen3-8B (sha256 will change after v2 rebuild)"
     }
   }
 }

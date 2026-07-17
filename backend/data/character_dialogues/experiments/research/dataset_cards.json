@@ -1,76 +1,6 @@
 [
   {
     "schema_version": 1,
-    "name": "shenbai_mizunamo_train",
-    "source": "用户提供视觉小说文本，经显式说话人标签提取",
-    "license": "unknown-user-must-verify",
-    "language": [
-      "zh-CN"
-    ],
-    "size": 357,
-    "persona": "shenbai_mizunamo",
-    "domain": "角色对话微调与留出评测",
-    "risks": [
-      "原作版权与再分发限制",
-      "剧情偏见",
-      "自动清洗可能保留低信息台词"
-    ],
-    "intended_use": "非商业研究、LoRA受控实验和角色评测",
-    "preprocessing": [
-      "Unicode规范化",
-      "来源文件隔离",
-      "连续台词合并",
-      "prompt去重",
-      "训练评测source id隔离"
-    ],
-    "train_val_test_split": {
-      "train": 357,
-      "held_out_eval": 150
-    },
-    "content_hash": "7f7e05dd9619a9b4111a8524eeedc391abeb8569ae460032a95b468de8951e8e",
-    "created_at": "2026-07-13T17:15:54.845061+00:00",
-    "tags": [
-      "shenbai_mizunamo",
-      "train"
-    ]
-  },
-  {
-    "schema_version": 1,
-    "name": "shenbai_mizunamo_eval",
-    "source": "用户提供视觉小说文本，经显式说话人标签提取",
-    "license": "unknown-user-must-verify",
-    "language": [
-      "zh-CN"
-    ],
-    "size": 150,
-    "persona": "shenbai_mizunamo",
-    "domain": "角色对话微调与留出评测",
-    "risks": [
-      "原作版权与再分发限制",
-      "剧情偏见",
-      "自动清洗可能保留低信息台词"
-    ],
-    "intended_use": "非商业研究、LoRA受控实验和角色评测",
-    "preprocessing": [
-      "Unicode规范化",
-      "来源文件隔离",
-      "连续台词合并",
-      "prompt去重",
-      "训练评测source id隔离"
-    ],
-    "train_val_test_split": {
-      "train": 357,
-      "held_out_eval": 150
-    },
-    "content_hash": "d0ec0e02ddcc796d465e61d045dc398c430f47703b9c7ad4fcb9ddbf9be19535",
-    "created_at": "2026-07-13T17:15:54.845061+00:00",
-    "tags": [
-      "shenbai_mizunamo",
-      "eval"
-    ]
-  },
-  {
-    "schema_version": 1,
     "name": "tsukiyashiro_kisaki_train",
     "source": "用户提供视觉小说文本，经显式说话人标签提取",
     "license": "unknown-user-must-verify",
@@ -102,7 +32,8 @@
     "tags": [
       "tsukiyashiro_kisaki",
       "train"
-    ]
+    ],
+    "_note": "v1 metadata (Qwen2.5-7B baseline), pending v2 rebuild on Qwen3-8B"
   },
   {
     "schema_version": 1,
@@ -137,6 +68,7 @@
     "tags": [
       "tsukiyashiro_kisaki",
       "eval"
-    ]
+    ],
+    "_note": "v1 metadata (Qwen2.5-7B baseline), pending v2 rebuild on Qwen3-8B"
   }
 ]
