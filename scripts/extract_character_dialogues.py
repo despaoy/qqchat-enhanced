@@ -1,17 +1,17 @@
-"""Create auditable raw and SFT character-dialogue datasets."""
+"""从游戏文本提取月社妃角色对话，生成可审计的 raw 和 SFT 数据集（v2，Qwen3-8B 基座）。
+
+v2 改进（相对 v1）：
+- 适配 gametext/纸上魔法使/*.txt 数据源结构
+- 移除已清除的深白水波（ATRI）相关代码
+- 添加过短台词过滤与占比控制（≤ 15%），缓解 v1 回复塌缩问题
+- 保留 v1 的质量评分、去重、excluded 审计逻辑
+"""
 from __future__ import annotations
 import argparse, hashlib, json, re, unicodedata
 from collections import Counter
 from pathlib import Path
-from docx import Document
 
 TARGETS = {
-    "shenbai_mizunamo": {
-        "display_name": "神白水菜萌",
-        "train_aliases": {"水菜萌", "神白水菜萌", "水菜萌的声音"},
-        "joint_aliases": {"夏生·水菜萌"},
-        "system": "你正在扮演神白水菜萌。请依据给定角色设定和原作中的语言习惯，自然地回应。",
-    },
     "tsukiyashiro_kisaki": {
         "display_name": "月社妃",
         "train_aliases": {"妃", "月社妃"},
@@ -19,10 +19,13 @@ TARGETS = {
         "system": "你正在扮演月社妃。请依据给定角色设定和原作中的语言习惯，自然地回应。",
     },
 }
-DOCX_RE = re.compile(r"^(?P<speaker>[^：:\r\n]{1,40})\s*[：:]\s*(?P<text>.+?)\s*$")
 SCRIPT_RE = re.compile(r"\[(?P<speaker>[^\]]+)\]\s*[「『“](?P<text>.*?)[」』”]", re.DOTALL)
 SPACE_RE = re.compile(r"\s+")
 MEANING_RE = re.compile(r"[\w\u3400-\u9fff]", re.UNICODE)
+
+# v2 新增：过短回复阈值与占比上限
+SHORT_REPLY_THRESHOLD = 5  # 有效字符数 < 5 视为过短
+SHORT_REPLY_MAX_RATIO = 0.15  # 过短回复在最终 SFT 中占比 ≤ 15%
 
 
 def clean(text):
@@ -42,20 +45,12 @@ def stable_id(*parts):
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
-def read_docx_events(path):
-    events = []
-    for index, paragraph in enumerate(Document(path).paragraphs, 1):
-        match = DOCX_RE.match(clean(paragraph.text))
-        if match:
-            events.append({
-                "speaker": clean(match.group("speaker")),
-                "text": clean(match.group("text")),
-                "source": f"{path.name}:paragraph:{index}",
-            })
-    return events
-
-
 def read_script_events(path, source_id=None):
+    """从纸上魔法使脚本文件提取对话事件。
+
+    文件格式：[角色名] 「对话内容」
+    旁白行（无 [] 标签）不被提取为事件，保留纯对话序列。
+    """
     source_id = source_id or path.name
     text = path.read_text(encoding="utf-8")
     events = []
@@ -70,14 +65,12 @@ def read_script_events(path, source_id=None):
 
 
 def source_scripts(root):
-    for path in sorted((root / "所有文本").glob("scenario_*.json")):
-        yield path, f"所有文本/{path.name}", "canonical"
-    for path in sorted((root / "分章文本").glob("*.txt")):
-        yield path, f"分章文本/{path.name}", "verification"
-    for name in ("个人线插入主线.txt", "个人线后于主线.txt"):
-        path = root / name
-        if path.exists():
-            yield path, name, "verification"
+    """遍历 gametext/纸上魔法使/ 下所有 .txt 文件。
+
+    每个文件视为 canonical 来源（完整剧情卷）。
+    """
+    for path in sorted(root.glob("*.txt")):
+        yield path, path.name, "canonical"
 
 
 def target_kind(speaker, target_key):
@@ -157,6 +150,10 @@ def build_candidates(groups, target_key):
                 reasons.append("prompt_too_long")
             if len(reply) > 1600:
                 reasons.append("reply_too_long")
+            # v2 新增：标记过短回复（不直接排除，后续按占比控制）
+            is_short = meaningful_len(reply) < SHORT_REPLY_THRESHOLD
+            if is_short:
+                reasons.append("short_reply")
             source = reply_events[0]["source"] if reply_events else event["source"]
             ids = [f"{target_key}_raw_{stable_id(target_key, x['source'], x['text'])}" for x in reply_events]
             candidates.append({
@@ -171,6 +168,7 @@ def build_candidates(groups, target_key):
                 "response_line_count": len(reply_events),
                 "quality_score": quality_score(prompt, reply, len(reply_events)),
                 "reasons": reasons,
+                "is_short_reply": is_short,
             })
     return candidates
 
@@ -192,44 +190,84 @@ def as_sft(item, target_key):
             "target_event_ids": item["target_event_ids"],
             "response_line_count": item["response_line_count"],
             "quality_score": item["quality_score"],
-            "extraction": "explicit-label-source-bounded-turn-grouped",
+            "is_short_reply": item.get("is_short_reply", False),
+            "extraction": "explicit-label-source-bounded-turn-grouped-v2",
         },
     }
 
 
 def make_sft(groups, target_key):
-    excluded, valid = [], []
-    for item in build_candidates(groups, target_key):
-        (excluded if item["reasons"] else valid).append(item)
-    full_by_pair = {}
-    for item in valid:
-        key = (norm_key(item["prompt"]), norm_key(item["reply"]))
-        if key in full_by_pair:
-            item = dict(item)
-            item["reasons"] = ["duplicate_pair"]
-            excluded.append(item)
+    """构建 SFT 数据集，控制过短回复占比。
+
+    流程：
+    1. 排除有质量问题的候选（除 short_reply 外的 reasons）
+    2. 去重（同 prompt 取质量分最高的）
+    3. 控制过短回复占比 ≤ SHORT_REPLY_MAX_RATIO
+    """
+    candidates = build_candidates(groups, target_key)
+
+    # Step 1: 排除非 short_reply 的质量问题
+    hard_excluded = []
+    valid = []
+    for item in candidates:
+        non_short_reasons = [r for r in item["reasons"] if r != "short_reply"]
+        if non_short_reasons:
+            hard_excluded.append(item)
         else:
-            full_by_pair[key] = item
+            valid.append(item)
+
+    # Step 2: 去重（同 prompt 取质量分最高的）
     best = {}
-    for item in full_by_pair.values():
+    dedup_excluded = []
+    for item in valid:
         key = norm_key(item["prompt"])
         old = best.get(key)
         rank = (item["quality_score"], meaningful_len(item["reply"]), item["id"])
         old_rank = None if old is None else (old["quality_score"], meaningful_len(old["reply"]), old["id"])
         if old is None or rank > old_rank:
             if old is not None:
-                old = dict(old)
-                old["reasons"] = ["duplicate_prompt_lower_rank"]
-                excluded.append(old)
+                old_copy = dict(old)
+                old_copy["reasons"] = old_copy["reasons"] + ["duplicate_prompt_lower_rank"]
+                dedup_excluded.append(old_copy)
             best[key] = item
         else:
-            item = dict(item)
-            item["reasons"] = ["duplicate_prompt_lower_rank"]
-            excluded.append(item)
+            item_copy = dict(item)
+            item_copy["reasons"] = item_copy["reasons"] + ["duplicate_prompt_lower_rank"]
+            dedup_excluded.append(item_copy)
+
+    recommended = list(best.values())
+
+    # Step 3: 控制过短回复占比
+    short_items = [x for x in recommended if x.get("is_short_reply")]
+    long_items = [x for x in recommended if not x.get("is_short_reply")]
+    max_short = int(len(recommended) * SHORT_REPLY_MAX_RATIO)
+    if len(short_items) > max_short:
+        # 按质量分排序，保留质量分最高的 max_short 条短回复
+        short_items.sort(key=lambda x: x["quality_score"], reverse=True)
+        kept_short = short_items[:max_short]
+        dropped_short = short_items[max_short:]
+        for item in dropped_short:
+            item_copy = dict(item)
+            item_copy["reasons"] = item_copy["reasons"] + ["short_reply_ratio_exceeded"]
+            dedup_excluded.append(item_copy)
+        recommended = kept_short + long_items
+
+    all_excluded = hard_excluded + dedup_excluded
+
+    # full 集：仅去除完全相同问答，保留所有有效候选（含全部短回复）
+    full_by_pair = {}
+    full_excluded = []
+    for item in valid:
+        key = (norm_key(item["prompt"]), norm_key(item["reply"]))
+        if key in full_by_pair:
+            full_excluded.append(item)
+        else:
+            full_by_pair[key] = item
+
     return (
-        [as_sft(x, target_key) for x in best.values()],
+        [as_sft(x, target_key) for x in recommended],
         [as_sft(x, target_key) for x in full_by_pair.values()],
-        excluded,
+        [as_sft(x, target_key) if "conversations" not in x else x for x in all_excluded],
     )
 
 
@@ -247,7 +285,9 @@ def summary(raw, recommended, full, excluded):
     canonical = {x["id"] for x in raw if x["source_role"] == "canonical" and x["speaker_kind"] == "direct"}
     full_ids = {i for x in full for i in x["metadata"]["target_event_ids"]}
     recommended_ids = {i for x in recommended for i in x["metadata"]["target_event_ids"]}
-    reasons = Counter(r for x in excluded for r in x["reasons"])
+    reasons = Counter(r for x in excluded for r in x.get("reasons", []))
+    short_in_recommended = sum(1 for x in recommended if x["metadata"].get("is_short_reply"))
+    reply_lengths = [meaningful_len(x["conversations"][1]["value"]) for x in recommended]
     return {
         "all_supplied_attributable_occurrences": len(raw),
         "all_supplied_unique_utterances": len({x["text"] for x in raw}),
@@ -258,57 +298,76 @@ def summary(raw, recommended, full, excluded):
         "recommended_sft_examples": len(recommended),
         "recommended_sft_unique_prompts": len({norm_key(x["conversations"][0]["value"]) for x in recommended}),
         "recommended_sft_covered_canonical_occurrences": len(recommended_ids & canonical),
+        "short_reply_count_in_recommended": short_in_recommended,
+        "short_reply_ratio_in_recommended": round(short_in_recommended / max(len(recommended), 1), 4),
+        "short_reply_max_ratio": SHORT_REPLY_MAX_RATIO,
+        "reply_length_meaningful": {
+            "min": min(reply_lengths) if reply_lengths else 0,
+            "max": max(reply_lengths) if reply_lengths else 0,
+            "mean": round(sum(reply_lengths) / len(reply_lengths), 1) if reply_lengths else 0,
+        },
         "excluded_turn_reasons": dict(sorted(reasons.items())),
     }
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--atri-docx", type=Path, required=True)
-    parser.add_argument("--magic-root", type=Path, required=True)
-    parser.add_argument("--output-dir", type=Path, required=True)
+    parser = argparse.ArgumentParser(description="提取月社妃角色对话（v2，Qwen3-8B）")
+    parser.add_argument("--magic-root", type=Path, required=True,
+                        help="纸上魔法使文本根目录（含 *.txt）")
+    parser.add_argument("--output-dir", type=Path, required=True,
+                        help="输出目录")
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    all_groups = {
-        "shenbai_mizunamo": [{"source_id": args.atri_docx.name, "source_role": "canonical", "events": read_docx_events(args.atri_docx)}],
-        "tsukiyashiro_kisaki": [
-            {"source_id": sid, "source_role": role, "events": read_script_events(path, sid)}
-            for path, sid, role in source_scripts(args.magic_root)
-        ],
+
+    target_key = "tsukiyashiro_kisaki"
+    groups = [
+        {"source_id": sid, "source_role": role, "events": read_script_events(path, sid)}
+        for path, sid, role in source_scripts(args.magic_root)
+    ]
+
+    raw = make_raw(groups, target_key)
+    recommended, full, excluded = make_sft(groups, target_key)
+
+    write_jsonl(args.output_dir / f"{target_key}_raw.jsonl", raw)
+    write_json(args.output_dir / f"{target_key}_sft.json", recommended)
+    write_json(args.output_dir / f"{target_key}_sft_full.json", full)
+    write_jsonl(args.output_dir / f"{target_key}_excluded.jsonl", excluded)
+
+    char_summary = {
+        "character": TARGETS[target_key]["display_name"],
+        **summary(raw, recommended, full, excluded),
+        "source_files": dict(Counter(x["source"].split(":line:", 1)[0] for x in raw)),
     }
-    summaries = {}
-    for target_key, groups in all_groups.items():
-        raw = make_raw(groups, target_key)
-        recommended, full, excluded = make_sft(groups, target_key)
-        write_jsonl(args.output_dir / f"{target_key}_raw.jsonl", raw)
-        write_json(args.output_dir / f"{target_key}_sft.json", recommended)
-        write_json(args.output_dir / f"{target_key}_sft_full.json", full)
-        write_jsonl(args.output_dir / f"{target_key}_excluded.jsonl", excluded)
-        summaries[target_key] = {
-            "character": TARGETS[target_key]["display_name"],
-            **summary(raw, recommended, full, excluded),
-            "source_files": dict(Counter(x["source"].split(":line:", 1)[0].split(":paragraph:", 1)[0] for x in raw)),
-        }
+
     manifest = {
-        "schema_version": 2,
+        "schema_version": 3,
+        "extraction_version": "v2_qwen3",
         "extraction_policy": {
-            "shenbai_mizunamo": "收录水菜萌、神白水菜萌、水菜萌的声音，以及仅供审计的夏生·水菜萌共同台词；明确排除水菜萌的妈妈。",
             "tsukiyashiro_kisaki": "只把显式[妃]/[月社妃]作为目标说话人；克丽索贝莉露是独立角色，即使冒用月社妃姓名也不并入。",
-            "source_policy": "raw保留全部来源；SFT只使用DOCX或所有文本/scenario_*.json权威来源，分章和合并文本仅用于覆盖核验。",
-            "quality_policy": "按文件隔离上下文，连续目标台词合并，排除无上下文、低信息、超长和重复样本。",
+            "source_policy": "gametext/纸上魔法使/*.txt 全部视为 canonical 来源；按文件隔离上下文，连续目标台词合并。",
+            "quality_policy": "排除无上下文、低信息、超长和重复样本；过短回复（<5字）按占比控制（≤15%）。",
+            "v2_changes": "适配 gametext 结构；移除 ATRI；新增短回复占比控制缓解 v1 塌缩问题。",
         },
-        "characters": summaries,
+        "characters": {target_key: char_summary},
     }
     write_json(args.output_dir / "manifest.json", manifest)
-    write_json(args.output_dir / "coverage_report.json", summaries)
+    write_json(args.output_dir / "coverage_report.json", {target_key: char_summary})
+
     (args.output_dir / "README.md").write_text(
-        "# 角色对话训练数据\n\n"
-        "- `*_raw.jsonl`：完整可追溯语料，用于覆盖审计，不直接训练。\n"
-        "- `*_sft.json`：推荐训练集，每个规范化human输入只保留一个高信息回复。\n"
-        "- `*_sft_full.json`：上下文有效的完整候选集，仅去除完全相同问答。\n"
-        "- `*_excluded.jsonl`：排除候选及原因，避免静默丢数据。\n"
-        "- `coverage_report.json`：覆盖率与排除统计。\n\n"
-        "默认训练sft文件；先人工抽查excluded；按剧情文件划分训练/验证集；固定数据哈希、脚本版本和随机种子。\n",
+        "# 月社妃角色对话训练数据（v2）\n\n"
+        "## 文件说明\n\n"
+        "- `tsukiyashiro_kisaki_raw.jsonl`：完整可追溯语料，用于覆盖审计，不直接训练。\n"
+        "- `tsukiyashiro_kisaki_sft.json`：推荐训练集，过短回复占比已控制（≤15%）。\n"
+        "- `tsukiyashiro_kisaki_sft_full.json`：上下文有效的完整候选集，仅去除完全相同问答。\n"
+        "- `tsukiyashiro_kisaki_excluded.jsonl`：排除候选及原因，避免静默丢数据。\n"
+        "- `manifest.json` / `coverage_report.json`：覆盖率与排除统计。\n\n"
+        "## v2 改进\n\n"
+        "- 适配 gametext/纸上魔法使/*.txt 数据源\n"
+        "- 移除已清除的深白水波（ATRI）相关代码\n"
+        "- 新增过短回复（<5字）占比控制（≤15%），缓解 v1 回复塌缩\n"
+        "- 保留质量评分、去重、excluded 审计逻辑\n\n"
+        "## 使用建议\n\n"
+        "默认训练 sft 文件；先人工抽查 excluded；按剧情文件划分训练/验证集；固定数据哈希、脚本版本和随机种子。\n",
         encoding="utf-8", newline="\n"
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))

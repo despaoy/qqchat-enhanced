@@ -1,0 +1,46 @@
+{
+  "dataset_name": "kisaki-sft-v2",
+  "version": "v2_qwen3",
+  "total_examples": 839,
+  "train_examples": 755,
+  "val_examples": 84,
+  "split_ratio": "90/10",
+  "split_seed": 42,
+  "source_distribution": {
+    "train": {
+      "llm_generated": 50,
+      "game_text": 705
+    },
+    "val": {
+      "game_text": 77,
+      "llm_generated": 7
+    },
+    "total": {
+      "llm_generated": 57,
+      "game_text": 782
+    }
+  },
+  "reply_length_meaningful": {
+    "train": {
+      "min": 3,
+      "max": 662,
+      "mean": 31.7
+    },
+    "val": {
+      "min": 3,
+      "max": 80,
+      "mean": 28.3
+    },
+    "total": {
+      "min": 3,
+      "max": 662,
+      "mean": 31.3
+    }
+  },
+  "quality_filtering": {
+    "total_candidates": 861,
+    "excluded_quality": 19,
+    "excluded_dedup": 3,
+    "final": 839
+  }
+}
