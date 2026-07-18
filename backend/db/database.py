@@ -802,6 +802,7 @@ class SQLiteDB:
         session_type: str | None = None,
         lora_name: str | None = None,
         session_id: str | None = None,
+        session_name: str | None = None,
         platform: str | None = None,
     ) -> tuple[str, list]:
         conditions: list[str] = []
@@ -819,6 +820,9 @@ class SQLiteDB:
         if session_id:
             conditions.append("sessionId = ?")
             params.append(session_id)
+        if session_name:
+            conditions.append("sessionName LIKE ?")
+            params.append(f"%{session_name}%")
         if platform:
             conditions.append("platform = ?")
             params.append(platform)
@@ -832,6 +836,7 @@ class SQLiteDB:
         session_type: str | None = None,
         lora_name: str | None = None,
         session_id: str | None = None,
+        session_name: str | None = None,
         platform: str | None = None,
         limit: int = 100,
         offset: int = 0,
@@ -845,6 +850,7 @@ class SQLiteDB:
             session_type=session_type,
             lora_name=lora_name,
             session_id=session_id,
+            session_name=session_name,
             platform=platform,
         )
         params.extend([limit, offset])
@@ -860,6 +866,7 @@ class SQLiteDB:
         session_type: str | None = None,
         lora_name: str | None = None,
         session_id: str | None = None,
+        session_name: str | None = None,
         platform: str | None = None,
     ) -> int:
         """Return the exact count for the same filters used by get_messages_filtered."""
@@ -870,6 +877,7 @@ class SQLiteDB:
             session_type=session_type,
             lora_name=lora_name,
             session_id=session_id,
+            session_name=session_name,
             platform=platform,
         )
         cursor.execute(f"SELECT COUNT(*) FROM messages {where}", params)

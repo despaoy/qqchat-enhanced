@@ -1,5 +1,7 @@
 # qqchat_gateway
 
+> 状态：薄网关插件。平台登录与账号凭证由 AstrBot 管理，RAG、LoRA、推理、历史和策略仍由 FastAPI 负责。
+
 AstrBot 插件，用于 qqchat-enhanced。它将 AstrBot 保持为多平台网关，并将归一化后的文本消息转发至 FastAPI：
 
 `POST /api/integrations/astrbot/messages`

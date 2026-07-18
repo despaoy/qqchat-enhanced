@@ -414,6 +414,10 @@ class TestMultiPlatformStorage:
         assert db.get_message_count_filtered(platform="qq") == 1
         assert db.get_message_count_filtered(platform="telegram") == 1
         assert db.get_message_count_filtered(search="same text") == 2
+        assert db.get_message_count_filtered(session_name="telegram") == 1
+        rows = db.get_messages_filtered(session_name="telegram")
+        assert len(rows) == 1
+        assert rows[0]["platform"] == "telegram"
 
     def test_integration_dedup_uses_platform_adapter_message(self):
         db = self._make_db()

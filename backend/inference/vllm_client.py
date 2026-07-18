@@ -18,7 +18,9 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 import httpx
 
-from infra.circuit_breaker import CircuitBreaker, CircuitState, DegradationMode
+from infra.circuit_breaker import (
+    CircuitBreaker, CircuitOpenError, CircuitState, DegradationMode,
+)
 from interfaces import InferenceInterface
 
 logger = logging.getLogger(__name__)
@@ -286,9 +288,8 @@ class VLLMClient:
             failure_threshold=20,
             recovery_timeout=60.0,
             half_open_max_calls=5,
-            degradation_mode=DegradationMode.DEFAULT,
+            degradation_mode=DegradationMode.RAISE,
         )
-        self._circuit_breaker.set_default("[系统提示] 推理服务暂时不可用，请稍后再试")
 
         logger.info(
             "VLLMClient 初始化: %d 个实例, 模型=%s, 策略=%s",
@@ -501,18 +502,18 @@ class VLLMClient:
         top_p: float,
     ) -> AsyncGenerator[str, None]:
         """流式生成，带熔断器保护"""
-        if self._circuit_breaker.state == CircuitState.OPEN:
-            yield self._circuit_breaker.default_value
-            return
-        try:
-            async for chunk in self._generate_stream(
-                messages, lora_name, temperature, max_tokens, top_p
-            ):
-                yield chunk
-            self._circuit_breaker.record_success()
-        except Exception as e:
-            self._circuit_breaker.record_failure(str(e))
-            raise
+        async with self._request_semaphore:
+            if self._circuit_breaker.state == CircuitState.OPEN:
+                raise CircuitOpenError("vLLM circuit is open")
+            try:
+                async for chunk in self._generate_stream(
+                    messages, lora_name, temperature, max_tokens, top_p
+                ):
+                    yield chunk
+                await self._circuit_breaker.record_success()
+            except Exception as e:
+                await self._circuit_breaker.record_failure(str(e))
+                raise
 
     async def _generate_stream(
         self,
@@ -777,6 +778,27 @@ class VLLMClient:
                 errors,
             )
             raise RuntimeError("LoRA could not be loaded on every vLLM instance")
+
+    async def unload_lora_adapter(self, lora_name: str) -> None:
+        """Best-effort unload of an adapter from every vLLM instance."""
+        if not lora_name:
+            raise ValueError("LoRA name is required")
+        client = await self._ensure_client()
+        errors: list[str] = []
+        for instance in self._instances:
+            try:
+                response = await client.post(
+                    f"{instance.base_url}/v1/unload_lora_adapter",
+                    json={"lora_name": lora_name},
+                    headers=self._build_headers(),
+                    timeout=httpx.Timeout(30.0, connect=5.0),
+                )
+                if response.status_code not in {200, 404}:
+                    errors.append(f"{instance.name}: HTTP {response.status_code}")
+            except Exception as exc:
+                errors.append(f"{instance.name}: {type(exc).__name__}")
+        if errors:
+            raise RuntimeError(f"LoRA unload failed: {', '.join(errors)}")
 
     async def list_loras(self) -> Optional[List[str]]:
         """查询vLLM中可用的LoRA适配器列表

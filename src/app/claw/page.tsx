@@ -16,7 +16,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, Edit3, Trash2, Play, Terminal, Wrench, Shield, RefreshCw, Code, FileText } from 'lucide-react';
+import { Plus, Edit3, Trash2, Play, Terminal, Wrench, Shield, RefreshCw, Code } from 'lucide-react';
 
 interface ClawTool {
   name: string;
@@ -41,7 +41,6 @@ function ClawContent() {
   const [loading, setLoading] = useState(true);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-  const [testDialogOpen, setTestDialogOpen] = useState(false);
   const [testResult, setTestResult] = useState<{ output: string; error: string; result: string; success: boolean } | null>(null);
   const [testRunning, setTestRunning] = useState(false);
 

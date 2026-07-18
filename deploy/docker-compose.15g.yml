@@ -35,7 +35,7 @@ services:
     container_name: qq-assistant-vllm
     restart: unless-stopped
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     volumes:
       - models:/models:ro
       - loras:/loras:ro
@@ -64,7 +64,7 @@ services:
               count: 1
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready', timeout=8)"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -79,15 +79,19 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
+      args:
+        INSTALL_GPU_DEPS: "false"
     container_name: qq-assistant-backend
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - data:/app/data
       - loras:/app/loras
       - models:/app/models:ro
     environment:
+      - VLLM_ENABLED=true
+      - MODEL_PROVIDER=vllm
       - VLLM_BASE_URLS=http://vllm:8000
       - VLLM_SERVED_MODEL_NAME=qwen3-8b-instruct-awq
       - VLLM_LORA_ROOT=/loras
@@ -130,7 +134,7 @@ services:
     container_name: qq-assistant-frontend
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "127.0.0.1:5000:5000"
     environment:
       - NEXT_PUBLIC_API_URL=/api
       - BACKEND_URL=http://backend:8000
@@ -145,7 +149,7 @@ services:
         reservations:
           memory: 512M
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5000/api/health"]
       interval: 15s
       timeout: 5s
       retries: 3

@@ -2,7 +2,7 @@
 # 构建参数：
 #   INSTALL_GPU_DEPS=true  安装 PyTorch CUDA + vLLM（生产部署，需要 NVIDIA GPU）
 #   INSTALL_GPU_DEPS=false 仅安装 CPU 版 PyTorch，跳过 vLLM（CI / 无 GPU 环境）
-ARG INSTALL_GPU_DEPS=true
+ARG INSTALL_GPU_DEPS=false
 
 FROM python:3.12-slim
 
@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 # Re-declare ARG after FROM (ARG before FROM is only for FROM itself)
-ARG INSTALL_GPU_DEPS=true
+ARG INSTALL_GPU_DEPS=false
 
 COPY requirements.txt .
 
@@ -38,9 +38,10 @@ COPY . .
 
 # Non-secret runtime defaults. Database and authentication settings are injected by the deploy environment.
 ENV BACKEND_WORKERS=1
-ENV REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
-ENV VLLM_ENABLED=true
-ENV VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8001}
+ENV REDIS_URL=redis://redis:6379/0
+ENV VLLM_ENABLED=false
+ENV MODEL_PROVIDER=vllm
+ENV VLLM_BASE_URL=http://vllm:8001
 
 EXPOSE 8000
 

@@ -3,6 +3,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $Backend = Join-Path $Root "backend"
 
@@ -43,6 +45,7 @@ function Invoke-Step {
 
 $Python = Find-Python
 $PyArgs = @($Python.Args)
+$PytestTmp = Join-Path ([IO.Path]::GetTempPath()) ("qqchat-enhanced-pytest-{0}" -f $PID)
 
 $CompileTargets = @(
     "app/main.py",
@@ -61,14 +64,16 @@ $CompileTargets = @(
 )
 
 Invoke-Step "Python syntax check" $Backend $Python.Command ($PyArgs + @("-m", "py_compile") + $CompileTargets)
+Invoke-Step "Alembic migration graph check" $Backend $Python.Command ($PyArgs + @("-m", "alembic", "heads"))
 Invoke-Step "Backend core tests" $Backend $Python.Command ($PyArgs + @(
-    "-m", "pytest", "tests", "-q"
+    "-m", "pytest", "tests", "-q", "--basetemp", $PytestTmp
 ))
 Invoke-Step "API smoke test and mock AstrBot event" $Backend $Python.Command ($PyArgs + @("-m", "scripts.local_smoke"))
 Invoke-Step "Git whitespace check" $Root "git" @("diff", "--check")
 
 if ($Frontend) {
     Invoke-Step "Frontend TypeScript check" $Root "pnpm" @("ts-check")
+    Invoke-Step "Frontend lint" $Root "pnpm" @("lint")
 } else {
     Write-Host ""
     Write-Host "Skipped frontend TypeScript check. Run: pnpm verify:local:frontend" -ForegroundColor DarkGray
@@ -76,15 +81,21 @@ if ($Frontend) {
 
 Write-Host ""
 
-$TestTmp = Join-Path $Backend ".test_tmp"
-$ResolvedTmp = Resolve-Path -LiteralPath $TestTmp -ErrorAction SilentlyContinue
-if ($ResolvedTmp) {
-    $BackendResolved = (Resolve-Path -LiteralPath $Backend).Path
-    $TmpPath = $ResolvedTmp.Path
-    if (-not ($TmpPath.StartsWith($BackendResolved, [System.StringComparison]::OrdinalIgnoreCase))) {
-        throw "Refusing to remove test temp outside backend: $TmpPath"
+$TempPaths = @(
+    @{ Path = (Join-Path $Backend ".test_tmp"); Root = $Backend },
+    @{ Path = $PytestTmp; Root = [IO.Path]::GetTempPath() }
+)
+foreach ($TempItem in $TempPaths) {
+    $ResolvedTmp = Resolve-Path -LiteralPath $TempItem.Path -ErrorAction SilentlyContinue
+    if (-not $ResolvedTmp) { continue }
+
+    $ResolvedPath = $ResolvedTmp.Path
+    $AllowedRoot = [IO.Path]::GetFullPath($TempItem.Root).TrimEnd([IO.Path]::DirectorySeparatorChar)
+    $AllowedPrefix = $AllowedRoot + [IO.Path]::DirectorySeparatorChar
+    if (-not $ResolvedPath.StartsWith($AllowedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove test temp outside allowed root: $ResolvedPath"
     }
-    Remove-Item -LiteralPath $TmpPath -Recurse -Force
+    Remove-Item -LiteralPath $ResolvedPath -Recurse -Force
 }
 
 Write-Host "Local baseline verification completed." -ForegroundColor Green

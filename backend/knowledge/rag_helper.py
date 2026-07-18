@@ -179,8 +179,9 @@ class RAGHelper:
         self.enable_query_expansion = True
         self.enable_multi_query = True
 
-        self._query_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._query_cache: Dict[str, tuple[float, List[Dict[str, Any]]]] = {}
         self._cache_max_size = 100
+        self._cache_ttl = max(1, int(os.getenv("RAG_RETRIEVAL_CACHE_TTL", "60")))
 
         if self.enable_reranking:
             try:
@@ -191,13 +192,20 @@ class RAGHelper:
                 self.enable_reranking = False
 
     def _get_from_cache(self, query: str) -> Optional[List[Dict[str, Any]]]:
-        return self._query_cache.get(query)
+        cached = self._query_cache.get(query)
+        if cached is None:
+            return None
+        expires_at, results = cached
+        if expires_at <= time.monotonic():
+            self._query_cache.pop(query, None)
+            return None
+        return results
 
     def _add_to_cache(self, query: str, results: List[Dict[str, Any]]):
         if len(self._query_cache) >= self._cache_max_size:
             oldest_key = next(iter(self._query_cache))
             del self._query_cache[oldest_key]
-        self._query_cache[query] = results
+        self._query_cache[query] = (time.monotonic() + self._cache_ttl, results)
 
     def _normalize_scores(self, results: List[Dict[str, Any]], score_key: str = "score") -> List[Dict[str, Any]]:
         if not results:
@@ -367,14 +375,23 @@ class RAGHelper:
             logger.error(f"RAG检索失败: {e}")
             return []
 
+    @staticmethod
+    def _absolute_score(result: Dict[str, Any]) -> float:
+        """Return a cross-query comparable score instead of per-result-list normalization."""
+        value = result.get("score", result.get("fused_score", result.get("final_score", 0.0)))
+        try:
+            return max(0.0, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            return 0.0
+
     def compute_confidence(self, results: List[Dict[str, Any]]) -> float:
-        """计算检索置信度：top-1 归一化分数 × 结果覆盖率。范围 0-1。"""
+        """Estimate confidence from absolute retrieval scores, not min-max rank scores."""
         if not results:
             return 0.0
-        top1_score = results[0].get("normalized_score", results[0].get("score", 0))
-        top1_score = max(0.0, min(1.0, float(top1_score)))
-        coverage = len([r for r in results if r.get("normalized_score", r.get("score", 0)) > 0]) / max(len(results), 1)
-        return round(top1_score * coverage, 4)
+        scores = [self._absolute_score(result) for result in results[:3]]
+        top_score = scores[0]
+        support_score = sum(scores) / len(scores)
+        return round(0.7 * top_score + 0.3 * support_score, 4)
 
     def build_citations(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """从检索结果构建引用列表，供前端展示证据来源。"""
@@ -396,14 +413,19 @@ class RAGHelper:
         """判断是否应弃答（置信度低于阈值时返回 True）。"""
         return confidence < threshold
 
-    def retrieve_with_citations(self, query: str, top_k: Optional[int] = None,
-                                threshold: float = 0.3) -> Dict[str, Any]:
+    def retrieve_with_citations(
+        self,
+        query: str,
+        top_k: Optional[int] = None,
+        threshold: float = 0.3,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """检索并返回带引用和置信度的结构化结果。
 
         Returns:
             {results, citations, confidence, abstained}
         """
-        results = self.retrieve_context(query, top_k=top_k)
+        results = self.retrieve_context(query, top_k=top_k, filters=filters)
         confidence = self.compute_confidence(results)
         abstained = self.should_abstain(confidence, threshold)
         citations = self.build_citations(results) if not abstained else []

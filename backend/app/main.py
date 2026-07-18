@@ -278,11 +278,14 @@ async def health_check():
 
 @app.get("/ready")
 async def readiness_check():
-    """就绪探针 — 检查数据库和向量索引可用性。外部服务（vLLM/Redis）不在探针中同步检查（避免超时阻塞）。"""
-    deps = {"database": False, "faiss": False}
+    """Readiness checks required local state and the configured inference provider."""
+    model_required = (
+        os.getenv("MODEL_PROVIDER", "").strip().lower() == "vllm"
+        or os.getenv("VLLM_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    )
+    deps = {"database": False, "faiss": False, "model": not model_required}
     details: dict[str, str] = {}
 
-    # 1. 数据库（必须成功）
     try:
         from db.adapter import is_pg_mode
         if is_pg_mode():
@@ -290,24 +293,35 @@ async def readiness_check():
         else:
             conn = db.get_connection()
             conn.execute("SELECT 1")
-            # 注意：不要 conn.close()——SQLiteDB 使用线程本地连接复用，
-            # 直接 close 会导致连接对象存在但已关闭，后续所有 DB 操作失败。
         deps["database"] = True
-    except Exception as e:
-        details["database"] = str(e)[:120]
+    except Exception as exc:
+        details["database"] = type(exc).__name__
 
-    # 2. Faiss
     try:
         from knowledge.vector_db import get_vector_db
-        vb = get_vector_db()
-        deps["faiss"] = vb is not None
+        deps["faiss"] = get_vector_db() is not None
         details["faiss"] = "ok" if deps["faiss"] else "not_initialized"
-    except Exception as e:
-        details["faiss"] = str(e)[:80]
+    except Exception as exc:
+        details["faiss"] = type(exc).__name__
 
-    ready = deps["database"] and deps["faiss"]
+    if model_required:
+        try:
+            from api.generate import get_vllm_client
+
+            client = await asyncio.wait_for(get_vllm_client(), timeout=3.0)
+            if client is not None:
+                health = await asyncio.wait_for(client.health_check(), timeout=6.0)
+                deps["model"] = health.get("summary", {}).get("healthy", 0) > 0
+            details["model"] = "ok" if deps["model"] else "unavailable"
+        except Exception as exc:
+            details["model"] = type(exc).__name__
+
+    ready = all(deps.values())
     if not ready:
-        raise HTTPException(status_code=503, detail={"ready": False, "deps": deps, "details": details})
+        raise HTTPException(
+            status_code=503,
+            detail={"ready": False, "deps": deps, "details": details},
+        )
     return {"status": "ready", "deps": deps}
 
 

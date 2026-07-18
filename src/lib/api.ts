@@ -632,11 +632,14 @@ class ApiClient {
    * @param {number} [offset] - 分页偏移量
    * @returns {Promise<MessagesResponse>} 消息列表及总数
    */
-  async getMessages(limit?: number, offset?: number, filters?: { platform?: string; sessionType?: string }): Promise<MessagesResponse> {
+  async getMessages(limit?: number, offset?: number, filters?: { platform?: string; sessionType?: string; search?: string; lora?: string; sessionName?: string }): Promise<MessagesResponse> {
     const params = new URLSearchParams();
     if (limit) params.append('limit', limit.toString());
     if (offset) params.append('offset', offset.toString());
     if (filters?.platform && filters.platform !== 'all') params.append('platform', filters.platform);
+    if (filters?.search) params.append('search', filters.search);
+    if (filters?.lora && filters.lora !== 'all') params.append('lora', filters.lora);
+    if (filters?.sessionName) params.append('sessionName', filters.sessionName);
     if (filters?.sessionType && filters.sessionType !== 'all') params.append('sessionType', filters.sessionType);
     const qs = params.toString();
     return this.request<MessagesResponse>(`/messages${qs ? '?' + qs : ''}`);

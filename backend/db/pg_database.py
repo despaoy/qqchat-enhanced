@@ -512,6 +512,7 @@ class PgDatabase:
         session_type: Optional[str] = None,
         lora_name: Optional[str] = None,
         session_id: Optional[str] = None,
+        session_name: Optional[str] = None,
         platform: Optional[str] = None,
     ):
         conditions = []
@@ -528,6 +529,8 @@ class PgDatabase:
             conditions.append(messages_table.c.loraName == lora_name)
         if session_id:
             conditions.append(messages_table.c.sessionId == session_id)
+        if session_name:
+            conditions.append(messages_table.c.sessionName.like(f"%{session_name}%"))
         if platform:
             conditions.append(messages_table.c.platform == platform)
         return conditions
@@ -538,6 +541,7 @@ class PgDatabase:
         session_type: Optional[str] = None,
         lora_name: Optional[str] = None,
         session_id: Optional[str] = None,
+        session_name: Optional[str] = None,
         platform: Optional[str] = None,
     ) -> int:
         """Return the exact count for the same filters used by get_messages_filtered."""
@@ -545,7 +549,9 @@ class PgDatabase:
             from sqlalchemy import and_, func, select
 
             stmt = select(func.count()).select_from(messages_table)
-            conditions = self._message_filter_conditions(search, session_type, lora_name, session_id, platform)
+            conditions = self._message_filter_conditions(
+                search, session_type, lora_name, session_id, session_name, platform
+            )
             if conditions:
                 stmt = stmt.where(and_(*conditions))
             result = await session.execute(stmt)
@@ -557,6 +563,7 @@ class PgDatabase:
         session_type: Optional[str] = None,
         lora_name: Optional[str] = None,
         session_id: Optional[str] = None,
+        session_name: Optional[str] = None,
         platform: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
@@ -570,6 +577,7 @@ class PgDatabase:
                 session_type=session_type,
                 lora_name=lora_name,
                 session_id=session_id,
+                session_name=session_name,
                 platform=platform,
             )
 

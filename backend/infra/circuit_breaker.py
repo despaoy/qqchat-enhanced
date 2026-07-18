@@ -29,6 +29,7 @@ class DegradationMode(Enum):
     CACHE = "cache"          # 返回缓存结果
     DEFAULT = "default"      # 返回默认值
     QUEUE = "queue"          # 排队等待恢复
+    RAISE = "raise"          # Raise CircuitOpenError; do not fabricate a success
 
 
 class CircuitOpenError(Exception):
@@ -205,6 +206,9 @@ class CircuitBreaker:
 
         根据降级模式返回缓存结果、默认值或将请求排队等待恢复。
         """
+        if self.degradation_mode == DegradationMode.RAISE:
+            raise CircuitOpenError(f"Circuit breaker [{self.name}] is open")
+
         if self.fallback is not None:
             logger.debug("熔断器 [%s] 执行降级函数", self.name)
             if asyncio.iscoroutinefunction(self.fallback):

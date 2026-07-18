@@ -11,13 +11,11 @@ import { Progress } from '@/components/ui/progress';
 import {
   Database,
   Pause,
-  Settings,
   BrainCircuit,
   RefreshCw,
   AlertCircle,
   Upload,
   Plus,
-  Cpu,
   Zap,
   FileText,
   CheckCircle2,
@@ -41,7 +39,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
-import { api, type Dataset, type ModelConfig, type TrainingTask, type CharacterStyle, type CreateDatasetRequest, type StartTrainingRequest, type DialogueConversation, type DialogueGenerateRequest, type SavedDialogueItem } from '@/lib/api';
+import { api, type Dataset, type TrainingTask, type CreateDatasetRequest, type StartTrainingRequest, type DialogueConversation, type DialogueGenerateRequest, type SavedDialogueItem } from '@/lib/api';
 import { toast } from 'sonner';
 import { usePageData } from '@/hooks/usePageData';
 import { TrainingParamsEditor } from '@/components/training/TrainingParamsEditor';
@@ -84,7 +82,6 @@ function TrainingContent() {
     newDatasetCustomPrompt: '',
     newDatasetData: '',
     selectedModelConfig: 'qwen3-8b-3090',
-    newLoraName: '',
   });
 
   // 便捷访问器
@@ -93,7 +90,7 @@ function TrainingContent() {
   };
   const { charDescription, charStyle, charCustomPrompt, numDialogues,
     newDatasetName, newDatasetStyle, newDatasetCustomPrompt, newDatasetData,
-    selectedModelConfig, newLoraName } = pageFormData;
+    selectedModelConfig } = pageFormData;
 
   // 数据集状态
   const [datasets, setDatasets] = useState<Dataset[]>([]);
@@ -107,8 +104,6 @@ function TrainingContent() {
   const [showScanSection, setShowScanSection] = useState(false);
 
   // 模型配置状态
-  const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>([]);
-  const [, setStyles] = useState<CharacterStyle[]>([]);
 
   // 训练任务状态
   const [trainingTasks, setTrainingTasks] = useState<TrainingTask[]>([]);
@@ -122,7 +117,6 @@ function TrainingContent() {
 
   // 启动训练对话框
   const [startTrainingOpen, setStartTrainingOpen] = useState(false);
-  const [selectedDataset, setSelectedDataset] = useState('');
   const [trainingSubmitting, setTrainingSubmitting] = useState(false);
 
   // ========== 快速生成对话状态 ==========
@@ -277,28 +271,6 @@ function TrainingContent() {
     }
   }, [scanResults, handleImportDataset]);
 
-  const loadModelConfigs = useCallback(async () => {
-    try {
-      const response = await api.listModelConfigs();
-      if (response.success) {
-        setModelConfigs(response.configs);
-      }
-    } catch (error) {
-      console.error('Failed to load model configs:', error);
-    }
-  }, []);
-
-  const loadStyles = useCallback(async () => {
-    try {
-      const response = await api.listStyles();
-      if (response.success) {
-        setStyles(response.styles);
-      }
-    } catch (error) {
-      console.error('Failed to load styles:', error);
-    }
-  }, []);
-
   const loadTrainingTasks = useCallback(async () => {
     try {
       setTasksLoading(true);
@@ -315,12 +287,10 @@ function TrainingContent() {
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
     loadDatasets();
-    loadModelConfigs();
-    loadStyles();
     loadTrainingTasks();
-  }, [loadDatasets, loadModelConfigs, loadStyles, loadTrainingTasks]);
+  }, [loadDatasets, loadTrainingTasks]);
 
   // 定期刷新训练任务
   // 使用 ref 保存最新的 trainingTasks，避免把它放进定时器 effect 依赖导致
@@ -428,7 +398,6 @@ function TrainingContent() {
       if (response.success) {
         toast.success('训练任务已启动');
         setStartTrainingOpen(false);
-        setSelectedDataset('');
         loadTrainingTasks();
       } else {
         const msg = (response as { message?: string }).message || '启动训练失败';

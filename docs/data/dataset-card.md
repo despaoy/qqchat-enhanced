@@ -1,5 +1,7 @@
 # 数据集卡片：QQChat Enhanced 角色训练数据
 
+> 状态：历史 v1 数据集卡。Qwen2.5/原神角色字段用于旧实验；月社妃 Qwen3 数据应以 character_dialogues 清单和实验配置为准。
+
 > 本文件遵循 `backend/evaluation/dataset_card_schema.py` 的 `DatasetCard` Schema。
 > 版本：v1.0 ｜ 创建时间：2026-07-12 ｜ 维护者：项目作者
 
@@ -96,7 +98,7 @@
 | `qiqi`（七七） | 七七、不卜庐、记不住、忘了、嗯、僵尸、琥珀 | 僵尸；不卜庐工作；记忆不好 | 缓慢断续，天真无邪 |
 | `xiao`（魈） | 魈、降魔、夜叉、业障、璃月、守护、哼、无需 | 护法夜叉；风元素；守护璃月 | 冷淡寡言，背负业障 |
 
-完整角色关键词与事实见 [backend/evaluation/persona_metrics.py](file:///c:/Users/13474/Desktop/qqchat-enhanced/backend/evaluation/persona_metrics.py)。
+完整角色关键词与事实见 [backend/evaluation/persona_metrics.py](../../backend/evaluation/persona_metrics.py)。
 
 ---
 

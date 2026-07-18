@@ -183,11 +183,22 @@ async def update_lora_status(lora_id: str, request: Request, current_user: dict 
     if status not in {"active", "inactive"}:
         raise HTTPException(status_code=422, detail="LoRA 状态只能是 active 或 inactive")
 
-    existing = next((item for item in db.get_loras() if item["id"] == lora_id), None)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="LoRA模型不存在")
-
     async with _lora_status_lock:
+        # Read and update the active adapter under one lock so concurrent
+        # activation requests cannot both act on stale database state.
+        all_loras = db.get_loras()
+        existing = next((item for item in all_loras if item["id"] == lora_id), None)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="LoRA模型不存在")
+        previous_active = next(
+            (
+                item
+                for item in all_loras
+                if item["status"] == "active" and item["id"] != lora_id
+            ),
+            None,
+        )
+
         if status == "active":
             try:
                 from api.generate import get_vllm_client
@@ -208,13 +219,46 @@ async def update_lora_status(lora_id: str, request: Request, current_user: dict 
                     raise RuntimeError("vLLM client is unavailable")
                 served_name = resolve_lora_served_name(existing["name"])
                 adapter_path = _resolve_vllm_adapter_path(existing["name"])
-                await client.load_lora_adapter(served_name, adapter_path)
+                previous_unloaded = False
+                if previous_active is not None:
+                    await client.unload_lora_adapter(
+                        resolve_lora_served_name(previous_active["name"])
+                    )
+                    previous_unloaded = True
+                try:
+                    await client.load_lora_adapter(served_name, adapter_path)
+                except Exception:
+                    if previous_unloaded and previous_active is not None:
+                        try:
+                            await client.load_lora_adapter(
+                                resolve_lora_served_name(previous_active["name"]),
+                                _resolve_vllm_adapter_path(previous_active["name"]),
+                            )
+                        except Exception as rollback_exc:
+                            logger.exception(
+                                "Failed to restore previous LoRA id=%s after switch failure: %s",
+                                previous_active["id"],
+                                rollback_exc,
+                            )
+                    raise
+            except HTTPException:
+                raise
             except (FileNotFoundError, ValueError) as exc:
                 logger.warning("Invalid LoRA adapter id=%s error=%s", lora_id, exc)
                 raise HTTPException(status_code=422, detail="LoRA 适配器文件无效或配置不完整") from exc
             except Exception as exc:
                 logger.exception("Failed to load LoRA into vLLM id=%s", lora_id)
                 raise HTTPException(status_code=502, detail="LoRA 无法加载到 vLLM，数据库状态未变更") from exc
+
+        if status == "inactive":
+            try:
+                from api.generate import get_vllm_client
+
+                client = await get_vllm_client()
+                if client is not None:
+                    await client.unload_lora_adapter(resolve_lora_served_name(existing["name"]))
+            except Exception as exc:
+                logger.warning("Failed to unload inactive LoRA id=%s: %s", lora_id, exc)
 
         lora = db.update_lora_status(lora_id, status)
 

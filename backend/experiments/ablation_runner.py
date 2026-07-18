@@ -71,7 +71,10 @@ class AblationRunner:
         """从默认配置创建运行器。"""
         base = {
             "base_model_path": os.getenv("BASE_MODEL_PATH", "models/Qwen3-8B-Instruct"),
-            "train_data_path": "hutao_dialogues.json",
+            "train_data_path": os.getenv(
+                "LORA_ABLATION_TRAIN_DATA",
+                "backend/data/character_dialogues/tsukiyashiro_kisaki_train.json",
+            ),
             "lora_r": 32,
             "lora_alpha": 64,
             "learning_rate": 2e-4,

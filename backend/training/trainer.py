@@ -4,6 +4,7 @@
 """
 import os as _os
 import logging
+import inspect
 import json
 import math
 from pathlib import Path
@@ -169,6 +170,7 @@ class LoRATrainingConfig:
     """
     base_model_path: str = _resolve_path(_os.getenv("BASE_MODEL_PATH", "models/Qwen3-8B-Instruct"))
     train_data_path: str = _resolve_path("backend/hutao_dialogues.json")
+    eval_data_path: Optional[str] = None
     output_dir: str = _resolve_path("backend/loras/hutao_lora_7b")
 
     lora_r: int = 32
@@ -230,7 +232,7 @@ class LoRATrainingConfig:
     train_test_split: float = 0.9
     seed: int = 42
     resume_from_checkpoint: Optional[str] = None
-    truncation_direction: str = "right"
+    truncation_direction: str = "left"
     chat_template: bool = True
 
     def validate(self):
@@ -244,6 +246,8 @@ class LoRATrainingConfig:
             errors.append(f"基础模型路径不存在: {self.base_model_path}")
         if not Path(self.train_data_path).exists():
             errors.append(f"训练数据路径不存在: {self.train_data_path}")
+        if self.eval_data_path and not Path(self.eval_data_path).exists():
+            errors.append(f"Evaluation data path does not exist: {self.eval_data_path}")
         if self.lora_r <= 0:
             errors.append(f"lora_r必须大于0: {self.lora_r}")
         if self.learning_rate <= 0:
@@ -271,8 +275,8 @@ class LoRATrainingConfig:
     def from_dict(cls, d: Dict[str, Any]) -> "LoRATrainingConfig":
         valid_fields = {f.name for f in cls.__dataclass_fields__.values()}
         filtered = {k: v for k, v in d.items() if k in valid_fields}
-        for path_key in ("base_model_path", "train_data_path", "output_dir"):
-            if path_key in filtered and not _os.path.isabs(filtered[path_key]):
+        for path_key in ("base_model_path", "train_data_path", "eval_data_path", "output_dir"):
+            if filtered.get(path_key) and not _os.path.isabs(filtered[path_key]):
                 filtered[path_key] = _resolve_path(filtered[path_key])
         return cls(**filtered)
 
@@ -324,6 +328,26 @@ class LoRATrainer:
             tokenizer.pad_token_id = tokenizer.eos_token_id
         self._tokenizer = tokenizer
         return tokenizer
+
+    def _truncate_preserving_response(
+        self, full_ids: List[int], prompt_ids: List[int]
+    ) -> tuple[List[int], int]:
+        """Fit a sample to max length without silently removing all supervised tokens."""
+        prompt_len = min(len(prompt_ids), len(full_ids))
+        if len(full_ids) <= self.config.max_seq_length:
+            return full_ids, prompt_len
+
+        prompt_part = full_ids[:prompt_len]
+        response_part = full_ids[prompt_len:]
+        if len(response_part) >= self.config.max_seq_length:
+            return response_part[: self.config.max_seq_length], 0
+
+        keep_prompt = self.config.max_seq_length - len(response_part)
+        if self.config.truncation_direction == "right":
+            prompt_part = prompt_part[:keep_prompt]
+        else:
+            prompt_part = prompt_part[-keep_prompt:] if keep_prompt else []
+        return prompt_part + response_part, len(prompt_part)
 
     def _load_and_preprocess_data(self, tokenizer: AutoTokenizer) -> Dict[str, Dataset]:
         logger.info("=" * 60)
@@ -388,28 +412,11 @@ class LoRATrainer:
                     prompt_ids = tokenizer.encode(prompt_text, add_special_tokens=False)
                     full_ids = tokenizer.encode(full_text, add_special_tokens=False)
 
-                    if len(full_ids) > self.config.max_seq_length:
-                        if self.config.truncation_direction == "left":
-                            full_ids = full_ids[-self.config.max_seq_length:]
-                            prompt_len = max(0, len(prompt_ids) - (len(full_ids) - self.config.max_seq_length))
-                        else:
-                            full_ids = full_ids[:self.config.max_seq_length]
-                            prompt_len = min(len(prompt_ids), self.config.max_seq_length)
-                    else:
-                        prompt_len = len(prompt_ids)
-
+                    full_ids, prompt_len = self._truncate_preserving_response(
+                        full_ids, prompt_ids
+                    )
                     labels = [-100] * prompt_len + full_ids[prompt_len:]
-                    labels = labels[:self.config.max_seq_length]
-
                     attention_mask = [1] * len(full_ids)
-                    while len(full_ids) < self.config.max_seq_length:
-                        full_ids.append(tokenizer.pad_token_id)
-                        attention_mask.append(0)
-                        labels.append(-100)
-
-                    full_ids = full_ids[:self.config.max_seq_length]
-                    attention_mask = attention_mask[:self.config.max_seq_length]
-                    labels = labels[:self.config.max_seq_length]
 
                     all_input_ids.append(full_ids)
                     all_labels.append(labels)
@@ -442,28 +449,11 @@ class LoRATrainer:
                     prompt_ids = tokenizer.encode(prompt_text, add_special_tokens=False)
                     full_ids = tokenizer.encode(full_text, add_special_tokens=False)
 
-                    if len(full_ids) > self.config.max_seq_length:
-                        if self.config.truncation_direction == "left":
-                            full_ids = full_ids[-self.config.max_seq_length:]
-                            prompt_len = max(0, len(prompt_ids) - (len(full_ids) - self.config.max_seq_length))
-                        else:
-                            full_ids = full_ids[:self.config.max_seq_length]
-                            prompt_len = min(len(prompt_ids), self.config.max_seq_length)
-                    else:
-                        prompt_len = len(prompt_ids)
-
+                    full_ids, prompt_len = self._truncate_preserving_response(
+                        full_ids, prompt_ids
+                    )
                     labels = [-100] * prompt_len + full_ids[prompt_len:]
-                    labels = labels[:self.config.max_seq_length]
-
                     attention_mask = [1] * len(full_ids)
-                    while len(full_ids) < self.config.max_seq_length:
-                        full_ids.append(tokenizer.pad_token_id)
-                        attention_mask.append(0)
-                        labels.append(-100)
-
-                    full_ids = full_ids[:self.config.max_seq_length]
-                    attention_mask = attention_mask[:self.config.max_seq_length]
-                    labels = labels[:self.config.max_seq_length]
 
                     all_input_ids.append(full_ids)
                     all_labels.append(labels)
@@ -482,13 +472,27 @@ class LoRATrainer:
             desc="Tokenizing dataset",
         )
 
-        split = tokenized_dataset.train_test_split(
-            test_size=1 - self.config.train_test_split,
-            seed=self.config.seed,
-        )
-
-        train_dataset = split["train"]
-        eval_dataset = split["test"]
+        if self.config.eval_data_path:
+            eval_raw = load_dataset(
+                "json", data_files=str(self.config.eval_data_path)
+            )["train"]
+            eval_has_conversations = "conversations" in eval_raw[0]
+            if eval_has_conversations != has_conversations:
+                raise ValueError("Training and evaluation datasets must use the same schema")
+            eval_dataset = eval_raw.map(
+                format_and_tokenize,
+                batched=True,
+                remove_columns=eval_raw.column_names,
+                desc="Tokenizing fixed evaluation dataset",
+            )
+            train_dataset = tokenized_dataset
+        else:
+            split = tokenized_dataset.train_test_split(
+                test_size=1 - self.config.train_test_split,
+                seed=self.config.seed,
+            )
+            train_dataset = split["train"]
+            eval_dataset = split["test"]
 
         logger.info(f"训练集: {len(train_dataset)} 样本")
         logger.info(f"验证集: {len(eval_dataset)} 样本")
@@ -707,7 +711,8 @@ class LoRATrainer:
                 callbacks.append(ProgressCallback(self.progress_fn))
                 logger.info("已启用训练进度报告回调")
 
-            training_args = SFTConfig(
+            # trl 1.8+ 将 max_seq_length 改名为 max_length，做版本兼容
+            sft_config_kwargs = dict(
                 output_dir=str(output_dir),
                 num_train_epochs=self.config.num_train_epochs,
                 per_device_train_batch_size=self.config.per_device_train_batch_size,
@@ -737,11 +742,15 @@ class LoRATrainer:
                 optim=self.config.optim,
                 report_to=self.config.report_to,
                 gradient_checkpointing=self.config.gradient_checkpointing,
-                max_seq_length=self.config.max_seq_length,
                 seed=self.config.seed,
                 packing=self.config.packing,
                 neftune_noise_alpha=self.config.neftune_noise_alpha or None,
             )
+            # 优先用 max_length（trl>=1.8），失败回退 max_seq_length（trl<1.8）
+            sft_parameters = inspect.signature(SFTConfig).parameters
+            length_key = "max_length" if "max_length" in sft_parameters else "max_seq_length"
+            sft_config_kwargs[length_key] = self.config.max_seq_length
+            training_args = SFTConfig(**sft_config_kwargs)
 
             data_collator = DataCollatorForSeq2Seq(
                 tokenizer=tokenizer,

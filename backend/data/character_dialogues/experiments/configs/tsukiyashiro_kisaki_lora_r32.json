@@ -1,7 +1,8 @@
 {
   "base_model_path": "/home/szw/lhm2/runtime/models/Qwen3-8B-Instruct",
-  "train_data_path": "backend/data/character_dialogues/experiments/tsukiyashiro_kisaki_train.json",
-  "output_dir": "/home/szw/lhm2/runtime/loras/kisaki/lora_r32_qwen3",
+  "train_data_path": "backend/data/character_dialogues/tsukiyashiro_kisaki_train.json",
+  "eval_data_path": "backend/data/character_dialogues/tsukiyashiro_kisaki_eval.json",
+  "output_dir": "/home/szw/lhm2/runtime/loras/kisaki/e1_baseline_r32",
   "lora_r": 32,
   "lora_alpha": 64,
   "lora_dropout": 0.1,
@@ -37,5 +38,6 @@
   "system_prompt": "你是月社妃，请根据训练对话保持角色的说话方式、人物关系与世界观，不要编造训练材料之外的事实。",
   "train_test_split": 0.9,
   "seed": 42,
-  "_note": "Updated for Qwen3-8B-Instruct. Train data pending v2 rebuild."
+  "_experiment": "E1 baseline LoRA (r=32, alpha=64, no DoRA/RSLoRA/NEFTune). Data: 829 train + 91 eval (game extraction 801 + LLM v3 119, merged & deduped).",
+  "_note": "Updated for Qwen3-8B-Instruct. v2 data with identity features injected."
 }

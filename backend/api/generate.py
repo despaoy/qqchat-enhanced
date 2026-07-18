@@ -1,6 +1,7 @@
 """消息生成API - 支持vLLM高并发推理"""
 import asyncio
 import hashlib
+import json
 import os
 import time
 import logging
@@ -137,21 +138,33 @@ async def get_vllm_client():
     return _vllm_client
 
 
-# 确保熔断器已注册（仅首次）
-if CIRCUIT_BREAKER_AVAILABLE and circuit_breaker_registry:
-    import asyncio as _asyncio
-    try:
-        _loop = _asyncio.get_event_loop()
-        if _loop.is_running():
-            pass
-        else:
-            _loop.run_until_complete(
-                circuit_breaker_registry.get_or_create("model_generate")
-            )
-    except RuntimeError:
-        pass
-
 router = APIRouter()
+
+
+def _response_cache_keys(request: MessageRequest, lora_name: str) -> tuple[str, str, int]:
+    """Include every response-affecting setting in the cache identity."""
+    try:
+        config = db.config or {}
+    except Exception:
+        config = {}
+    model_name = os.getenv(
+        "VLLM_SERVED_MODEL_NAME", os.getenv("VLLM_MODEL", "qwen3-8b-instruct-awq")
+    )
+    use_knowledge_base = bool(config.get("useKnowledgeBase", True))
+    identity = {
+        "model": model_name,
+        "lora": lora_name,
+        "temperature": float(config.get("temperature", os.getenv("VLLM_TEMPERATURE", "0.7"))),
+        "max_tokens": int(config.get("maxTokens", os.getenv("VLLM_MAX_TOKENS", "2048"))),
+        "use_knowledge_base": use_knowledge_base,
+        "platform": request.platform,
+        "conversation_type": request.conversationType or request.sessionType,
+        "conversation_id": request.conversationId or request.sessionId,
+    }
+    prompt_hash = hashlib.sha256(request.message.encode("utf-8")).hexdigest()
+    serialized = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    cache_key = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    return prompt_hash, cache_key, 60 if use_knowledge_base else 300
 
 
 async def generate_reply_core(request: MessageRequest, current_user: dict | None = None):
@@ -160,16 +173,6 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
     if _is_high_risk_prompt(request.message):
         return _security_policy_response()
 
-    # 缓存查询
-    if response_cache:
-        cache_key = hashlib.md5(f"generate:{request.message}:{request.sessionId}".encode()).hexdigest()
-        prompt_hash = hashlib.md5(request.message.encode()).hexdigest()
-        cached = await response_cache.get(prompt_hash, cache_key)
-        if cached:
-            logger.debug("命中缓存，直接返回")
-            return GenerateResponse(**cached)
-
-    # 限流检查
     if rate_limiter:
         limit_key = f"generate:{request.sessionId}" if request.sessionType == "group" else f"generate:private:{request.userId}"
         allowed = await rate_limiter.acquire(limit_key)
@@ -184,12 +187,13 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
 
     # 获取LoRA：始终计算 active_lora，优先使用前端指定的，否则使用当前激活的
     active_lora = next((l for l in db.loras if l["status"] == "active"), None)
+    selected_lora = active_lora
 
     if request.loraName:
-        requested_lora = next((item for item in db.loras if item["name"] == request.loraName), None)
-        if requested_lora is None:
-            raise HTTPException(status_code=422, detail="指定的 LoRA 不存在")
-        lora_name = request.loraName
+        selected_lora = next((item for item in db.loras if item["name"] == request.loraName), None)
+        if selected_lora is None:
+            raise HTTPException(status_code=422, detail="Specified LoRA does not exist")
+        lora_name = selected_lora["name"]
     else:
         lora_name = active_lora["name"] if active_lora else "default"
 
@@ -207,10 +211,23 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
                     available_loras,
                 )
                 raise HTTPException(status_code=409, detail="所选 LoRA 尚未加载到 vLLM，请先重新激活")
+        except HTTPException:
+            raise
         except Exception as e:
-            # 查询失败时保守地尝试使用
-            logger.warning(f"查询vLLM可用LoRA失败: {e}")
-            pass
+            # A failed capability probe should not make the model unavailable.
+            logger.warning("failed to query vLLM LoRA inventory: %s", e)
+
+    prompt_hash = cache_key = ""
+    cache_ttl = 300
+    if response_cache:
+        try:
+            prompt_hash, cache_key, cache_ttl = _response_cache_keys(request, lora_name)
+            cached = await response_cache.get(prompt_hash, cache_key)
+            if cached:
+                logger.debug("response cache hit")
+                return GenerateResponse(**cached)
+        except Exception as e:
+            logger.warning("response cache read failed: %s", e)
 
     start_time = time.time()
 
@@ -237,9 +254,9 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
 
             if response_cache:
                 try:
-                    cache_key = hashlib.md5(f"generate:{request.message}:{request.sessionId}".encode()).hexdigest()
-                    prompt_hash = hashlib.md5(request.message.encode()).hexdigest()
-                    await response_cache.set(prompt_hash, cache_key, result.model_dump(), ttl=300)
+                    await response_cache.set(
+                        prompt_hash, cache_key, result.model_dump(), ttl=cache_ttl
+                    )
                 except Exception as e:
                     logger.warning(f"vLLM缓存写入失败: {e}")
                     pass
@@ -289,8 +306,8 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
 
         try:
             async with _local_model_lock:
-                if active_lora and active_lora["id"] in LORA_PATH_MAP:
-                    lora_path = LORA_PATH_MAP[active_lora["id"]]
+                if selected_lora and selected_lora["id"] in LORA_PATH_MAP:
+                    lora_path = LORA_PATH_MAP[selected_lora["id"]]
                     if ModelProvider.TRANSFORMERS_PEFT in model_manager._providers:
                         peft_provider = model_manager._providers[ModelProvider.TRANSFORMERS_PEFT]
                         if hasattr(peft_provider, 'set_lora_adapter'):
@@ -307,7 +324,7 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
                     )
 
                 if circuit_breaker_registry:
-                    cb = await circuit_breaker_registry.get("model_generate")
+                    cb = await circuit_breaker_registry.get_or_create("model_generate")
                     if cb:
                         reply, cost_time = await asyncio.wait_for(
                             cb.call(_do_generate_async),
@@ -349,15 +366,17 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
 
         if response_cache:
             try:
-                cache_key = hashlib.md5(f"generate:{request.message}:{request.sessionId}".encode()).hexdigest()
-                prompt_hash = hashlib.md5(request.message.encode()).hexdigest()
-                await response_cache.set(prompt_hash, cache_key, result.model_dump(), ttl=300)
+                await response_cache.set(
+                    prompt_hash, cache_key, result.model_dump(), ttl=cache_ttl
+                )
             except Exception as e:
                 logger.warning(f"模型管理器缓存写入失败: {e}")
                 pass
 
         return result
 
+    except HTTPException:
+        raise
     except Exception as e:
         failed_cost = round(time.time() - start_time, 2) if "start_time" in locals() else 0.0
         await _record_model_invocation(
@@ -456,6 +475,7 @@ async def _generate_with_vllm(request: MessageRequest, lora_name: str | None, pr
 
     # RAG 检索（受设置页 useKnowledgeBase 开关控制）
     rag_context = ""
+    filters = None
     if _use_kb:
         try:
             from knowledge.intent_detector import needs_rag
@@ -534,14 +554,18 @@ async def _generate_with_vllm(request: MessageRequest, lora_name: str | None, pr
             helper = get_rag_helper()
             if os.getenv("CORRECTIVE_RAG_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}:
                 from knowledge.corrective_rag import get_corrective_rag
-                cited = get_corrective_rag().retrieve_with_correction(request.message, top_k=3)
+                cited = get_corrective_rag().retrieve_with_correction(
+                    request.message, top_k=3, filters=filters
+                )
                 rag_meta = {
                     "citations": cited.get("citations", []),
                     "confidence": cited.get("confidence"),
                     "abstained": cited.get("abstained", False),
                 }
             else:
-                cited = helper.retrieve_with_citations(request.message, top_k=3)
+                cited = helper.retrieve_with_citations(
+                    request.message, top_k=3, filters=filters
+                )
                 rag_meta = {
                     "citations": cited.get("citations", []),
                     "confidence": cited.get("confidence"),

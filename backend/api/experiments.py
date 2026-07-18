@@ -1,7 +1,9 @@
 """实验管理 API - LoRA 消融/RAG 消融/量化基准"""
+import asyncio
 import json
 import logging
 import secrets
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -17,6 +19,38 @@ router = APIRouter()
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _track_background(coro) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+async def _run_lora_ablation(exp_id: str, overrides: Optional[dict]) -> None:
+    """Run GPU training off the API event loop and persist terminal state."""
+    try:
+        from experiments.ablation_runner import AblationRunner
+
+        runner = AblationRunner.from_default_config(overrides)
+        results = await asyncio.to_thread(runner.run_all)
+        db.execute_sql(
+            "UPDATE experiment_runs SET status='completed', completed_at=?, results=? WHERE id=?",
+            (_now(), json.dumps(results, ensure_ascii=False), exp_id),
+        )
+    except Exception as exc:
+        logger.exception("LoRA ablation failed experiment_id=%s", exp_id)
+        db.execute_sql(
+            "UPDATE experiment_runs SET status='failed', completed_at=?, results=? WHERE id=?",
+            (_now(), json.dumps({"error": str(exc)}, ensure_ascii=False), exp_id),
+        )
+
+
+def _serialize_results(results):
+    return [asdict(item) if is_dataclass(item) else item for item in results]
 
 
 @router.get("/api/experiments/")
@@ -112,28 +146,13 @@ async def start_lora_ablation(req: ExperimentStartRequest,
         )
         return {"success": True, "experiment_id": exp_id, "status": "completed", "mock": True, "results": mock_results}
 
-    try:
-        from experiments.ablation_runner import AblationRunner, AblationExperiment
-        runner = AblationRunner.from_default_config(req.config_overrides)
-        results = runner.run_all()
-        db.execute_sql(
-            "UPDATE experiment_runs SET status='completed', completed_at=?, results=? WHERE id=?",
-            (_now(), json.dumps(results), exp_id),
-        )
-        return {"success": True, "experiment_id": exp_id, "status": "completed", "results": results}
-    except ImportError:
-        db.execute_sql(
-            "UPDATE experiment_runs SET status='failed', completed_at=?, results=? WHERE id=?",
-            (_now(), json.dumps({"error": "ablation module not available"}), exp_id),
-        )
-        return {"success": False, "experiment_id": exp_id, "status": "failed", "error": "ablation module not available"}
-    except Exception as e:
-        logger.error(f"LoRA 消融实验失败: {e}")
-        db.execute_sql(
-            "UPDATE experiment_runs SET status='failed', completed_at=?, results=? WHERE id=?",
-            (_now(), json.dumps({"error": str(e)}), exp_id),
-        )
-        raise HTTPException(status_code=500, detail=str(e))
+    _track_background(_run_lora_ablation(exp_id, req.config_overrides))
+    return {
+        "success": True,
+        "experiment_id": exp_id,
+        "status": "running",
+        "mock": False,
+    }
 
 
 @router.post("/api/experiments/rag-ablation")
@@ -152,36 +171,37 @@ async def start_rag_ablation(req: ExperimentStartRequest,
 
     try:
         from experiments.rag_ablation import RAGAblation
+
         ablation = RAGAblation()
-        results = ablation.run_all()
+        raw_results = await asyncio.to_thread(
+            ablation.run_all_mock if req.mock else ablation.run_all
+        )
+        results = _serialize_results(raw_results)
         db.execute_sql(
             "UPDATE experiment_runs SET status='completed', completed_at=?, results=? WHERE id=?",
-            (_now(), json.dumps(results), exp_id),
+            (_now(), json.dumps(results, ensure_ascii=False), exp_id),
         )
-        return {"success": True, "experiment_id": exp_id, "status": "completed", "results": results}
-    except ImportError:
-        mock_results = {
-            "mock": True,
-            "variants": ["vector_only", "bm25_only", "hybrid", "hybrid_reranker"],
-            "comparison_table": [
-                {"variant": "vector_only", "recall_at_5": 0.62, "mrr": 0.51, "ndcg": 0.58, "avg_latency_ms": 45},
-                {"variant": "bm25_only", "recall_at_5": 0.55, "mrr": 0.44, "ndcg": 0.50, "avg_latency_ms": 12},
-                {"variant": "hybrid", "recall_at_5": 0.78, "mrr": 0.66, "ndcg": 0.72, "avg_latency_ms": 58},
-                {"variant": "hybrid_reranker", "recall_at_5": 0.85, "mrr": 0.74, "ndcg": 0.81, "avg_latency_ms": 180},
-            ],
+        return {
+            "success": True,
+            "experiment_id": exp_id,
+            "status": "completed",
+            "mock": req.mock,
+            "results": results,
         }
-        db.execute_sql(
-            "UPDATE experiment_runs SET status='completed', completed_at=?, results=? WHERE id=?",
-            (_now(), json.dumps(mock_results), exp_id),
-        )
-        return {"success": True, "experiment_id": exp_id, "status": "completed", "mock": True, "results": mock_results}
-    except Exception as e:
-        logger.error(f"RAG 消融实验失败: {e}")
+    except ImportError:
+        error = "RAG ablation module not available"
         db.execute_sql(
             "UPDATE experiment_runs SET status='failed', completed_at=?, results=? WHERE id=?",
-            (_now(), json.dumps({"error": str(e)}), exp_id),
+            (_now(), json.dumps({"error": error}), exp_id),
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"success": False, "experiment_id": exp_id, "status": "failed", "error": error}
+    except Exception as e:
+        logger.exception("RAG ablation failed experiment_id=%s", exp_id)
+        db.execute_sql(
+            "UPDATE experiment_runs SET status='failed', completed_at=?, results=? WHERE id=?",
+            (_now(), json.dumps({"error": str(e)}, ensure_ascii=False), exp_id),
+        )
+        raise HTTPException(status_code=500, detail="RAG ablation failed")
 
 
 @router.post("/api/experiments/quantization-benchmark")

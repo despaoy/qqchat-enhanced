@@ -416,7 +416,7 @@ export function TrainingParamsEditor({
       }
       setActivePreset(null);
       toast.success('配置已导入');
-    } catch (e) {
+    } catch {
       toast.error('导入失败：文件不是合法的配置 JSON');
     }
   }, []);

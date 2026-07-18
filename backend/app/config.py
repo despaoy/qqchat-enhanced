@@ -97,9 +97,10 @@ def verify_token(token: str) -> dict:
 # LLM 并发控制器
 # ============================================
 
-LLM_CONCURRENCY_LIMIT = 10  # 最多同时10个LLM调用
+LLM_CONCURRENCY_LIMIT = max(
+    1, int(os.getenv("LLM_MAX_CONCURRENCY", os.getenv("MODEL_MAX_CONCURRENCY", "2")))
+)
 llm_semaphore = asyncio.Semaphore(LLM_CONCURRENCY_LIMIT)
-LLM_CONCURRENCY_LIMIT = max(1, int(os.getenv("LLM_MAX_CONCURRENCY", os.getenv("MODEL_MAX_CONCURRENCY", "2"))))
 llm_request_counter = 0  # 当前排队的请求数
 llm_max_queue = 100  # 最大排队数
 

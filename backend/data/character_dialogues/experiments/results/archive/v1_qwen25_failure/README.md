@@ -1,5 +1,7 @@
 # v1 Qwen2.5-7B 失败实验归档
 
+> 状态：只读历史归档；不得挂载到 Qwen3，也不得覆盖当前实验结果。
+
 本目录保留月社妃 LoRA v1（基于 Qwen2.5-7B-Instruct）的失败实验记录，作为科研对照基线。
 
 ## 归档原因
@@ -30,4 +32,4 @@
 
 ## 关联文档
 
-- [月社妃 LoRA 重训科研路径](../../../../../docs/research/KISAKI_LORA_RETRAIN_PLAN.md)
+- [月社妃 LoRA 重训科研路径](../../../../../../../docs/research/KISAKI_LORA_RETRAIN_PLAN.md)

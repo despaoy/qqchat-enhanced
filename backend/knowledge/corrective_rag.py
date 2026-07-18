@@ -62,7 +62,12 @@ class CorrectiveRAG:
         extra = " ".join(keywords[:5])
         return f"{query} {extra}"
 
-    def retrieve_with_correction(self, query: str, top_k: Optional[int] = None) -> Dict[str, Any]:
+    def retrieve_with_correction(
+        self,
+        query: str,
+        top_k: Optional[int] = None,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """纠正性检索：首次检索 → 低置信度则重写重试 → 仍低则弃答。
 
         Returns:
@@ -70,7 +75,9 @@ class CorrectiveRAG:
              original_query, reformulated_query}
         """
         # 首次检索
-        first = self.rag_helper.retrieve_with_citations(query, top_k=top_k, threshold=self.threshold)
+        first = self.rag_helper.retrieve_with_citations(
+            query, top_k=top_k, threshold=self.threshold, filters=filters
+        )
         confidence = first.get("confidence", 0.0)
 
         if not first.get("abstained", False):
@@ -87,7 +94,9 @@ class CorrectiveRAG:
         reformulated_query = self.reformulate_query(query, first.get("results", []))
         logger.info(f"纠正性RAG: 重写查询 -> {reformulated_query}")
 
-        second = self.rag_helper.retrieve_with_citations(reformulated_query, top_k=top_k, threshold=self.threshold)
+        second = self.rag_helper.retrieve_with_citations(
+            reformulated_query, top_k=top_k, threshold=self.threshold, filters=filters
+        )
         second_confidence = second.get("confidence", 0.0)
 
         if not second.get("abstained", False):

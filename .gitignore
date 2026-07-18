@@ -79,6 +79,11 @@ Desktop.ini
 *.temp
 .tmp/
 .temp/
+.test_tmp/
+_output.txt
+_temp_*.py
+scripts/_tmp_*.py
+backend/.codex_pytest_tmp/
 
 # === Archive files ===
 *.tgz

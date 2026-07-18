@@ -18,6 +18,7 @@ async def get_messages(
     sessionType: Optional[str] = Query(None),
     lora: Optional[str] = Query(None),
     sessionId: Optional[str] = Query(None),
+    sessionName: Optional[str] = Query(None),
     platform: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
@@ -31,6 +32,7 @@ async def get_messages(
         session_type=sessionType if sessionType and sessionType != "all" else None,
         lora_name=lora if lora and lora != "all" else None,
         session_id=sessionId,
+        session_name=sessionName,
         platform=platform if platform and platform != "all" else None,
         limit=limit,
         offset=offset,
@@ -40,6 +42,7 @@ async def get_messages(
         session_type=sessionType if sessionType and sessionType != "all" else None,
         lora_name=lora if lora and lora != "all" else None,
         session_id=sessionId,
+        session_name=sessionName,
         platform=platform if platform and platform != "all" else None,
     )
 

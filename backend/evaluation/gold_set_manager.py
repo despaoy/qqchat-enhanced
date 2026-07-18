@@ -35,6 +35,10 @@ class GoldSetManager:
     def filter_by_category(self, prompts: List[Dict[str, Any]], category: str) -> List[Dict[str, Any]]:
         return [p for p in prompts if p.get("category") == category]
 
+    def filter_by_persona(self, prompts: List[Dict[str, Any]], persona: str) -> List[Dict[str, Any]]:
+        """按 persona 过滤 prompt 列表（避免不同角色 Gold Set 互相污染）。"""
+        return [p for p in prompts if p.get("persona") == persona]
+
     def get_split(self, prompts: List[Dict[str, Any]], split: str) -> List[Dict[str, Any]]:
         return [p for p in prompts if p.get("split", "eval") == split]
 

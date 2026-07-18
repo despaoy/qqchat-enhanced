@@ -19,7 +19,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api, Message } from '@/lib/api';
 
-export function useMessages(limit = 20, offset = 0, enabled = true, filters?: { platform?: string; sessionType?: string }) {
+export function useMessages(limit = 20, offset = 0, enabled = true, filters?: { platform?: string; sessionType?: string; search?: string; lora?: string; sessionName?: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [total, setTotal] = useState(0);
   const [totalAll, setTotalAll] = useState(0);
@@ -48,7 +48,7 @@ export function useMessages(limit = 20, offset = 0, enabled = true, filters?: { 
       setLoading(false);
       return;
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
     fetchMessages();
   }, [fetchMessages, enabled]);
 

@@ -16,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Brain, Play, XCircle, RefreshCw, Loader2, Database,
-  CheckCircle2, AlertCircle, Info, FileText, Plus, Pencil, Trash2, X, Check,
+  CheckCircle2, Info, FileText, Plus, Pencil, Trash2, X, Check,
   SquareCheck, Square, FlipHorizontal2, Trash, ShieldCheck,
 } from 'lucide-react';
 import { api, type KnowledgeBase } from '@/lib/api';

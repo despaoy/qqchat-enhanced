@@ -1,21 +1,26 @@
 # QQChat Enhanced
 
-QQChat Enhanced 是一个多平台 LLM 系统，专注于角色对话、知识接地回答、LoRA 适配和可复现的 LLM 实验。
+QQChat Enhanced 是一个面向角色对话研究与保研展示的多平台 LLM 系统。项目覆盖数据治理、LoRA/DoRA/RSLoRA 微调、AWQ 高效推理、混合 RAG、评测体系、AstrBot 消息网关以及可观测的 Web 管理台。
 
-系统以 AstrBot 作为平台网关，FastAPI 作为核心服务。支持 QQ/NapCat 和可扩展的 IM 平台、vLLM AWQ 推理、RAG、LoRA 训练与切换、实验追踪，以及 Next.js 管理控制台。
+> 当前定位：单机可部署、证据驱动的研究原型。项目强调完整的“数据 -> 训练 -> 推理 -> 检索 -> 评测 -> 多平台交付”链路，不以堆叠云原生组件为目标。
 
-## 当前状态
+## 当前技术基线
 
-- **基础模型**：`Qwen3-8B-Instruct`（含 AWQ 量化版本，已从 Qwen2.5-7B 迁移）
-- **vLLM 服务**：`qwen3-8b-instruct-awq`，端口 8001，`--enforce-eager` 模式
-- **后端**：FastAPI，端口 8000，回归测试 86 passed
-- **前端**：Next.js 16，TypeScript 编译 0 错误，28 条路由
-- **数据库**：26 张表（含 6 张 Phase A 评测表）
-- **LoRA**：旧适配器（hutao/minamo/kisaki）已备份至 `loras/backup_qwen25/`，需基于 Qwen3-8B 重新训练
+| 模块 | 推荐版本或实现 |
+| --- | --- |
+| 基础模型 | Qwen3-8B-Instruct |
+| 量化推理 | Qwen3-8B-Instruct-AWQ + vLLM 0.10.2 |
+| 训练 | PyTorch 2.8、Transformers 4.57、PEFT、TRL |
+| 后端 | Python 3.12 + FastAPI |
+| 前端 | Node.js 22 + Next.js 16 + React 19 |
+| RAG | FAISS/BM25 混合检索 + BGE-M3 + 可选 Reranker |
+| 平台网关 | AstrBot 插件，统一接入 QQ、微信系、Telegram 等平台 |
+| 数据库 | SQLite（本地/单进程）或 PostgreSQL（部署推荐） |
+| 缓存 | Redis 可选；不可用时使用受限的进程内退化实现 |
 
-本项目是一个已验证的单服务器研究原型。PostgreSQL 迁移、持久化服务监督、真实 IM 账号接入在生产部署前仍需完成。
+实验室服务器已验证 Python 3.12.13、PyTorch 2.8.0+cu128、RTX 3090 CUDA 可用、vLLM 0.10.2 依赖完整，后端回归最近一次为：Windows 本地 100 passed、1 skipped；实验室服务器 101 passed。
 
-## 架构
+## 系统架构
 
 ```text
 QQ / WeChat / Telegram
@@ -26,133 +31,150 @@ QQ / WeChat / Telegram
           |
       FastAPI core
    /       |        \
-vLLM     RAG      PostgreSQL/Redis
+vLLM     RAG      SQLite/PostgreSQL
+  |        |              |
+LoRA   BGE/FAISS         Redis
           |
      Next.js console
 ```
 
-技术栈：FastAPI v2.0.0 + Next.js 16 + vLLM 0.10.2 + FAISS 混合 RAG + 多 LoRA 路由 + DPO/ORPO + Gold Set 评估。
+关键设计边界：
 
-## 快速开始
+- AstrBot 只负责平台事件标准化、鉴权调用和回复发送。
+- FastAPI 负责会话策略、幂等、队列、RAG、模型调用、历史和指标。
+- vLLM/Transformers 是可替换的推理后端。
+- 模型、LoRA、数据库、日志和向量索引存放在仓库之外。
+- 所有外部边界都设置超时、降级和结构化错误。
 
-### 本地验证
+## 主要能力
 
-```powershell
-pnpm ts-check
-pnpm build
-cd backend
-py -3.12 -m pytest tests -q
-py -3.12 -m scripts.local_smoke
-```
+### LLM 与 LoRA
 
-### 服务器验证
+- Qwen3-8B SFT，支持 LoRA、DoRA、RSLoRA、NEFTune、Sequence Packing。
+- 固定训练集、验证集和随机种子的受控消融实验。
+- adapter 兼容性检查、扫描、激活、回滚和多 LoRA 路由。
+- 角色一致性、格式、重复率、Distinct-N、安全、RAG 引用和人工盲评。
 
-```bash
-curl -fsS http://127.0.0.1:8000/health
-curl -fsS http://127.0.0.1:8000/ready
-redis-cli -h 127.0.0.1 ping
-curl -fsS http://127.0.0.1:8001/v1/models
-```
+### RAG
 
-### 启动 vLLM 服务
+- 向量检索、BM25、Hybrid 和可选 Reranker。
+- Corrective RAG、引用、置信度和拒答策略。
+- 文档导入、分块、索引更新、检索评测和缓存失效。
 
-```bash
-# 使用 Qwen3-8B-AWQ（需 GPU 1 空闲）
-bash scripts/lab-start-vllm-daemon.sh
-```
+### AstrBot 多平台
 
-## 文档导航
+- 统一消息协议和 `traceId`。
+- `platform + adapter + messageId` 幂等。
+- 平台/会话/发送者/全局限流。
+- QQ、Telegram、企业微信、公众号和个人微信适配边界。
+- 群聊静默降级、私聊简短降级提示。
 
-所有文档集中在 `docs/` 目录，按类别分目录组织：
+### 工程能力
 
-### 核心文档（docs/architecture/）
-
-| 文档 | 用途 |
-| --- | --- |
-| [代码知识库](docs/architecture/CODE_WIKI.md) | **权威技术文档**：项目整体架构、模块职责、关键类与函数、依赖关系（1300+ 行结构化知识库） |
-| [优化策略](docs/architecture/OPTIMIZATION_STRATEGY.md) | 性能、可靠性、安全、部署的工程优化执行基线（P0-P3 优先级原则） |
-
-### 研究与实验（docs/research/）
-
-| 文档 | 用途 |
-| --- | --- |
-| [研究与学习路线图](docs/research/RESEARCH_AND_LEARNING_ROADMAP.md) | **合并文档**：项目定位、当前状态、9 项研究方向、10 周实施计划（含 Learn/Do/Deliver/Pass）、部署验收、学习资源、研究诚信 Guardrails |
-| [真实 vLLM 基准报告](docs/research/REAL_VLLM_BENCHMARK_REPORT.md) | 2026-07-14 RTX 3090 真实实验报告：Minamo/月社妃 LoRA 训练与评测、质量门禁、根因分析 |
-| [初学者真实 LLM 实验指南](docs/research/BEGINNER_REAL_LLM_EXPERIMENT_GUIDE.md) | 面向初学者的实验操作指南：盲评、偏好审核、训练、挂载 vLLM、真实评测 |
-| [月社妃 LoRA 重训科研路径](docs/research/KISAKI_LORA_RETRAIN_PLAN.md) | **保研科研主线**：v1 失败诊断→数据治理（游戏文本+LLM增强+人工审核）→四组消融（LoRA/DoRA/RSLoRA/NEFTune）→部署→DPO pilot |
-
-### 数据与评测（docs/data/）
-
-| 文档 | 用途 |
-| --- | --- |
-| [数据集卡片](docs/data/dataset-card.md) | QQChat Persona SFT 训练数据集卡片 v1.0：来源、预处理、分割、角色定义、版权 |
-| [人工评分标准](docs/data/human-scoring-rubric.md) | Gold Set 105 条 prompt 的人工评分标准（5 分制，5 类别） |
-
-### 子目录文档
-
-| 文档 | 用途 |
-| --- | --- |
-| [AstrBot 网关插件](astrbot_plugins/qqchat_gateway/README.md) | AstrBot 插件安装与环境变量配置 |
-| [角色对话数据](backend/data/character_dialogues/README.md) | 角色对话训练数据目录结构说明 |
-| [偏好审核指南](backend/data/character_dialogues/experiments/research/PREFERENCE_REVIEW_GUIDE.md) | 偏好数据人工审核操作指南（chosen/rejected 判定） |
+- JWT 认证、CSRF/同源校验、内部集成 token 和输入限制。
+- 优先级队列、模型并发控制、会话串行化和熔断。
+- 结构化日志、指标、告警、健康检查和服务状态。
+- Alembic 数据库迁移、分页查询和多平台数据模型。
+- 单元、集成、契约、本地 smoke 和真实模型评测。
 
 ## 仓库结构
 
 ```text
-backend/                 FastAPI, 训练, RAG, 评测, 数据库（26 张表）
-├── api/                 18 个 API 路由模块
-├── inference/           vLLM 客户端 + LoRA 路由 + 适配器检查
-├── training/            LoRA 训练器 + 任务管理 + 评估器
-├── knowledge/           FAISS 向量库 + 重排序 + 纠正性 RAG
-├── experiments/         消融实验 + 量化基准 + RAG 消融
-├── evaluation/          Gold Set + 安全测试 + 角色基准
-└── data/                训练数据 + 偏好对 + KB 种子
-src/                     Next.js 管理控制台（14 页面, 12 Hook）
-astrbot_plugins/         AstrBot 网关插件
-deploy/                  Compose, Nginx, 服务器脚本, 实验运行器
-scripts/                 vLLM 启动 + 实验脚本 + 盲评工具
-gametext/                角色语料（纸上魔法使系列）
+astrbot_plugins/     AstrBot 网关插件
+backend/
+├── api/              FastAPI 路由
+├── app/              配置、依赖和应用生命周期
+├── cache/            Redis/内存缓存、队列、语义缓存
+├── db/               SQLite/PostgreSQL、模型与迁移
+├── evaluation/       Gold Set、角色、安全与检索指标
+├── experiments/      LoRA/RAG/量化消融
+├── inference/        vLLM 客户端、模型与 LoRA 路由
+├── infra/            安全、并发、熔断、观测
+├── knowledge/        导入、分块、检索、重排序
+├── tests/            后端测试
+└── training/         SFT、偏好训练和任务管理
+deploy/               Compose、Nginx 和部署脚本
+docs/                 架构、运维、研究和数据文档
+gametext/             可审计的原始角色语料
+scripts/              验证、训练、评测和服务器启动工具
+src/                  Next.js 管理台
 ```
 
-## LoRA 子系统
+服务器上的模型与训练资产遵循 [服务器目录规范](docs/operations/SERVER_LAYOUT.md)，不放入源码目录。
 
-本项目包含完整的 LoRA 训练-推理-管理闭环：
+## 快速验证
 
-- **训练**：PEFT/DoRA/RSLoRA/NEFTune/Packing 全栈微调，GPU 温度监控，异步任务管理，DB 持久化
-- **推理**：双后端（vLLM + Transformers PEFT），熔断器、负载均衡、KV Cache 复用、语义缓存
-- **路由**：基于关键词的 LoRA 路由器（BASE_CHAT / RAG / PERSONA 三态切换）
-- **管理**：完整 REST API（CRUD + 扫描 + 激活 + 训练启停查）+ 前端可视化界面
-- **兼容性**：adapter_checker 在加载前校验 7 项（config/base_model/target_modules/rank/peft_version/weights/tokenizer）
+### Windows 本地
 
-详见 [Code Wiki](docs/architecture/CODE_WIKI.md) 第十二章。
+```powershell
+pnpm install --frozen-lockfile
+pnpm ts-check
+pnpm build
+py -3.12 -m pytest backend/tests -q
+powershell -ExecutionPolicy Bypass -File scripts/local-verify.ps1
+```
 
-## 研究诚信规则
+无 NVIDIA GPU 的本地环境可以验证前端、API、数据库、鉴权、Schema 和 mock 边界，但不能替代真实 vLLM/LoRA 评测。
 
-- **不得**将 mock 输出当作真实实验结果
-- **不得**声称 `eval_accuracy=0.65`（历史占位值，非真实测量）
-- 生成的偏好对以 `pending` 状态开始，需人工审核后才能用于 DPO/ORPO 训练
-- 真实量化对比需为每个模型变体使用隔离的 vLLM 进程
-- 每次实验必须同时保留：数据版本、种子、模型版本、命令、硬件、报告
-- 至少 50 条 approved 偏好对才可进行 DPO pilot
-- DPO/ORPO 不是 RLHF（基于参考模型的对比学习，非强化学习）
+### 实验室服务器
 
-## 关键设计要点
+```bash
+source /home/szw/lhm2/activate_qqchat.sh
+cd /home/szw/lhm2/qqchat-enhanced
+python -m pip check
+python -m pytest backend/tests -q
+pnpm ts-check
+```
 
-- **单 GPU 单 vLLM 进程**：避免显存竞争
-- **BACKEND_WORKERS=1**：避免 SQLite 并发问题
-- **LoRA 单一 LORA_PATH**：所有 adapter 在同一根目录下管理
-- **PostgreSQL 生产默认**：SQLite 仅用于开发
-- **JWT/token 不入日志**：敏感信息脱敏
-- **所有外部边界视为不可靠**：AstrBot、vLLM、IM 平台均需熔断与重试
+服务验收：
 
-## 模型迁移说明（2026-07-15）
+```bash
+curl -fsS http://127.0.0.1:8000/health
+curl -fsS http://127.0.0.1:8000/ready
+curl -fsS http://127.0.0.1:8001/v1/models
+curl -fsS http://127.0.0.1:5000/api/health
+```
 
-项目已从 Qwen2.5-7B-Instruct 迁移到 Qwen3-8B-Instruct：
+默认 vLLM 端口是 8001；独立 LoRA 对比实验可使用 8002，实际地址始终由 `VLLM_BASE_URL` 配置。
 
-- 服务器路径：`/home/szw/lhm2/runtime/models/Qwen3-8B-Instruct-AWQ`
-- vLLM 环境：`/home/szw/lhm2/envs/qqchat-gpu-qwen3/`（Python 3.11 + vLLM 0.10.2 + PyTorch 2.8.0+cu128 + transformers 4.57.6）
-- 启动参数添加 `--enforce-eager`（绕过 Triton 编译 `-lcuda` 问题）
-- 旧 LoRA 已备份，需基于 Qwen3-8B 重新训练
+## 配置原则
+
+从 `.env.example` 创建私有 `.env`，至少配置：
+
+- `JWT_SECRET`
+- `ASTRBOT_INTEGRATION_TOKEN`
+- `MODEL_PROVIDER=vllm`
+- `VLLM_BASE_URL`
+- `DATABASE_URL` 或 `DATABASE_PATH`
+- `BASE_MODEL_PATH`
+- `LORA_PATH`
+- `VECTOR_DB_PATH`
+- `EMBEDDING_MODEL_PATH`
+- `ALLOWED_ORIGINS`
+
+真实密钥不得进入 Git、前端响应或日志。部署细节见 [部署与验收指南](docs/operations/DEPLOYMENT_GUIDE.md)。
+
+## 文档
+
+完整索引见 [docs/README.md](docs/README.md)。
+
+- [代码知识库](docs/architecture/CODE_WIKI.md)
+- [优化策略](docs/architecture/OPTIMIZATION_STRATEGY.md)
+- [生产准备审查](docs/architecture/PRODUCTION_READINESS_REVIEW_2026-07-18.md)
+- [部署指南](docs/operations/DEPLOYMENT_GUIDE.md)
+- [研究与学习路线](docs/research/RESEARCH_AND_LEARNING_ROADMAP.md)
+- [月社妃 LoRA 重训计划](docs/research/KISAKI_LORA_RETRAIN_PLAN.md)
+- [数据集卡片](docs/data/dataset-card.md)
+- [人工评分标准](docs/data/human-scoring-rubric.md)
+
+## 研究诚信
+
+- mock 输出不能作为真实实验结果。
+- 历史 Qwen2.5 报告必须标为迁移前对照，不与 Qwen3 当前结果混算。
+- 偏好数据必须保留审核状态；DPO/ORPO 不表述为 RLHF。
+- 每次实验记录代码提交、数据哈希、模型版本、随机种子、硬件、命令和原始结果。
+- Gold Set 不得进入训练集，任何重叠都必须在报告中披露。
+- 结论同时报告质量、延迟、显存和失败样本，不只展示最好结果。
 
 ## 许可证
 

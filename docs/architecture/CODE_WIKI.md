@@ -3,7 +3,7 @@
 > 本文档为 `qqchat-enhanced` 项目的结构化代码知识库（Code Wiki），涵盖项目整体架构、模块职责、关键类与函数、依赖关系与运行方式。
 >
 > - **版本基线**：FastAPI 后端 `v2.0.0`、Next.js 前端 `0.1.0`（Next 16.2.9 / React 19.2.3）
-> - **生成日期**：2026-07-15
+> - **最近核对**：2026-07-18
 > - **维护原则**：随代码演进同步更新；任何架构性变更须同步本文档对应章节。
 
 ---
@@ -55,7 +55,7 @@
 - **研究严谨性**：Gold Set 评估、质量门（benchmark_gate）、盲评流程、合成数据审核 guardrail。
 
 **当前验证状态**（截至文档生成时）：
-- 后端回归：`86 passed, 1 skipped`
+- 后端回归：Windows 本地最近一次 `100 passed, 1 skipped`；实验室 Python 3.12 环境 `101 passed`
 - TypeScript 与 Next.js 生产构建通过
 - vLLM 在 RTX 3090 上稳定服务 `qwen2.5-7b-awq`
 - 26 张数据库表已建（PostgreSQL/SQLite 双模式）
@@ -465,7 +465,7 @@ def _should_use_postgresql(env=os.environ) -> bool:
 **关键类**：
 - `ModelProvider(str, Enum)`：6 种后端（ollama/llama_cpp/openai_compat/transformers_peft/vllm/mock）
 - `ModelConfig`（dataclass）：模型元信息
-- `MODEL_CONFIGS`：预置 Qwen2.5-7B/3B/1.5B-Instruct 三档配置
+- `MODEL_CONFIGS`：预置 Qwen3-8B 与轻量 Qwen2.5-3B/1.5B 配置；实际模型以环境变量和服务模型列表为准
 - `BaseProvider`：基类，定义 `generate()`、`async_generate`（默认经 `asyncio.to_thread` 包装）、`set_lora_adapter`、`get_status`
 - 6 个具体 Provider：`MockProvider`、`OllamaProvider`、`LlamaCppProvider`、`OpenAICompatProvider`、`TransformersPeftProvider`（三种量化降级链 4-bit NF4 → 8-bit → FP16）、`VLLMProvider`
 - `ModelManager`：
@@ -668,7 +668,7 @@ build_citations() / build_context_prompt() → 注入 LLM
 - **RAG 集成**：`_rag_search_via_api(query, top_k, kb_name)`：HTTP POST 调用后端 RAG 服务
 - **LoRA 热切换**：
   - `LORA_REGISTRY`：预置 hutao/minamo/test-lora-highperf 三个角色
-  - `_load_7b_model(lora_name)`：首次加载 Qwen2.5-7B 4-bit NF4 + PeftModel；热切换时 `load_adapter` + `set_adapter`
+  - `_load_7b_model(lora_name)`：加载 Qwen3-8B 4-bit NF4 + PeftModel；热切换时 `load_adapter` + `set_adapter`
 - **推理主流程**：
   - `generate_with_local_model(prompt, session_id, is_claw, lora_name)`：**优先 vLLM**（`inference.vllm_client.VLLMClient`），失败回退 transformers
   - `process_message(event) -> str`：同步 LoRA → 生成回复 → 保存历史 → 保存数据库 → 动态延迟
@@ -1051,7 +1051,7 @@ powershell -ExecutionPolicy Bypass -File scripts/start-local-backend.ps1
 | `deploy/scripts/start_all.sh` | 双模式（docker-compose / 裸金属），环境检查，.env 生成，裸金属模式启动 vLLM×2 + backend + frontend |
 | `deploy/scripts/start_vllm.sh` | vLLM 启动带 GPU/模型检查、AWQ、`--enable-prefix-caching`、`--trust-remote-code`、`wait_for_healthy` 循环 |
 | `deploy/scripts/start_vllm_15g.sh` | 15GB 显存优化变体，`gpu_memory_utilization=0.5` |
-| `deploy/scripts/download_models.sh` | 国内镜像（`HF_ENDPOINT=hf-mirror.com`），下载 base（Qwen2.5-7B-AWQ 5.2GB）、embed（420MB）、rerank（1.1GB） |
+| `deploy/scripts/download_models.sh` | 国内镜像（`HF_ENDPOINT=hf-mirror.com`），下载 Qwen3-8B-AWQ、BGE-M3 和 BGE reranker |
 | `deploy/compare_quantization.sh` | 遍历 fp16/awq/int8 串行启动 vLLM、跑 benchmark |
 | `deploy/run_experiments.sh` | 顺序跑 4 实验，生成 summary.md |
 | `deploy/run_server_experiments.sh` | 6 阶段编排，支持 `--phase N` 或 `--all` |

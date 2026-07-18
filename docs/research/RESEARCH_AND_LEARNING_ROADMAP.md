@@ -2,7 +2,7 @@
 
 > 将 QQChat Enhanced 转化为证据驱动的 LLM 系统研究平台，用于研究生保研面试展示。
 > 合并自原 LLM_RESEARCH_ENHANCEMENT_ROADMAP、PERSONAL_ACTION_AND_LEARNING_ROADMAP、PROJECT_STATUS_AND_NEXT_STEPS。
-> 最近验证：2026-07-15（Qwen3-8B-Instruct 迁移后）。
+> 最近验证：2026-07-18（Python 3.12 环境与 Qwen3 月社妃 E1-E2'' 实验）。
 
 ## 1. 项目定位
 
@@ -34,13 +34,13 @@
 ### 验证
 
 ```text
-后端回归：86 passed, 1 skipped
+后端回归：Windows 本地 100 passed、1 skipped；实验室服务器 101 passed
 TypeScript：0 错误
 Next.js 生产构建：通过（28 条路由）
 服务器健康：healthy
 服务器就绪：database=true, faiss=true
 Redis：PONG
-vLLM：qwen3-8b-instruct-awq 端口 8001（--enforce-eager 模式）
+vLLM：默认端口 8001；月社妃 LoRA 对比实验使用 8002，具体由 VLLM_BASE_URL 决定
 ```
 
 ## 3. 当前限制（不得声称的事项）
@@ -50,7 +50,7 @@ vLLM：qwen3-8b-instruct-awq 端口 8001（--enforce-eager 模式）
 - 当前 AWQ 结果是热服务单模型基准，**不是** FP16/AWQ/NF4/INT8 对比，也**不是**真实 startup-load/streaming-TTFT 测量
 - 当前 RAG 集是回归基准，声明泛化前需单独编写 held-out 集
 - SQLite + 手动 Redis **不是**生产部署
-- 旧 LoRA（hutao/minamo/kisaki）基于 Qwen2.5-7B 训练，与 Qwen3-8B 架构不兼容，已备份至 `loras/backup_qwen25/`，需重新训练
+- 旧 Qwen2.5 LoRA 已归档；月社妃已完成 Qwen3 E1/E2/E2'/E2''，胡桃和 Minamo 仍需基于 Qwen3 重训
 
 ## 4. 最高价值研究方向
 

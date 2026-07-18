@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Search, Download, Eye, Calendar, RefreshCw, AlertCircle, User, Bot, X, Trash2 } from 'lucide-react';
+import { Search, Download, Eye, Calendar, RefreshCw, AlertCircle, User, Bot, Trash2 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -19,6 +19,8 @@ import { AuthGuard } from '@/components/layout/AuthGuard';
 import { useAuth } from '@/contexts/AuthContext';
 import { format } from 'date-fns';
 import type { Message } from '@/lib/api';
+
+const PAGE_SIZE = 50;
 
 export default function HistoryPage() {
   return (
@@ -35,13 +37,36 @@ function HistoryContent() {
   const [platformFilter, setPlatformFilter] = useState('all');
   const [sessionNameFilter, setSessionNameFilter] = useState('');
   const [selectedLora, setSelectedLora] = useState('all');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [debouncedSessionName, setDebouncedSessionName] = useState('');
+  const [page, setPage] = useState(0);
   const [detailMessage, setDetailMessage] = useState<Message | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
   const [batchDeleting, setBatchDeleting] = useState(false);
   const [loraModels, setLoraModels] = useState<LoraModel[]>([]);
-  const { messages, totalAll, loading, error, refetch } = useMessages(50, 0, !!user);
+  const messageFilters = useMemo(() => ({
+    platform: platformFilter,
+    sessionType,
+    search: debouncedSearch,
+    lora: selectedLora,
+    sessionName: debouncedSessionName,
+  }), [platformFilter, sessionType, debouncedSearch, selectedLora, debouncedSessionName]);
+  const { messages, total, totalAll, loading, error, refetch } = useMessages(
+    PAGE_SIZE,
+    page * PAGE_SIZE,
+    !!user,
+    messageFilters,
+  );
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim());
+      setDebouncedSessionName(sessionNameFilter.trim());
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [searchTerm, sessionNameFilter]);
 
   // 加载 LoRA 模型列表
   const loadLoras = useCallback(async () => {
@@ -59,32 +84,17 @@ function HistoryContent() {
   }, [loadLoras]);
 
   // 从消息中提取实际出现的 loraName（去重）
-  const loraNamesFromMessages = useMemo(() => {
-    const names = new Set<string>();
+  const availableLoraNames = useMemo(() => {
+    const names = new Set(loraModels.map(model => model.name));
     for (const msg of messages) {
       if (msg.loraName) names.add(msg.loraName);
     }
     return Array.from(names).sort();
-  }, [messages]);
+  }, [loraModels, messages]);
 
   // 过滤消息
-  const filteredMessages = useMemo(() => {
-    return messages.filter(msg => {
-      const matchesSearch = !searchTerm || 
-        msg.message.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        msg.reply.toLowerCase().includes(searchTerm.toLowerCase());
-      
-      const matchesType = sessionType === 'all' || msg.sessionType === sessionType;
-      
-      const matchesLora = selectedLora === 'all' ||
-        msg.loraName === selectedLora;
-
-      const matchesSessionName = !sessionNameFilter ||
-        msg.sessionName.toLowerCase().includes(sessionNameFilter.toLowerCase());
-      
-      return matchesSearch && matchesType && matchesLora && matchesSessionName;
-    });
-  }, [messages, searchTerm, sessionType, selectedLora, sessionNameFilter]);
+  const filteredMessages = messages;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   // CSV 导出
   const handleExport = useCallback(() => {
@@ -116,6 +126,7 @@ function HistoryContent() {
     setDeletingId(id);
     try {
       await api.deleteMessage(id);
+      setPage(0);
       await refetch();
     } catch (err) {
       console.error('Failed to delete message:', err);
@@ -146,19 +157,21 @@ function HistoryContent() {
     setConfirmBatchDelete(false);
     try {
       const filters: Record<string, string> = {};
-      if (searchTerm) filters.search = searchTerm;
+      if (debouncedSearch) filters.search = debouncedSearch;
       if (sessionType && sessionType !== 'all') filters.sessionType = sessionType;
       if (selectedLora && selectedLora !== 'all') filters.lora = selectedLora;
-      if (sessionNameFilter) filters.sessionName = sessionNameFilter;
+      if (debouncedSessionName) filters.sessionName = debouncedSessionName;
       
-      const result = await api.deleteMessagesBatch(filters);
+      if (platformFilter && platformFilter !== 'all') filters.platform = platformFilter;
+      await api.deleteMessagesBatch(filters);
+      setPage(0);
       await refetch();
     } catch (err) {
       console.error('Failed to batch delete messages:', err);
     } finally {
       setBatchDeleting(false);
     }
-  }, [searchTerm, sessionType, platformFilter, selectedLora, sessionNameFilter, refetch]);
+  }, [debouncedSearch, sessionType, platformFilter, selectedLora, debouncedSessionName, refetch]);
 
   if (error) {
     return (
@@ -203,12 +216,15 @@ function HistoryContent() {
                   <Input
                     placeholder="搜索消息内容..."
                     value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value);
+                      setPage(0);
+                    }}
                     className="pl-8"
                   />
                 </div>
               </div>
-              <Select value={platformFilter} onValueChange={setPlatformFilter}>
+              <Select value={platformFilter} onValueChange={(value) => { setPlatformFilter(value); setPage(0); }}>
                 <SelectTrigger className="w-[150px]">
                   <SelectValue placeholder="平台" />
                 </SelectTrigger>
@@ -221,7 +237,7 @@ function HistoryContent() {
                   <SelectItem value="wechat_personal">个人微信</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={sessionType} onValueChange={setSessionType}>
+              <Select value={sessionType} onValueChange={(value) => { setSessionType(value); setPage(0); }}>
                 <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="会话类型" />
                 </SelectTrigger>
@@ -231,13 +247,13 @@ function HistoryContent() {
                   <SelectItem value="private">私聊</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={selectedLora} onValueChange={setSelectedLora}>
+              <Select value={selectedLora} onValueChange={(value) => { setSelectedLora(value); setPage(0); }}>
                 <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="LoRA模型" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">全部</SelectItem>
-                  {loraNamesFromMessages.map((name) => (
+                  {availableLoraNames.map((name) => (
                     <SelectItem key={name} value={name}>
                       {name === 'default' ? '基础模型（无LoRA）' : name}
                     </SelectItem>
@@ -247,7 +263,10 @@ function HistoryContent() {
               <Input
                 placeholder="群聊名/私聊名称..."
                 value={sessionNameFilter}
-                onChange={(e) => setSessionNameFilter(e.target.value)}
+                onChange={(e) => {
+                  setSessionNameFilter(e.target.value);
+                  setPage(0);
+                }}
                 className="w-[200px]"
               />
               <Button onClick={handleExport}>
@@ -263,12 +282,12 @@ function HistoryContent() {
             <CardTitle>对话记录</CardTitle>
             <div className="flex items-center gap-3">
               <span className="text-sm text-muted-foreground">
-                 共 {totalAll} 条记录{filteredMessages.length !== totalAll ? `（当前筛选 ${filteredMessages.length} 条）` : ''}
+                共 {totalAll} 条记录（当前筛选 {total} 条）
                </span>
               <Button
                 variant="destructive"
                 size="sm"
-                disabled={batchDeleting || filteredMessages.length === 0}
+                disabled={batchDeleting || total === 0}
                 onClick={() => setConfirmBatchDelete(true)}
               >
                 {batchDeleting ? '删除中...' : '删除全部'}
@@ -363,6 +382,27 @@ function HistoryContent() {
                 </TableBody>
               </Table>
             )}
+            <div className="mt-4 flex items-center justify-end gap-3">
+              <span className="text-sm text-muted-foreground">
+                第 {page + 1} / {totalPages} 页
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={loading || page === 0}
+                onClick={() => setPage(current => Math.max(0, current - 1))}
+              >
+                上一页
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={loading || page + 1 >= totalPages}
+                onClick={() => setPage(current => current + 1)}
+              >
+                下一页
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
@@ -374,15 +414,16 @@ function HistoryContent() {
             </DialogHeader>
             <div className="space-y-2">
               <p className="text-muted-foreground">
-                将删除当前筛选条件下的 <strong>{filteredMessages.length}</strong> 条对话记录，此操作不可撤销。
+                将删除当前筛选条件下的 <strong>{total}</strong> 条对话记录，此操作不可撤销。
               </p>
-              {(searchTerm || sessionType !== 'all' || selectedLora !== 'all' || sessionNameFilter) && (
+              {(debouncedSearch || platformFilter !== 'all' || sessionType !== 'all' || selectedLora !== 'all' || debouncedSessionName) && (
                 <div className="text-xs text-muted-foreground bg-muted rounded-md p-2 space-y-0.5">
                   <p>当前筛选条件：</p>
-                  {searchTerm && <p>· 搜索：{searchTerm}</p>}
+                  {debouncedSearch && <p>· 搜索：{debouncedSearch}</p>}
+                  {platformFilter !== 'all' && <p>· 平台：{platformFilter}</p>}
                   {sessionType !== 'all' && <p>· 类型：{sessionType === 'group' ? '群聊' : '私聊'}</p>}
                   {selectedLora !== 'all' && <p>· LoRA：{selectedLora}</p>}
-                  {sessionNameFilter && <p>· 会话名：{sessionNameFilter}</p>}
+                  {debouncedSessionName && <p>· 会话名：{debouncedSessionName}</p>}
                 </div>
               )}
             </div>

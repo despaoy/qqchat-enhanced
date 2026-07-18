@@ -264,8 +264,20 @@ async def test_lora_status_is_not_changed_when_runtime_load_fails(monkeypatch):
     async def fake_get_client():
         return FailingClient()
 
+    class FakeChecker:
+        def __init__(self, **kwargs):
+            pass
+
+        def check_adapter(self, name):
+            return type(
+                "Report",
+                (),
+                {"compatible": True, "errors": [], "warnings": []},
+            )()
+
     fake_db = FakeDb()
     monkeypatch.setattr(loras, "db", fake_db)
+    monkeypatch.setattr(loras, "AdapterChecker", FakeChecker)
     monkeypatch.setattr(loras, "_resolve_vllm_adapter_path", lambda name: "/loras/minamo")
     import api.generate
     monkeypatch.setattr(api.generate, "get_vllm_client", fake_get_client)
@@ -275,6 +287,63 @@ async def test_lora_status_is_not_changed_when_runtime_load_fails(monkeypatch):
 
     assert exc.value.status_code == 502
     assert fake_db.updated is False
+
+
+@pytest.mark.asyncio
+async def test_lora_switch_unloads_previous_adapter_before_loading_new(monkeypatch):
+    from api import loras
+
+    events = []
+
+    class FakeDb:
+        def get_loras(self):
+            return [
+                {"id": "1", "name": "old_lora", "status": "active"},
+                {"id": "2", "name": "new_lora", "status": "inactive"},
+            ]
+
+        def update_lora_status(self, lora_id, status):
+            events.append(("db", lora_id, status))
+            return {"id": lora_id, "name": "new_lora", "status": status}
+
+    class FakeRequest:
+        async def json(self):
+            return {"status": "active"}
+
+    class FakeClient:
+        async def unload_lora_adapter(self, name):
+            events.append(("unload", name))
+
+        async def load_lora_adapter(self, name, path):
+            events.append(("load", name, path))
+
+    class FakeChecker:
+        def __init__(self, **kwargs):
+            pass
+
+        def check_adapter(self, name):
+            return type(
+                "Report",
+                (),
+                {"compatible": True, "errors": [], "warnings": []},
+            )()
+
+    async def fake_get_client():
+        return FakeClient()
+
+    monkeypatch.setattr(loras, "db", FakeDb())
+    monkeypatch.setattr(loras, "AdapterChecker", FakeChecker)
+    monkeypatch.setattr(loras, "_resolve_vllm_adapter_path", lambda name: f"/loras/{name}")
+    import api.generate
+    monkeypatch.setattr(api.generate, "get_vllm_client", fake_get_client)
+
+    await loras.update_lora_status("2", FakeRequest(), {"user_id": 1})
+
+    assert events == [
+        ("unload", "old_lora"),
+        ("load", "new_lora", "/loras/new_lora"),
+        ("db", "2", "active"),
+    ]
 
 
 def test_postgresql_adapter_exposes_training_persistence_contract():

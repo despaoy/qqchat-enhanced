@@ -24,6 +24,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm ts-check
       - run: pnpm lint
+      - run: pnpm audit --prod --registry=https://registry.npmjs.org
       - run: pnpm build
 
   # Backend checks
@@ -46,21 +47,14 @@ jobs:
           # Install remaining deps (skip GPU-only vllm and torch variants)
           grep -v -E "^(vllm|torch|torchvision|torchaudio)" requirements.txt > requirements-ci.txt
           pip install -r requirements-ci.txt
-      - name: Syntax check
+      - name: Syntax and dependency checks
         run: |
-          python -m py_compile app/main.py
-          python -m py_compile app/config.py
-          python -m py_compile db/adapter.py
-          python -m py_compile db/pg_database.py
-          python -m py_compile db/database.py
-          python -m py_compile inference/vllm_client.py
-          python -m py_compile cache/redis_client.py
-          python -m py_compile cache/semantic_cache.py
-          python -m py_compile cache/message_queue.py
-          python -m py_compile infra/circuit_breaker.py
-          python -m py_compile interfaces/__init__.py
+          python -m compileall -q . ../scripts ../astrbot_plugins
+          python -m alembic heads
+          python -m pip check
       - name: Run tests
         run: |
+          set -o pipefail
           python -m pytest tests/ -v --tb=short \
             --ignore=tests/security_test.py \
             --ignore=tests/fault_injection_test.py \

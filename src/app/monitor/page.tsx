@@ -52,7 +52,7 @@ function MonitorContent() {
   }, [t]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
     fetchData();
 
     // 标签页隐藏时跳过轮询，可见时恢复，减少后台无效请求

@@ -74,6 +74,8 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
+      args:
+        INSTALL_GPU_DEPS: "false"
     restart: unless-stopped
     depends_on:
       postgres:
@@ -81,7 +83,7 @@ services:
       redis:
         condition: service_healthy
       vllm:
-        condition: service_started
+        condition: service_healthy
     environment:
       USE_POSTGRESQL: "true"
       PG_HOST: postgres
@@ -92,10 +94,12 @@ services:
       DATABASE_URL: postgresql+asyncpg://${PG_USER:-qqassistant}:${PG_PASSWORD:?set PG_PASSWORD}@postgres:5432/${PG_DATABASE:-qqassistant}
       REDIS_URL: redis://redis:6379/0
       VLLM_ENABLED: "true"
+      MODEL_PROVIDER: vllm
       VLLM_BASE_URL: http://vllm:8001
       VLLM_BASE_URLS: http://vllm:8001
       VLLM_SERVED_MODEL_NAME: qwen3-8b-instruct-awq
       VLLM_LORA_ROOT: /loras
+      LORA_PATH: /app/loras
       ENVIRONMENT: ${ENVIRONMENT:-production}
       ASTRBOT_INTEGRATION_TOKEN: ${ASTRBOT_INTEGRATION_TOKEN:?set ASTRBOT_INTEGRATION_TOKEN}
       QQCHAT_BACKEND_URL: http://backend:8000
@@ -109,11 +113,11 @@ services:
       - ./data/knowledge_bases:/app/knowledge_bases
       - ./data/loras:/app/loras
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready', timeout=8)"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 150s
     networks:
       - internal
 
