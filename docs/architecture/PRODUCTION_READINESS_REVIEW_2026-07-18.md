@@ -12,7 +12,7 @@
 
 | 类别 | 状态 | 证据 |
 | --- | --- | --- |
-| 后端回归 | 通过 | Windows 本地 100 passed、1 skipped；实验室服务器 101 passed |
+| 后端回归 | 通过 | Windows 本地 101 passed、1 skipped；实验室服务器 102 passed |
 | GPU 运行时 | 通过 | PyTorch 2.8.0+cu128 可识别 RTX 3090 |
 | vLLM 依赖 | 通过 | vLLM 0.10.2、Transformers 4.57.6，`pip check` 无冲突 |
 | 前后端契约 | 已实现 | 统一 API 客户端、FastAPI Schema、集成测试 |

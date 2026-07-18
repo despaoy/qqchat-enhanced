@@ -1,7 +1,7 @@
 # Next.js Frontend - Multi-stage build
 FROM node:22-alpine AS deps
 WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # 使用 npmjs.org 官方源，避免镜像源在 CI/海外环境不可用
 RUN corepack enable && pnpm config set registry https://registry.npmjs.org/ && pnpm install --frozen-lockfile
 

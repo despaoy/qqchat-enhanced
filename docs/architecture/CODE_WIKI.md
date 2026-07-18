@@ -55,7 +55,7 @@
 - **研究严谨性**：Gold Set 评估、质量门（benchmark_gate）、盲评流程、合成数据审核 guardrail。
 
 **当前验证状态**（截至文档生成时）：
-- 后端回归：Windows 本地最近一次 `100 passed, 1 skipped`；实验室 Python 3.12 环境 `101 passed`
+- 后端回归：Windows 本地最近一次 `101 passed, 1 skipped`；实验室 Python 3.12 环境 `102 passed`
 - TypeScript 与 Next.js 生产构建通过
 - vLLM 在 RTX 3090 上稳定服务 `qwen2.5-7b-awq`
 - 26 张数据库表已建（PostgreSQL/SQLite 双模式）

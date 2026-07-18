@@ -34,7 +34,7 @@
 ### 验证
 
 ```text
-后端回归：Windows 本地 100 passed、1 skipped；实验室服务器 101 passed
+后端回归：Windows 本地 101 passed、1 skipped；实验室服务器 102 passed
 TypeScript：0 错误
 Next.js 生产构建：通过（28 条路由）
 服务器健康：healthy

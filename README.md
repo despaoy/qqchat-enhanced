@@ -18,7 +18,7 @@ QQChat Enhanced 是一个面向角色对话研究与保研展示的多平台 LLM
 | 数据库 | SQLite（本地/单进程）或 PostgreSQL（部署推荐） |
 | 缓存 | Redis 可选；不可用时使用受限的进程内退化实现 |
 
-实验室服务器已验证 Python 3.12.13、PyTorch 2.8.0+cu128、RTX 3090 CUDA 可用、vLLM 0.10.2 依赖完整，后端回归最近一次为：Windows 本地 100 passed、1 skipped；实验室服务器 101 passed。
+实验室服务器已验证 Python 3.12.13、PyTorch 2.8.0+cu128、RTX 3090 CUDA 可用、vLLM 0.10.2 依赖完整，后端回归最近一次为：Windows 本地 101 passed、1 skipped；实验室服务器 102 passed。
 
 ## 系统架构
 
