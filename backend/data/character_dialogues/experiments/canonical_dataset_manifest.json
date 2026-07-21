@@ -10,6 +10,7 @@
     "status": "development_only"
   },
   "eval_ratio": 0.1,
+  "hash_mode": "sha256_utf8_lf_v1",
   "exclusions": {
     "count": 2,
     "path": "backend/data/character_dialogues/experiments/canonical_dataset_exclusions.json",
@@ -30,14 +31,14 @@
     {
       "count": 119,
       "path": "backend/data/character_dialogues/kisaki_llm_generated_v3.json",
-      "sha256": "8d62b88423aa6e96db2718baf9d6dc6fe6aa3e3a9f36ca5ed306975d601a3e0c"
+      "sha256": "a23c3d99afee6dfd91a6486c52e7a06a9d2fca6a69f8dc746ba04e0602d05783"
     }
   ],
   "status": "frozen_for_e1_e2",
   "train": {
     "count": 826,
     "path": "backend/data/character_dialogues/experiments/tsukiyashiro_kisaki_train.json",
-    "sha256": "d91780fbe8e5d2a294109e5a024e41fc87039ac1d079849ef19e3f58bfb3132e",
+    "sha256": "792ad8a5930a6fa63709e68ea65a278a9ade21161408922e2d43e878a8422689",
     "source_distribution": {
       "game_extraction": 715,
       "llm_v3_deepseek": 111
@@ -46,7 +47,7 @@
   "validation": {
     "count": 92,
     "path": "backend/data/character_dialogues/experiments/tsukiyashiro_kisaki_eval.json",
-    "sha256": "5c2d71816f5119aa70858115123953cad67c49927cc35a5e78251c97bfc61769",
+    "sha256": "1d73734fdf7f39a9489bfe843339c2f584e5a4523f040a532805017884e3d560",
     "source_distribution": {
       "game_extraction": 84,
       "llm_v3_deepseek": 8

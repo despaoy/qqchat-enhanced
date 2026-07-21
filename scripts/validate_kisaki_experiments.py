@@ -17,7 +17,7 @@ from evaluation.experiment_contracts import (  # noqa: E402
     canonical_json_hash,
     compare_experiment_configs,
     environment_snapshot,
-    sha256_file,
+    sha256_text_file,
     validate_frozen_gold,
     validate_r1_variant_set,
 )
@@ -56,7 +56,7 @@ def build_registry(*, require_model: bool, formal_eval: bool) -> tuple[dict[str,
             expected = dataset[manifest_key]
             if not path.exists():
                 errors.append(f"{label} {field} does not exist: {path}")
-            elif sha256_file(path) != expected["sha256"]:
+            elif sha256_text_file(path) != expected["sha256"]:
                 errors.append(f"{label} {field} hash does not match canonical dataset manifest")
         model_path = Path(config["base_model_path"])
         if require_model and not model_path.exists():
@@ -73,7 +73,7 @@ def build_registry(*, require_model: bool, formal_eval: bool) -> tuple[dict[str,
     prompt = {
         "path": PROMPT_V2_PATH.relative_to(PROJECT_ROOT).as_posix(),
         "version": 2,
-        "sha256": sha256_file(PROMPT_V2_PATH) if PROMPT_V2_PATH.exists() else None,
+        "sha256": sha256_text_file(PROMPT_V2_PATH) if PROMPT_V2_PATH.exists() else None,
     }
 
     gold: dict[str, Any] = {
@@ -82,7 +82,7 @@ def build_registry(*, require_model: bool, formal_eval: bool) -> tuple[dict[str,
     }
     if GOLD_V2_PATH.exists():
         gold_data = _load(GOLD_V2_PATH)
-        gold.update(status=gold_data.get("status"), sha256=sha256_file(GOLD_V2_PATH))
+        gold.update(status=gold_data.get("status"), sha256=sha256_text_file(GOLD_V2_PATH))
         if formal_eval:
             errors.extend(validate_frozen_gold(gold_data))
     elif formal_eval:
@@ -95,7 +95,7 @@ def build_registry(*, require_model: bool, formal_eval: bool) -> tuple[dict[str,
                 "id": f"R1-{name.upper()}",
                 "run_id": config.get("_experiment_id"),
                 "config": CONFIG_PATHS[name].relative_to(PROJECT_ROOT).as_posix(),
-                "config_sha256": sha256_file(CONFIG_PATHS[name]),
+                "config_sha256": sha256_text_file(CONFIG_PATHS[name]),
                 "config_contract_sha256": canonical_json_hash(config),
                 "baseline_differences": compare_experiment_configs(configs["e1"], config),
             }

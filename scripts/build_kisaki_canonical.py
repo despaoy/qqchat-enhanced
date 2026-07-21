@@ -25,7 +25,7 @@ from evaluation.experiment_contracts import (  # noqa: E402
     canonical_json_hash,
     dialogue_prompts,
     normalized_text,
-    sha256_file,
+    sha256_text_file,
 )
 
 DATA_DIR = BACKEND / "data" / "character_dialogues"
@@ -53,6 +53,7 @@ def _write_json(path: Path, value: Any) -> None:
     path.write_text(
         json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
 
@@ -92,7 +93,7 @@ def load_sources() -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dic
     for path, source in DEFAULT_SOURCES:
         data = _read_json(path)
         source_records.append(
-            {"path": path.relative_to(PROJECT_ROOT).as_posix(), "count": len(data), "sha256": sha256_file(path)}
+            {"path": path.relative_to(PROJECT_ROOT).as_posix(), "count": len(data), "sha256": sha256_text_file(path)}
         )
         for raw in data:
             item = _normalize_item(raw, source)
@@ -227,23 +228,24 @@ def build(seed: int = SEED, eval_ratio: float = EVAL_RATIO) -> dict[str, Any]:
         "status": "frozen_for_e1_e2",
         "seed": seed,
         "eval_ratio": eval_ratio,
+        "hash_mode": "sha256_utf8_lf_v1",
         "near_duplicate_threshold": NEAR_DUPLICATE_THRESHOLD,
         "sources": sources,
         "development_gold": {
             "path": DEV_GOLD_PATH.relative_to(PROJECT_ROOT).as_posix(),
             "status": "development_only",
-            "sha256": sha256_file(DEV_GOLD_PATH),
+            "sha256": sha256_text_file(DEV_GOLD_PATH),
         },
         "train": {
             "path": TRAIN_PATH.relative_to(PROJECT_ROOT).as_posix(),
             "count": len(train),
-            "sha256": sha256_file(TRAIN_PATH),
+            "sha256": sha256_text_file(TRAIN_PATH),
             "source_distribution": dict(Counter(item["metadata"]["data_source"] for item in train)),
         },
         "validation": {
             "path": EVAL_PATH.relative_to(PROJECT_ROOT).as_posix(),
             "count": len(evaluation),
-            "sha256": sha256_file(EVAL_PATH),
+            "sha256": sha256_text_file(EVAL_PATH),
             "source_distribution": dict(Counter(item["metadata"]["data_source"] for item in evaluation)),
         },
         "exclusions": {

@@ -38,11 +38,19 @@ def text_similarity(left: str, right: str) -> float:
 
 
 def sha256_file(path: Path) -> str:
+    """Hash exact bytes; use this for binary model artifacts."""
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def sha256_text_file(path: Path) -> str:
+    """Hash UTF-8 text after LF normalization for cross-platform provenance."""
+    text = path.read_text(encoding="utf-8")
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def canonical_json_hash(value: Any) -> str:

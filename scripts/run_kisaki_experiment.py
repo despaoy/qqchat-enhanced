@@ -23,6 +23,7 @@ from evaluation.experiment_contracts import (  # noqa: E402
     environment_snapshot,
     hash_tree,
     sha256_file,
+    sha256_text_file,
 )
 
 EXPERIMENT_DIR = BACKEND / "data" / "character_dialogues" / "experiments"
@@ -119,7 +120,7 @@ def main() -> int:
     for field, key in (("train_data_path", "train"), ("eval_data_path", "validation")):
         path = Path(config[field])
         path = path if path.is_absolute() else PROJECT_ROOT / path
-        if not path.exists() or sha256_file(path) != dataset[key]["sha256"]:
+        if not path.exists() or sha256_text_file(path) != dataset[key]["sha256"]:
             print(f"canonical_dataset_contract_failed={field}", file=sys.stderr)
             return 2
     model_config_path = Path(config["base_model_path"]) / "config.json"

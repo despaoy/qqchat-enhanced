@@ -5,8 +5,8 @@
   "research_question": "NEFTune alpha=5.0 对月社妃 LoRA 质量、稳定性和成本有何影响？",
   "fixed_contract": {
     "dataset_manifest": "backend/data/character_dialogues/experiments/canonical_dataset_manifest.json",
-    "train_sha256": "d91780fbe8e5d2a294109e5a024e41fc87039ac1d079849ef19e3f58bfb3132e",
-    "validation_sha256": "5c2d71816f5119aa70858115123953cad67c49927cc35a5e78251c97bfc61769",
+    "train_sha256": "792ad8a5930a6fa63709e68ea65a278a9ade21161408922e2d43e878a8422689",
+    "validation_sha256": "1d73734fdf7f39a9489bfe843339c2f584e5a4523f040a532805017884e3d560",
     "base_model": "Qwen3-8B-Instruct BF16",
     "seeds": [
       42,

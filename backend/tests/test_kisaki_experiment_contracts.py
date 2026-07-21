@@ -8,7 +8,7 @@ from evaluation.experiment_contracts import (
     audit_prompt_leakage,
     canonical_json_hash,
     compare_experiment_configs,
-    sha256_file,
+    sha256_text_file,
     validate_e1_e2_pair,
     validate_frozen_gold,
     validate_r1_variant_set,
@@ -51,13 +51,21 @@ def test_canonical_dataset_manifest_matches_files_and_has_no_split_overlap():
     manifest = _load(EXPERIMENT_DIR / "canonical_dataset_manifest.json")
     train = PROJECT_ROOT / manifest["train"]["path"]
     validation = PROJECT_ROOT / manifest["validation"]["path"]
-    assert sha256_file(train) == manifest["train"]["sha256"]
-    assert sha256_file(validation) == manifest["validation"]["sha256"]
+    assert sha256_text_file(train) == manifest["train"]["sha256"]
+    assert sha256_text_file(validation) == manifest["validation"]["sha256"]
     assert manifest["checks"]["train_validation_prompt_overlap"] == 0
     assert manifest["train"]["count"] > 0
     assert manifest["validation"]["count"] > 0
 
 
+
+
+def test_portable_text_hash_is_independent_of_line_endings(tmp_path):
+    sample = tmp_path / "sample.json"
+    sample.write_bytes(b'{"value": 1}\n{"value": 2}\n')
+    lf_hash = sha256_text_file(sample)
+    sample.write_bytes(b'{"value": 1}\r\n{"value": 2}\r\n')
+    assert sha256_text_file(sample) == lf_hash
 def test_gold_v2_candidates_are_balanced_and_cannot_be_used_formally():
     candidates = _load(PROJECT_ROOT / "backend" / "evaluation" / "kisaki_gold_set_v2_candidates.json")
     assert candidates["status"] == "draft"

@@ -20,12 +20,12 @@
                           "train":  {
                                         "path":  "backend/data/character_dialogues/experiments/tsukiyashiro_kisaki_train.json",
                                         "count":  826,
-                                        "sha256":  "d91780fbe8e5d2a294109e5a024e41fc87039ac1d079849ef19e3f58bfb3132e"
+                                        "sha256":  "792ad8a5930a6fa63709e68ea65a278a9ade21161408922e2d43e878a8422689"
                                     },
                           "validation":  {
                                              "path":  "backend/data/character_dialogues/experiments/tsukiyashiro_kisaki_eval.json",
                                              "count":  92,
-                                             "sha256":  "5c2d71816f5119aa70858115123953cad67c49927cc35a5e78251c97bfc61769"
+                                             "sha256":  "1d73734fdf7f39a9489bfe843339c2f584e5a4523f040a532805017884e3d560"
                                          },
                           "gold_v2":  {
                                           "path":  "backend/evaluation/kisaki_gold_set_v2.json",
