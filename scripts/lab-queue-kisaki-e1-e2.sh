@@ -123,7 +123,7 @@ run_seed() {
 }
 
 wait_for_frozen_gold() {
-  while ! "$PYTHON" "$PROJECT/scripts/validate_kisaki_experiments.py" --require-model --formal-eval --write-registry >>"$LOG" 2>&1; do
+  while ! "$PYTHON" "$PROJECT/scripts/validate_kisaki_experiments.py" --require-model --formal-eval --write-registry --registry-output "$RUNTIME/experiments/kisaki/canonical_experiment_registry.json" >>"$LOG" 2>&1; do
     write_state "waiting_for_gold" "Gold v2 must pass semantic audit and manual review before training"
     sleep "${KISAKI_GOLD_POLL_SECONDS:-300}"
   done
@@ -144,7 +144,7 @@ CURRENT_STAGE="dependency_preflight"
 write_state "preflight" "validating canonical training contracts"
 "$PYTHON" -c 'import tensorboard' >/dev/null
 CURRENT_STAGE="experiment_preflight"
-"$PYTHON" "$PROJECT/scripts/validate_kisaki_experiments.py" --require-model --write-registry
+"$PYTHON" "$PROJECT/scripts/validate_kisaki_experiments.py" --require-model --write-registry --registry-output "$RUNTIME/experiments/kisaki/canonical_experiment_registry.json"
 wait_for_frozen_gold
 wait_for_clean_git
 

@@ -133,10 +133,16 @@ def main() -> int:
     parser.add_argument("--require-model", action="store_true")
     parser.add_argument("--formal-eval", action="store_true")
     parser.add_argument("--write-registry", action="store_true")
+    parser.add_argument("--registry-output", type=Path)
     args = parser.parse_args()
     registry, errors = build_registry(require_model=args.require_model, formal_eval=args.formal_eval)
     if args.write_registry:
-        REGISTRY_PATH.write_text(json.dumps(registry, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        registry_output = args.registry_output or REGISTRY_PATH
+        registry_output.parent.mkdir(parents=True, exist_ok=True)
+        registry_output.write_text(
+            json.dumps(registry, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
     print(json.dumps(registry, ensure_ascii=False, indent=2))
     return 0 if not errors else 2
 
