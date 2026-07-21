@@ -219,6 +219,8 @@ def main() -> int:
             **environment_snapshot(PROJECT_ROOT),
             "dataset_path": str(args.dataset),
             "dataset_sha256": sha256_file(args.dataset),
+            "dataset_status": dataset.get("status"),
+            "dataset_id": dataset.get("gold_id"),
             "prompt_content_sha256": canonical_json_hash(prompts),
             "adapter_path": str(args.adapter_path) if args.adapter_path else None,
             "adapter_sha256": hash_tree(args.adapter_path) if args.adapter_path else None,

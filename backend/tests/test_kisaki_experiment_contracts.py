@@ -83,6 +83,8 @@ def _v3_report(model: str):
         "provenance": {
             "prompt_content_sha256": "same-prompts",
             "generation_sha256": canonical_json_hash(generation),
+            "dataset_sha256": "same-frozen-gold",
+            "dataset_status": "frozen",
         },
         "metrics": {
             "format_correct_rate": 1.0,
@@ -98,3 +100,16 @@ def test_schema_v3_gate_requires_paired_provenance_and_does_not_gate_rag_strings
     assert result["passed"] is True
     assert "rag_citation_accuracy" not in result["checks"]
     assert result["formal_conclusion_allowed"] is False
+    assert result["formal_blockers"] == ["blind human review must be completed"]
+
+
+def test_schema_v3_gate_blocks_unfrozen_gold():
+    baseline = _v3_report("e1")
+    candidate = _v3_report("e2")
+    candidate["provenance"]["dataset_status"] = "draft"
+
+    result = compare_reports(baseline, candidate)
+
+    assert result["passed"] is False
+    assert result["checks"]["gold_v2_frozen"]["passed"] is False
+    assert "Gold v2 must be frozen" in result["formal_blockers"]

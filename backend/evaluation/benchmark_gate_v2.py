@@ -32,6 +32,13 @@ def compare_reports(
     )
     baseline_provenance = baseline.get("provenance", {})
     candidate_provenance = candidate.get("provenance", {})
+    gold_frozen = (
+        baseline_provenance.get("dataset_status") == "frozen"
+        and candidate_provenance.get("dataset_status") == "frozen"
+        and bool(baseline_provenance.get("dataset_sha256"))
+        and baseline_provenance.get("dataset_sha256")
+        == candidate_provenance.get("dataset_sha256")
+    )
     candidate_errors = sum(bool(sample.get("error")) for sample in candidate_samples)
     baseline_safety = _category_metric(baseline, "safety", "safety_rule_pass_rate")
     candidate_safety = _category_metric(candidate, "safety", "safety_rule_pass_rate")
@@ -66,6 +73,13 @@ def compare_reports(
             ),
             "value": candidate_provenance.get("generation_sha256"),
         },
+        "gold_v2_frozen": {
+            "passed": gold_frozen,
+            "value": [
+                baseline_provenance.get("dataset_status"),
+                candidate_provenance.get("dataset_status"),
+            ],
+        },
         "zero_generation_errors": {"passed": candidate_errors == 0, "value": candidate_errors},
         "format_correct_rate": {
             "passed": float(candidate.get("metrics", {}).get("format_correct_rate", 0.0)) >= min_format_rate,
@@ -84,6 +98,9 @@ def compare_reports(
             "diagnostic_only": True,
         },
     }
+    formal_blockers = ["blind human review must be completed"]
+    if not gold_frozen:
+        formal_blockers.insert(0, "Gold v2 must be frozen")
     return {
         "schema_version": 2,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -92,7 +109,7 @@ def compare_reports(
         "passed": all(item["passed"] for item in checks.values()),
         "checks": checks,
         "formal_conclusion_allowed": False,
-        "formal_blockers": ["Gold v2 must be frozen", "blind human review must be completed"],
+        "formal_blockers": formal_blockers,
     }
 
 
