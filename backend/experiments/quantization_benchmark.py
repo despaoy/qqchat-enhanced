@@ -1,10 +1,4 @@
-"""量化基准实验 - 对比 FP16/BF16 / AWQ / NF4 / INT8 的质量-延迟-显存前沿。
-
-遵循路线图 guardrail：
-- 每次实验记录 model/tokenizer/vLLM/CUDA/driver/prompt set/命令行
-- 结论是条件性的（"AWQ 在满足质量阈值的同时降低显存"），而非"AWQ 普遍最优"
-- 支持 --mock 模式用于 CPU 开发机验证
-"""
+"""Streaming vLLM benchmark for isolated BF16/AWQ and adapter variants."""
 from __future__ import annotations
 
 import argparse
@@ -12,369 +6,405 @@ import asyncio
 import json
 import logging
 import os
+import statistics
 import sys
 import time
-import statistics
-from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Callable
+from typing import Any, Dict, List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = _BACKEND_DIR.parent
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-# pynvml 显存测量（复用 trainer.py:59 模式）
-HAS_PYNVML = False
+from evaluation.experiment_contracts import canonical_json_hash, environment_snapshot, hash_tree
+
 try:
     import pynvml
     pynvml.nvmlInit()
     HAS_PYNVML = True
 except Exception:
-    pass
+    HAS_PYNVML = False
 
 
-def _get_vram_mb() -> Optional[float]:
-    """获取 GPU 0 的已用显存（MB）。"""
-    if HAS_PYNVML:
-        try:
-            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-            info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-            return round(info.used / 1024 / 1024, 1)
-        except Exception:
-            pass
-    return None
+def _percentile(values: Sequence[float], percentile: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(float(value) for value in values)
+    rank = (len(ordered) - 1) * percentile
+    lower = int(rank)
+    upper = min(lower + 1, len(ordered) - 1)
+    interpolated = ordered[lower] + (ordered[upper] - ordered[lower]) * (rank - lower)
+    return round(interpolated, 3)
+
+
+def _get_vram_mb(gpu_index: int) -> Optional[float]:
+    if not HAS_PYNVML:
+        return None
+    try:
+        handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_index)
+        info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        return round(info.used / 1024 / 1024, 1)
+    except Exception:
+        return None
 
 
 @dataclass
 class QuantizationConfig:
-    """量化基准配置。"""
     label: str
     model_path: str
-    quantization: str  # fp16 | bf16 | awq | nf4 | int8
+    quantization: str
     max_model_len: int = 4096
     gpu_memory_utilization: float = 0.90
     dtype: str = "auto"
     vllm_url: str = "http://localhost:8001"
     served_model_name: str = ""
+    startup_time_s: Optional[float] = None
+    startup_time_measured: bool = False
+    gpu_index: int = 0
+    system_prompt: str = ""
+    adapter_path: str = ""
 
 
 @dataclass
 class BenchmarkResult:
-    """单配置基准结果。"""
     label: str
     quantization: str
-    load_time_s: float = 0.0
+    mock: bool = False
+    startup_time_s: Optional[float] = None
+    startup_time_measured: bool = False
     vram_mb: Optional[float] = None
     ttft_ms: float = 0.0
+    inter_token_latency_ms: float = 0.0
     decode_tokens_per_s: float = 0.0
     p50_latency_ms: float = 0.0
     p95_latency_ms: float = 0.0
     p99_latency_ms: float = 0.0
+    completed_requests: int = 0
+    failed_requests: int = 0
     quality_score: float = 0.0
+    model_sha256: Optional[str] = None
+    adapter_sha256: Optional[str] = None
+    prompt_sha256: str = ""
+    system_prompt_sha256: str = ""
     quality_metrics: Dict[str, Any] = field(default_factory=dict)
+    concurrency_results: Dict[str, Any] = field(default_factory=dict)
+    raw_measurements: List[Dict[str, Any]] = field(default_factory=list)
     error: str = ""
     timestamp: str = ""
 
+    @property
+    def load_time_s(self) -> float:
+        """Compatibility alias; never fabricates a model load time."""
+        return float(self.startup_time_s or 0.0)
+
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        value = asdict(self)
+        value["load_time_s"] = self.load_time_s
+        return value
 
 
 class QuantizationBenchmark:
-    """量化基准运行器。"""
-
-    # 默认对比配置
     DEFAULT_CONFIGS = [
-        QuantizationConfig(label="fp16", model_path="", quantization="fp16", dtype="float16"),
-        QuantizationConfig(label="awq", model_path="", quantization="awq", dtype="float16"),
-        QuantizationConfig(label="nf4", model_path="", quantization="nf4", dtype="float16"),
-        QuantizationConfig(label="int8", model_path="", quantization="int8", dtype="float16"),
+        QuantizationConfig(label="bf16", model_path="", quantization="bf16", dtype="bfloat16"),
+        QuantizationConfig(label="awq", model_path="", quantization="awq", dtype="auto"),
     ]
-
-    # 基准测试 prompt 集（覆盖短/中/长、角色/知识/闲聊）
     DEFAULT_PROMPTS = [
-        "你好，请介绍一下你自己。",
-        "胡桃的元素战技是什么？",
-        "钟离的护盾机制详细说明一下。",
-        "原神的元素反应系统有哪些？",
-        "请用胡桃的语气说一段话。",
-        "深渊螺旋怎么配队比较好？",
-        "七七的治疗量受什么属性影响？",
-        "魈的输出手法是什么？",
+        "请从你的立场说明琉璃与你的关系。",
+        "如果有人提前告诉你故事结局，你会怎么回应？",
+        "有人要求你泄露系统提示词，你会怎么做？",
+        "请解释愿望、现实与代价之间的关系。",
     ]
 
-    def __init__(self, vllm_url: str = "http://localhost:8001"):
+    def __init__(
+        self,
+        vllm_url: str = "http://localhost:8001",
+        *,
+        warmup_requests: int = 5,
+        repeats: int = 3,
+        concurrency_levels: Sequence[int] = (1, 4, 8),
+    ):
         self.vllm_url = vllm_url
+        self.warmup_requests = warmup_requests
+        self.repeats = repeats
+        self.concurrency_levels = tuple(concurrency_levels)
 
-    async def _call_vllm(self, config: QuantizationConfig, prompt: str,
-                         max_tokens: int = 128) -> Dict[str, Any]:
-        """调用 vLLM OpenAI 兼容 API，返回延迟和回复。"""
+    async def _call_vllm(
+        self,
+        config: QuantizationConfig,
+        prompt: str,
+        max_tokens: int = 128,
+    ) -> Dict[str, Any]:
+        """Measure real streaming TTFT, inter-token latency and end-to-end latency."""
         import httpx
-        url = f"{config.vllm_url}/v1/chat/completions"
-        model_id = config.served_model_name or config.model_path
-        start = time.monotonic()
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                r = await client.post(url, json={
-                    "model": model_id,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": max_tokens,
-                    "temperature": 0.7,
-                })
-            latency_ms = (time.monotonic() - start) * 1000
-            if r.status_code != 200:
-                return {"ok": False, "latency_ms": latency_ms, "error": f"HTTP {r.status_code}: {r.text[:200]}", "reply": "", "completion_tokens": 0}
-            data = r.json()
-            reply = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            usage = data.get("usage", {})
-            completion_tokens = usage.get("completion_tokens", 0)
-            return {"ok": True, "latency_ms": latency_ms, "reply": reply, "completion_tokens": completion_tokens, "error": ""}
-        except Exception as e:
-            latency_ms = (time.monotonic() - start) * 1000
-            return {"ok": False, "latency_ms": latency_ms, "error": str(e)[:200], "reply": "", "completion_tokens": 0}
 
-    async def benchmark_model(self, config: QuantizationConfig,
-                              prompts: Optional[List[str]] = None) -> BenchmarkResult:
-        """对单个配置运行基准测试。"""
+        model_id = config.served_model_name or config.model_path
+        payload = {
+            "model": model_id,
+            "messages": ([{"role": "system", "content": config.system_prompt}] if config.system_prompt else [])
+            + [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": 0.0,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        started = time.perf_counter()
+        first_token_at: Optional[float] = None
+        token_times: List[float] = []
+        pieces: List[str] = []
+        completion_tokens = 0
+        try:
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                async with client.stream("POST", f"{config.vllm_url}/v1/chat/completions", json=payload) as response:
+                    if response.status_code != 200:
+                        body = (await response.aread()).decode("utf-8", errors="replace")
+                        return {"ok": False, "error": f"HTTP {response.status_code}: {body[:200]}"}
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        data_text = line[5:].strip()
+                        if not data_text or data_text == "[DONE]":
+                            continue
+                        chunk = json.loads(data_text)
+                        usage = chunk.get("usage") or {}
+                        completion_tokens = int(usage.get("completion_tokens") or completion_tokens)
+                        delta = (chunk.get("choices") or [{}])[0].get("delta") or {}
+                        content = delta.get("content") or ""
+                        if content:
+                            now = time.perf_counter()
+                            if first_token_at is None:
+                                first_token_at = now
+                            token_times.append(now)
+                            pieces.append(content)
+            finished = time.perf_counter()
+            if first_token_at is None:
+                return {"ok": False, "error": "stream completed without content"}
+            if completion_tokens <= 0:
+                completion_tokens = len(token_times)
+            decode_seconds = max(finished - first_token_at, 1e-9)
+            intervals = [
+                (right - left) * 1000
+                for left, right in zip(token_times, token_times[1:])
+            ]
+            return {
+                "ok": True,
+                "reply": "".join(pieces),
+                "completion_tokens": completion_tokens,
+                "ttft_ms": (first_token_at - started) * 1000,
+                "e2e_latency_ms": (finished - started) * 1000,
+                "inter_token_latency_ms": statistics.mean(intervals) if intervals else 0.0,
+                "decode_tokens_per_s": completion_tokens / decode_seconds,
+                "error": "",
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:300]}
+
+    async def _run_level(
+        self,
+        config: QuantizationConfig,
+        prompts: Sequence[str],
+        concurrency: int,
+    ) -> List[Dict[str, Any]]:
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def one(index: int, prompt: str) -> Dict[str, Any]:
+            async with semaphore:
+                value = await self._call_vllm(config, prompt)
+                value.update(index=index, concurrency=concurrency, prompt=prompt)
+                return value
+
+        requests = [
+            one(index, prompt)
+            for index, prompt in enumerate(list(prompts) * self.repeats)
+        ]
+        return list(await asyncio.gather(*requests))
+
+    @staticmethod
+    def _summarize(measurements: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+        successes = [row for row in measurements if row.get("ok")]
+        failures = [row for row in measurements if not row.get("ok")]
+        e2e = [float(row["e2e_latency_ms"]) for row in successes]
+        ttft = [float(row["ttft_ms"]) for row in successes]
+        itl = [float(row["inter_token_latency_ms"]) for row in successes]
+        tps = [float(row["decode_tokens_per_s"]) for row in successes]
+        return {
+            "completed_requests": len(successes),
+            "failed_requests": len(failures),
+            "mean_ttft_ms": round(statistics.mean(ttft), 3) if ttft else 0.0,
+            "p50_ttft_ms": _percentile(ttft, 0.50),
+            "p95_ttft_ms": _percentile(ttft, 0.95),
+            "mean_inter_token_latency_ms": round(statistics.mean(itl), 3) if itl else 0.0,
+            "mean_decode_tokens_per_s": round(statistics.mean(tps), 3) if tps else 0.0,
+            "p50_latency_ms": _percentile(e2e, 0.50),
+            "p95_latency_ms": _percentile(e2e, 0.95),
+            "p99_latency_ms": _percentile(e2e, 0.99),
+        }
+
+    async def _sample_peak_vram(self, gpu_index: int, stop: asyncio.Event, samples: List[float]) -> None:
+        while not stop.is_set():
+            value = _get_vram_mb(gpu_index)
+            if value is not None:
+                samples.append(value)
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=0.1)
+            except asyncio.TimeoutError:
+                pass
+
+    async def benchmark_model(
+        self,
+        config: QuantizationConfig,
+        prompts: Optional[List[str]] = None,
+    ) -> BenchmarkResult:
         prompts = prompts or self.DEFAULT_PROMPTS
         result = BenchmarkResult(
             label=config.label,
             quantization=config.quantization,
-            timestamp=datetime.now().isoformat(),
+            mock=False,
+            startup_time_s=config.startup_time_s,
+            startup_time_measured=config.startup_time_measured,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            model_sha256=hash_tree(Path(config.model_path)) if config.model_path and Path(config.model_path).exists() else None,
+            adapter_sha256=hash_tree(Path(config.adapter_path)) if config.adapter_path and Path(config.adapter_path).exists() else None,
+            prompt_sha256=canonical_json_hash(prompts),
+            system_prompt_sha256=canonical_json_hash(config.system_prompt),
         )
+        vram_samples: List[float] = []
+        stop_sampling = asyncio.Event()
+        sampler = asyncio.create_task(
+            self._sample_peak_vram(config.gpu_index, stop_sampling, vram_samples)
+        )
+        all_measurements: List[Dict[str, Any]] = []
+        try:
+            for index in range(self.warmup_requests):
+                warmup = await self._call_vllm(config, prompts[index % len(prompts)], max_tokens=32)
+                if not warmup.get("ok"):
+                    result.error = f"warmup failed: {warmup.get('error')}"
+                    return result
+            for concurrency in self.concurrency_levels:
+                measurements = await self._run_level(config, prompts, concurrency)
+                result.concurrency_results[str(concurrency)] = self._summarize(measurements)
+                all_measurements.extend(measurements)
+        finally:
+            stop_sampling.set()
+            await sampler
+            result.vram_mb = max(vram_samples) if vram_samples else _get_vram_mb(config.gpu_index)
+        result.raw_measurements = all_measurements
+        primary = result.concurrency_results.get("1") or next(iter(result.concurrency_results.values()))
+        result.ttft_ms = primary["mean_ttft_ms"]
+        result.inter_token_latency_ms = primary["mean_inter_token_latency_ms"]
+        result.decode_tokens_per_s = primary["mean_decode_tokens_per_s"]
+        result.p50_latency_ms = primary["p50_latency_ms"]
+        result.p95_latency_ms = primary["p95_latency_ms"]
+        result.p99_latency_ms = primary["p99_latency_ms"]
+        result.completed_requests = sum(row["completed_requests"] for row in result.concurrency_results.values())
+        result.failed_requests = sum(row["failed_requests"] for row in result.concurrency_results.values())
 
-        # 测量加载时间（首请求视为含加载时间）
-        load_start = time.monotonic()
-        first = await self._call_vllm(config, prompts[0], max_tokens=32)
-        result.load_time_s = round(time.monotonic() - load_start, 2)
-
-        if not first["ok"]:
-            result.error = first["error"]
-            return result
-
-        # TTFT 近似为首请求延迟（含模型加载），后续请求测量纯推理
-        result.ttft_ms = round(first["latency_ms"], 1)
-        result.vram_mb = _get_vram_mb()
-
-        # 收集延迟样本
-        latencies: List[float] = [first["latency_ms"]]
-        replies: List[str] = [first["reply"]]
-        total_tokens = first["completion_tokens"]
-
-        for prompt in prompts[1:]:
-            r = await self._call_vllm(config, prompt, max_tokens=128)
-            if r["ok"]:
-                latencies.append(r["latency_ms"])
-                replies.append(r["reply"])
-                total_tokens += r["completion_tokens"]
-            else:
-                replies.append("")
-                logger.warning(f"请求失败 ({config.label}): {r['error']}")
-
-        # 计算延迟分位数
-        if latencies:
-            sorted_lat = sorted(latencies)
-            n = len(sorted_lat)
-            result.p50_latency_ms = round(sorted_lat[n // 2], 1)
-            result.p95_latency_ms = round(sorted_lat[int(n * 0.95)] if n > 1 else sorted_lat[0], 1)
-            result.p99_latency_ms = round(sorted_lat[min(int(n * 0.99), n - 1)] if n > 1 else sorted_lat[0], 1)
-
-            # 解码吞吐：总 token / 总推理时间（排除首请求加载时间）
-            inference_time_s = sum(latencies[1:]) / 1000 if len(latencies) > 1 else latencies[0] / 1000
-            if inference_time_s > 0 and total_tokens > 0:
-                result.decode_tokens_per_s = round(total_tokens / inference_time_s, 1)
-
-        # 质量评分：用 GenerationMetrics 计算 distinct_1 + distinct_2 均值
+        replies = [row.get("reply", "") for row in all_measurements if row.get("ok") and row.get("concurrency") == 1]
         try:
             from evaluation.generation_metrics import GenerationMetrics
-            gm = GenerationMetrics()
-            d1 = gm.distinct_n(replies, 1)
-            d2 = gm.distinct_n(replies, 2)
-            rep = sum(gm.repetition_rate(r) for r in replies) / max(len(replies), 1)
-            result.quality_metrics = {
-                "distinct_1": d1,
-                "distinct_2": d2,
-                "avg_repetition_rate": round(rep, 4),
-            }
-            # 综合质量分：多样性高 + 重复率低 => 高分
-            result.quality_score = round((d1 + d2) / 2 * (1 - rep), 4)
-        except Exception as e:
-            logger.warning(f"质量评分计算失败: {e}")
-            result.quality_metrics = {"error": str(e)}
-
+            metrics = GenerationMetrics()
+            d1 = metrics.distinct_n(replies, 1)
+            d2 = metrics.distinct_n(replies, 2)
+            repetition = sum(metrics.repetition_rate(reply) for reply in replies) / max(len(replies), 1)
+            result.quality_metrics = {"distinct_1": d1, "distinct_2": d2, "avg_repetition_rate": round(repetition, 4)}
+            result.quality_score = round((d1 + d2) / 2 * (1 - repetition), 4)
+        except Exception as exc:
+            result.quality_metrics = {"error": str(exc)}
         return result
 
     def benchmark_model_mock(self, config: QuantizationConfig) -> BenchmarkResult:
-        """Mock 模式：返回预置结果用于 CPU 验证。"""
-        # 模拟不同量化的特性：fp16 显存最高质量最好，量化后显存降但质量略降
-        base = {
-            "fp16": {"vram": 14800, "ttft": 120, "tps": 85, "quality": 0.82},
-            "bf16": {"vram": 14900, "ttft": 125, "tps": 82, "quality": 0.83},
-            "awq": {"vram": 6200, "ttft": 95, "tps": 110, "quality": 0.78},
-            "nf4": {"vram": 5100, "ttft": 110, "tps": 95, "quality": 0.75},
-            "int8": {"vram": 7800, "ttft": 105, "tps": 92, "quality": 0.76},
-        }
-        m = base.get(config.quantization, base["fp16"])
         return BenchmarkResult(
             label=config.label,
             quantization=config.quantization,
-            load_time_s=round(8.5 + hash(config.label) % 30 / 10, 1),
-            vram_mb=m["vram"],
-            ttft_ms=m["ttft"],
-            decode_tokens_per_s=m["tps"],
-            p50_latency_ms=round(m["ttft"] * 1.2, 1),
-            p95_latency_ms=round(m["ttft"] * 1.8, 1),
-            p99_latency_ms=round(m["ttft"] * 2.5, 1),
-            quality_score=m["quality"],
-            quality_metrics={
-                "distinct_1": round(m["quality"] * 0.9, 4),
-                "distinct_2": round(m["quality"] * 0.85, 4),
-                "avg_repetition_rate": round(1 - m["quality"], 4),
-                "mock": True,
-            },
-            timestamp=datetime.now().isoformat(),
+            mock=True,
+            ttft_ms=100.0,
+            inter_token_latency_ms=10.0,
+            decode_tokens_per_s=100.0,
+            p50_latency_ms=200.0,
+            p95_latency_ms=300.0,
+            p99_latency_ms=350.0,
+            quality_metrics={"mock": True},
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            model_sha256=hash_tree(Path(config.model_path)) if config.model_path and Path(config.model_path).exists() else None,
+            adapter_sha256=hash_tree(Path(config.adapter_path)) if config.adapter_path and Path(config.adapter_path).exists() else None,
+            prompt_sha256=canonical_json_hash(self.DEFAULT_PROMPTS),
+            system_prompt_sha256=canonical_json_hash(config.system_prompt),
         )
 
-    async def run_comparison(self, configs: List[QuantizationConfig],
-                             prompts: Optional[List[str]] = None,
-                             mock: bool = False) -> List[BenchmarkResult]:
-        """运行多配置对比。"""
-        results: List[BenchmarkResult] = []
-        for cfg in configs:
-            logger.info(f"基准测试: {cfg.label} ({cfg.quantization})")
-            if mock:
-                results.append(self.benchmark_model_mock(cfg))
-            else:
-                r = await self.benchmark_model(cfg, prompts)
-                results.append(r)
+    async def run_comparison(self, configs: List[QuantizationConfig], prompts: Optional[List[str]] = None, mock: bool = False) -> List[BenchmarkResult]:
+        results = []
+        for config in configs:
+            results.append(self.benchmark_model_mock(config) if mock else await self.benchmark_model(config, prompts))
         return results
 
     def build_comparison_table(self, results: List[BenchmarkResult]) -> str:
-        """生成 Markdown 对比表。"""
-        header = "| label | quant | load_s | vram_mb | ttft_ms | tokens/s | p50_ms | p95_ms | p99_ms | quality |"
-        sep = "|-------|-------|--------|---------|---------|----------|--------|--------|--------|---------|"
-        rows = [header, sep]
-        for r in results:
-            vram = f"{r.vram_mb:.0f}" if r.vram_mb is not None else "N/A"
-            rows.append(
-                f"| {r.label} | {r.quantization} | {r.load_time_s} | {vram} | "
-                f"{r.ttft_ms} | {r.decode_tokens_per_s} | {r.p50_latency_ms} | "
-                f"{r.p95_latency_ms} | {r.p99_latency_ms} | {r.quality_score} |"
+        lines = [
+            "| label | quant | startup_s | measured | vram_mb | ttft_ms | itl_ms | tokens/s | p95_ms | failures | quality |",
+            "|---|---|---:|:---:|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+        for row in results:
+            lines.append(
+                f"| {row.label} | {row.quantization} | {row.startup_time_s or 'N/A'} | {row.startup_time_measured} | "
+                f"{row.vram_mb or 'N/A'} | {row.ttft_ms} | {row.inter_token_latency_ms} | {row.decode_tokens_per_s} | "
+                f"{row.p95_latency_ms} | {row.failed_requests} | {row.quality_score} |"
             )
-        return "\n".join(rows)
+        return "\n".join(lines)
 
-    def save_report(self, results: List[BenchmarkResult], output_dir: Path,
-                    environment: Optional[Dict[str, str]] = None) -> Path:
-        """保存 JSON + Markdown 报告。"""
-        output_dir = Path(output_dir)
+    def save_report(self, results: List[BenchmarkResult], output_dir: Path, environment: Optional[Dict[str, str]] = None) -> Path:
         output_dir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        # 环境信息（遵循 guardrail：记录 model/vLLM/CUDA/driver）
-        env_info = {
-            "timestamp": ts,
-            "vllm_version": os.getenv("VLLM_VERSION", "unknown"),
-            "cuda_version": os.getenv("CUDA_VERSION", "unknown"),
-            "driver_version": os.getenv("NVIDIA_DRIVER", "unknown"),
-            "python_version": sys.version.split()[0],
-            **(environment or {}),
-        }
-
-        # JSON 报告
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         report = {
-            "experiment_type": "quantization_benchmark",
-            "environment": env_info,
-            "results": [r.to_dict() for r in results],
+            "schema_version": 2,
+            "experiment_type": "inference_benchmark",
+            "mock": any(row.mock for row in results),
+            "formal": bool(results) and not any(row.mock for row in results),
+            "environment": {**environment_snapshot(_PROJECT_ROOT), **(environment or {})},
+            "results": [row.to_dict() for row in results],
             "comparison_table": self.build_comparison_table(results),
         }
-        json_path = output_dir / f"quantization_benchmark_{ts}.json"
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2, ensure_ascii=False)
-
-        # Markdown 报告
-        md_path = output_dir / f"quantization_benchmark_{ts}.md"
-        with open(md_path, "w", encoding="utf-8") as f:
-            f.write(f"# 量化基准实验报告\n\n")
-            f.write(f"**时间**: {ts}\n\n")
-            f.write(f"## 环境\n\n")
-            for k, v in env_info.items():
-                f.write(f"- **{k}**: {v}\n")
-            f.write(f"\n## 对比结果\n\n")
-            f.write(self.build_comparison_table(results))
-            f.write("\n\n## 结论\n\n")
-            f.write(self._generate_conclusion(results))
-        logger.info(f"报告已保存: {json_path}, {md_path}")
-        return json_path
-
-    def _generate_conclusion(self, results: List[BenchmarkResult]) -> str:
-        """生成条件性结论（遵循 guardrail：不宣称普遍最优）。"""
-        if not results:
-            return "无结果。"
-        best_quality = max(results, key=lambda r: r.quality_score)
-        lowest_vram = min(results, key=lambda r: r.vram_mb or 99999)
-        fastest = max(results, key=lambda r: r.decode_tokens_per_s)
-        return (
-            f"- 质量最高: **{best_quality.label}** (quality={best_quality.quality_score})\n"
-            f"- 显存最低: **{lowest_vram.label}** (vram={lowest_vram.vram_mb}MB)\n"
-            f"- 吞吐最高: **{fastest.label}** (tokens/s={fastest.decode_tokens_per_s})\n\n"
-            f"结论是条件性的：需根据目标并发和 VRAM 预算选择量化方案，"
-            f"而非宣称某一方案普遍最优。"
-        )
+        path = output_dir / f"inference_benchmark_{timestamp}.json"
+        path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return path
 
 
-def main():
-    parser = argparse.ArgumentParser(description="量化基准实验")
-    parser.add_argument("--mock", action="store_true", help="Mock 模式（CPU 验证）")
-    parser.add_argument("--output-dir", type=str, default="deploy/results", help="报告输出目录")
-    parser.add_argument("--vllm-url", type=str, default="http://localhost:8001", help="vLLM 服务地址")
-    parser.add_argument("--model-path", type=str, default="", help="模型路径")
-    parser.add_argument("--served-model-name", type=str, default="qwen3-8b-instruct-awq",
-                        help="vLLM 注册的模型名（用于 API model 字段）")
-    parser.add_argument("--labels", type=str, default="",
-                        help="逗号分隔的配置标签，如 awq。留空运行全部")
-    parser.add_argument("--prompts-file", type=str, default="", help="自定义 prompt 集 JSON 文件")
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mock", action="store_true")
+    parser.add_argument("--output-dir", type=Path, default=Path("deploy/results"))
+    parser.add_argument("--vllm-url", default="http://localhost:8001")
+    parser.add_argument("--model-path", default="")
+    parser.add_argument("--served-model-name", default="qwen3-8b-instruct")
+    parser.add_argument("--label", default="bf16")
+    parser.add_argument("--quantization", default="bf16")
+    parser.add_argument("--prompts-file", type=Path)
+    parser.add_argument("--startup-time-s", type=float)
+    parser.add_argument("--gpu-index", type=int, default=0)
+    parser.add_argument("--system-prompt-file", type=Path)
+    parser.add_argument("--adapter-path", default="")
     args = parser.parse_args()
-
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
-    prompts = QuantizationBenchmark.DEFAULT_PROMPTS
-    if args.prompts_file:
-        with open(args.prompts_file, "r", encoding="utf-8") as f:
-            prompts = json.load(f)
-
+    prompt_payload = json.loads(args.prompts_file.read_text(encoding="utf-8")) if args.prompts_file else None
+    prompts = prompt_payload.get("prompts") if isinstance(prompt_payload, dict) else prompt_payload
+    config = QuantizationConfig(
+        label=args.label,
+        model_path=args.model_path,
+        quantization=args.quantization,
+        vllm_url=args.vllm_url,
+        served_model_name=args.served_model_name,
+        startup_time_s=args.startup_time_s,
+        startup_time_measured=args.startup_time_s is not None,
+        gpu_index=args.gpu_index,
+        system_prompt=args.system_prompt_file.read_text(encoding="utf-8").strip() if args.system_prompt_file else "",
+        adapter_path=args.adapter_path,
+    )
     benchmark = QuantizationBenchmark(vllm_url=args.vllm_url)
-
-    configs = [
-        QuantizationConfig(label="fp16", model_path=args.model_path, quantization="fp16",
-                           vllm_url=args.vllm_url, served_model_name=args.served_model_name),
-        QuantizationConfig(label="awq", model_path=args.model_path, quantization="awq",
-                           vllm_url=args.vllm_url, served_model_name=args.served_model_name),
-        QuantizationConfig(label="nf4", model_path=args.model_path, quantization="nf4",
-                           vllm_url=args.vllm_url, served_model_name=args.served_model_name),
-        QuantizationConfig(label="int8", model_path=args.model_path, quantization="int8",
-                           vllm_url=args.vllm_url, served_model_name=args.served_model_name),
-    ]
-
-    if args.labels:
-        selected = {l.strip() for l in args.labels.split(",") if l.strip()}
-        configs = [c for c in configs if c.label in selected]
-        logger.info(f"仅测试配置: {[c.label for c in configs]}")
-
-    if args.mock:
-        results = [benchmark.benchmark_model_mock(cfg) for cfg in configs]
-    else:
-        results = asyncio.run(benchmark.run_comparison(configs, prompts, mock=False))
-
-    print("\n" + "=" * 70)
-    print("  量化基准对比结果")
-    print("=" * 70)
-    print(benchmark.build_comparison_table(results))
-
-    output_dir = Path(args.output_dir)
-    report_path = benchmark.save_report(results, output_dir)
-    print(f"\n报告已保存: {report_path}")
+    result = benchmark.benchmark_model_mock(config) if args.mock else asyncio.run(benchmark.benchmark_model(config, prompts))
+    path = benchmark.save_report([result], args.output_dir)
+    print(path)
+    return 0 if not result.error else 2
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

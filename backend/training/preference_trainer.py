@@ -136,12 +136,17 @@ class PreferenceTrainer:
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token
 
+            # Quantized parameters must be prepared before loading a trainable adapter.
+            if self.config.load_in_4bit:
+                model = prepare_model_for_kbit_training(model)
+
             # 加载 SFT adapter 作为起点（若指定）
             if self.config.adapter_path and Path(self.config.adapter_path).exists():
                 logger.info(f"加载 SFT adapter: {self.config.adapter_path}")
-                model = PeftModel.from_pretrained(model, self.config.adapter_path)
+                model = PeftModel.from_pretrained(
+                    model, self.config.adapter_path, is_trainable=True
+                )
             elif self.config.load_in_4bit:
-                model = prepare_model_for_kbit_training(model)
                 lora_config = LoraConfig(
                     r=self.config.lora_r,
                     lora_alpha=self.config.lora_alpha,
@@ -283,6 +288,7 @@ def main():
     parser.add_argument("--output-dir", type=str, default="loras/preference_dpo", help="输出目录")
     parser.add_argument("--epochs", type=int, default=1, help="训练轮数")
     parser.add_argument("--beta", type=float, default=0.1, help="DPO/ORPO beta")
+    parser.add_argument("--learning-rate", type=float, default=5e-7)
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -317,6 +323,7 @@ def main():
         output_dir=args.output_dir,
         num_train_epochs=args.epochs,
         beta=args.beta,
+        learning_rate=args.learning_rate,
     )
     config.save(Path(args.output_dir) / "preference_config.json")
 

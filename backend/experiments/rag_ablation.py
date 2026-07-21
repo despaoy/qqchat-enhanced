@@ -1,52 +1,74 @@
-"""RAG 消融实验 - 对比 vector-only / BM25-only / hybrid / hybrid+reranker 四变体。
-
-遵循路线图 guardrail：
-- 控制变量：同一数据集、同一 k 值、同一检索评估指标
-- 无需 GPU，直接在 CPU 运行
-- 支持 --mock 模式用于无向量库时的 CPU 验证
-"""
+"""R2 retrieval ablation with per-query provenance and no formal mock results."""
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
+import statistics
 import sys
 import time
-from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Callable
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = _BACKEND_DIR.parent
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
 
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _percentile(values: List[float], percentile: float) -> float:
+    if not values:
+        return 0.0
+    values = sorted(float(value) for value in values)
+    rank = (len(values) - 1) * percentile
+    lower = int(rank)
+    upper = min(lower + 1, len(values) - 1)
+    interpolated = values[lower] + (values[upper] - values[lower]) * (rank - lower)
+    return round(interpolated, 3)
+
+
 @dataclass
 class RAGAblationResult:
-    """单变体消融结果。"""
     variant_name: str
+    mock: bool = False
+    recall_at_1: float = 0.0
     recall_at_5: float = 0.0
     mrr: float = 0.0
     ndcg_at_5: float = 0.0
+    p50_latency_ms: float = 0.0
+    p95_latency_ms: float = 0.0
     avg_latency_ms: float = 0.0
+    answerable_count: int = 0
+    unanswerable_count: int = 0
+    failed_queries: int = 0
+    per_question: List[Dict[str, Any]] = field(default_factory=list)
     error: str = ""
-    per_question_count: int = 0
 
 
 class RAGAblation:
-    """RAG 检索消融实验运行器。"""
-
     DEFAULT_VARIANTS = ["vector_only", "bm25_only", "hybrid", "hybrid_reranker"]
 
-    def __init__(self, dataset_path: str = "", k: int = 5):
-        self.dataset_path = dataset_path or str(
-            _BACKEND_DIR / "evaluation" / "retrieval_eval_dataset.json"
-        )
+    def __init__(self, dataset_path: str = "", k: int = 5, *, formal: bool = False):
+        default = _BACKEND_DIR / "data" / "character_dialogues" / "experiments" / "research" / "kisaki_rag_eval_v2_candidates.json"
+        self.dataset_path = Path(dataset_path) if dataset_path else default
         self.k = k
+        self.formal = formal
         self._vector_db = None
         self._rag_helper = None
+
+    def _dataset(self) -> Dict[str, Any]:
+        dataset = json.loads(self.dataset_path.read_text(encoding="utf-8"))
+        if self.formal and (dataset.get("status") != "frozen" or not dataset.get("formal_use_allowed")):
+            raise ValueError("formal R2 evaluation requires a reviewed and frozen dataset")
+        return dataset
 
     def _get_vector_db(self):
         if self._vector_db is None:
@@ -60,191 +82,151 @@ class RAGAblation:
             self._rag_helper = get_rag_helper()
         return self._rag_helper
 
-    def variant_vector_only(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        """纯向量检索变体。"""
-        vdb = self._get_vector_db()
-        return vdb.search(query, top_k=top_k, threshold=0.0)
+    def variant_vector_only(self, query: str, top_k: int) -> List[Dict[str, Any]]:
+        return self._get_vector_db().search(query, top_k=top_k, threshold=0.0)
 
-    def variant_bm25_only(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        """纯 BM25 检索变体。"""
-        vdb = self._get_vector_db()
-        results = vdb.bm25.search(query, top_k=top_k, threshold=0.0)
-        # BM25 返回 (index, score) 元组，转换为 dict 列表
+    def variant_bm25_only(self, query: str, top_k: int) -> List[Dict[str, Any]]:
+        database = self._get_vector_db()
         return [
-            {**vdb.metadata[idx], "score": score, "id": vdb.metadata[idx].get("id", str(idx))}
-            for idx, score in results
-            if 0 <= idx < len(vdb.metadata)
+            {**database.metadata[index], "score": score}
+            for index, score in database.bm25.search(query, top_k=top_k, threshold=0.0)
+            if 0 <= index < len(database.metadata)
         ]
 
-    def variant_hybrid(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        """混合检索变体（向量 + BM25 融合）。"""
-        vdb = self._get_vector_db()
-        return vdb.hybrid_search(query, top_k=top_k, threshold=0.0, keyword_weight=0.3)
+    def variant_hybrid(self, query: str, top_k: int) -> List[Dict[str, Any]]:
+        return self._get_vector_db().hybrid_search(query, top_k=top_k, threshold=0.0, keyword_weight=0.3)
 
-    def variant_hybrid_reranker(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        """混合 + 重排器变体。"""
+    def variant_hybrid_reranker(self, query: str, top_k: int) -> List[Dict[str, Any]]:
         helper = self._get_rag_helper()
-        return helper.retrieve_context(query, top_k=top_k, enable_rerank=True, use_cache=False)
+        if self.formal and (not helper.enable_reranking or helper.reranker is None):
+            raise RuntimeError("formal hybrid+reranker requires an available Cross-Encoder")
+        rows = helper.retrieve_context(
+            query, top_k=top_k, enable_rerank=True, use_cache=False
+        )
+        if self.formal and len(rows) > 1 and not any("rerank_score" in row for row in rows):
+            raise RuntimeError("Cross-Encoder did not produce rerank scores")
+        return rows
 
-    def _get_variant_fn(self, variant_name: str) -> Callable[[str, int], List[Dict[str, Any]]]:
-        """获取变体检索函数。"""
-        fns = {
+    def _variant(self, name: str) -> Callable[[str, int], List[Dict[str, Any]]]:
+        variants = {
             "vector_only": self.variant_vector_only,
             "bm25_only": self.variant_bm25_only,
             "hybrid": self.variant_hybrid,
             "hybrid_reranker": self.variant_hybrid_reranker,
         }
-        if variant_name not in fns:
-            raise ValueError(f"未知变体: {variant_name}，可选: {list(fns.keys())}")
-        return fns[variant_name]
+        if name not in variants:
+            raise ValueError(f"unknown R2 variant: {name}")
+        return variants[name]
 
     def run_variant(self, variant_name: str) -> RAGAblationResult:
-        """运行单个变体并计算指标。"""
         from evaluation.retrieval_metrics import RetrievalMetrics
+
+        dataset = self._dataset()
+        retrieve = self._variant(variant_name)
         metrics = RetrievalMetrics()
-        variant_fn = self._get_variant_fn(variant_name)
         result = RAGAblationResult(variant_name=variant_name)
-
-        try:
-            with open(self.dataset_path, "r", encoding="utf-8") as f:
-                dataset = json.load(f)
-            questions = dataset.get("questions", [])
-
-            latencies: List[float] = []
-            recall_sum = 0.0
-            mrr_sum = 0.0
-            ndcg_sum = 0.0
-            count = 0
-
-            for q in questions:
-                query = q.get("question", "")
-                expected_ids = q.get("expected_doc_ids", [])
-                start = time.monotonic()
-                try:
-                    retrieved = variant_fn(query, self.k)
-                except Exception as e:
-                    logger.warning(f"变体 {variant_name} 检索失败 ({q.get('id')}): {e}")
-                    retrieved = []
-                latencies.append((time.monotonic() - start) * 1000)
-
-                retrieved_ids = [str(r.get("id", r.get("chunk_id", ""))) for r in retrieved]
-                recall_sum += metrics.recall_at_k(retrieved_ids, expected_ids, self.k)
-                mrr_sum += metrics.mrr(retrieved_ids, expected_ids)
-                ndcg_sum += metrics.ndcg(retrieved_ids, expected_ids, self.k)
-                count += 1
-
-            result.recall_at_5 = round(recall_sum / max(count, 1), 4)
-            result.mrr = round(mrr_sum / max(count, 1), 4)
-            result.ndcg_at_5 = round(ndcg_sum / max(count, 1), 4)
-            result.avg_latency_ms = round(sum(latencies) / max(len(latencies), 1), 2)
-            result.per_question_count = count
-
-        except Exception as e:
-            result.error = str(e)
-            logger.error(f"变体 {variant_name} 运行失败: {e}")
-
+        recalls_1: List[float] = []
+        recalls_5: List[float] = []
+        mrr_values: List[float] = []
+        ndcg_values: List[float] = []
+        latencies: List[float] = []
+        for question in dataset.get("questions", []):
+            expected = list(question.get("expected_doc_ids", []))
+            started = time.perf_counter()
+            error = ""
+            try:
+                retrieved = retrieve(str(question.get("question", "")), self.k)
+            except Exception as exc:
+                retrieved = []
+                error = str(exc)[:300]
+                result.failed_queries += 1
+            latency = (time.perf_counter() - started) * 1000
+            latencies.append(latency)
+            retrieved_ids = [str(row.get("id", row.get("chunk_id", ""))) for row in retrieved]
+            if expected:
+                result.answerable_count += 1
+                r1 = metrics.recall_at_k(retrieved_ids, expected, 1)
+                r5 = metrics.recall_at_k(retrieved_ids, expected, self.k)
+                mrr = metrics.mrr(retrieved_ids, expected)
+                ndcg = metrics.ndcg(retrieved_ids, expected, self.k)
+                recalls_1.append(r1); recalls_5.append(r5); mrr_values.append(mrr); ndcg_values.append(ndcg)
+            else:
+                result.unanswerable_count += 1
+                r1 = r5 = mrr = ndcg = None
+            result.per_question.append({
+                "id": question.get("id"),
+                "question_type": question.get("question_type"),
+                "expected_doc_ids": expected,
+                "retrieved_doc_ids": retrieved_ids,
+                "recall_at_1": r1,
+                "recall_at_5": r5,
+                "mrr": mrr,
+                "ndcg_at_5": ndcg,
+                "latency_ms": round(latency, 3),
+                "error": error,
+            })
+        result.recall_at_1 = round(statistics.mean(recalls_1), 4) if recalls_1 else 0.0
+        result.recall_at_5 = round(statistics.mean(recalls_5), 4) if recalls_5 else 0.0
+        result.mrr = round(statistics.mean(mrr_values), 4) if mrr_values else 0.0
+        result.ndcg_at_5 = round(statistics.mean(ndcg_values), 4) if ndcg_values else 0.0
+        result.avg_latency_ms = round(statistics.mean(latencies), 3) if latencies else 0.0
+        result.p50_latency_ms = _percentile(latencies, 0.50)
+        result.p95_latency_ms = _percentile(latencies, 0.95)
+        if self.formal and result.failed_queries:
+            result.error = f"{result.failed_queries} formal retrieval queries failed"
         return result
 
     def run_all(self, variants: Optional[List[str]] = None) -> List[RAGAblationResult]:
-        """运行所有变体。"""
-        variants = variants or self.DEFAULT_VARIANTS
-        results: List[RAGAblationResult] = []
-        for v in variants:
-            logger.info(f"运行 RAG 消融变体: {v}")
-            results.append(self.run_variant(v))
-        return results
+        return [self.run_variant(name) for name in (variants or self.DEFAULT_VARIANTS)]
 
     def run_all_mock(self) -> List[RAGAblationResult]:
-        """Mock 模式：返回预置结果用于 CPU 验证。"""
-        mock_data = {
-            "vector_only": {"recall": 0.62, "mrr": 0.48, "ndcg": 0.55, "latency": 35},
-            "bm25_only": {"recall": 0.58, "mrr": 0.45, "ndcg": 0.52, "latency": 8},
-            "hybrid": {"recall": 0.72, "mrr": 0.58, "ndcg": 0.65, "latency": 42},
-            "hybrid_reranker": {"recall": 0.78, "mrr": 0.65, "ndcg": 0.71, "latency": 120},
-        }
-        results: List[RAGAblationResult] = []
-        for name, m in mock_data.items():
-            results.append(RAGAblationResult(
-                variant_name=name,
-                recall_at_5=m["recall"],
-                mrr=m["mrr"],
-                ndcg_at_5=m["ndcg"],
-                avg_latency_ms=m["latency"],
-                per_question_count=50,
-            ))
-        return results
+        return [RAGAblationResult(variant_name=name, mock=True) for name in self.DEFAULT_VARIANTS]
 
-    def build_comparison_table(self, results: List[RAGAblationResult]) -> str:
-        """生成 Markdown 对比表。"""
-        header = "| variant | recall@5 | mrr | ndcg@5 | avg_latency_ms |"
-        sep = "|---------|----------|-----|--------|----------------|"
-        rows = [header, sep]
-        for r in results:
-            rows.append(f"| {r.variant_name} | {r.recall_at_5} | {r.mrr} | {r.ndcg_at_5} | {r.avg_latency_ms} |")
-        return "\n".join(rows)
+    def build_comparison_table(self, results: List[RAGAblationResult]) -> List[Dict[str, Any]]:
+        return [{
+            "variant": row.variant_name,
+            "mock": row.mock,
+            "recall_at_1": row.recall_at_1,
+            "recall_at_5": row.recall_at_5,
+            "mrr": row.mrr,
+            "ndcg_at_5": row.ndcg_at_5,
+            "p50_latency_ms": row.p50_latency_ms,
+            "p95_latency_ms": row.p95_latency_ms,
+            "failed_queries": row.failed_queries,
+        } for row in results]
 
     def save_report(self, results: List[RAGAblationResult], output_dir: Path) -> Path:
-        """保存 JSON + Markdown 报告。"""
-        output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        report = {
-            "experiment_type": "rag_ablation",
-            "timestamp": ts,
+        dataset = self._dataset()
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        payload = {
+            "schema_version": 2,
+            "experiment_type": "r2_retrieval_ablation",
+            "mock": any(row.mock for row in results),
+            "formal": self.formal and not any(row.mock for row in results),
+            "dataset": {"path": str(self.dataset_path), "sha256": _sha256(self.dataset_path), "status": dataset.get("status")},
             "k": self.k,
-            "dataset": self.dataset_path,
-            "results": [asdict(r) for r in results],
+            "results": [asdict(row) for row in results],
             "comparison_table": self.build_comparison_table(results),
         }
-        json_path = output_dir / f"rag_ablation_{ts}.json"
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2, ensure_ascii=False)
-
-        md_path = output_dir / f"rag_ablation_{ts}.md"
-        with open(md_path, "w", encoding="utf-8") as f:
-            f.write("# RAG 消融实验报告\n\n")
-            f.write(f"**时间**: {ts}\n")
-            f.write(f"**数据集**: {self.dataset_path}\n")
-            f.write(f"**k值**: {self.k}\n\n")
-            f.write("## 对比结果\n\n")
-            f.write(self.build_comparison_table(results))
-            f.write("\n\n## 结论\n\n")
-            best_recall = max(results, key=lambda r: r.recall_at_5)
-            fastest = min(results, key=lambda r: r.avg_latency_ms)
-            f.write(f"- 召回最高: **{best_recall.variant_name}** (recall@5={best_recall.recall_at_5})\n")
-            f.write(f"- 延迟最低: **{fastest.variant_name}** ({fastest.avg_latency_ms}ms)\n")
-
-        logger.info(f"报告已保存: {json_path}, {md_path}")
-        return json_path
+        path = output_dir / f"r2_retrieval_ablation_{timestamp}.json"
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return path
 
 
-def main():
-    parser = argparse.ArgumentParser(description="RAG 消融实验")
-    parser.add_argument("--mock", action="store_true", help="Mock 模式（CPU 验证）")
-    parser.add_argument("--dataset", type=str, default="", help="检索评估数据集路径")
-    parser.add_argument("--output-dir", type=str, default="deploy/results", help="报告输出目录")
-    parser.add_argument("--k", type=int, default=5, help="recall@k / nDCG@k 的 k 值")
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mock", action="store_true")
+    parser.add_argument("--formal", action="store_true")
+    parser.add_argument("--dataset", default="")
+    parser.add_argument("--output-dir", type=Path, default=Path("deploy/results"))
+    parser.add_argument("--k", type=int, default=5)
     args = parser.parse_args()
-
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
-    ablation = RAGAblation(dataset_path=args.dataset, k=args.k)
-
-    if args.mock:
-        results = ablation.run_all_mock()
-    else:
-        results = ablation.run_all()
-
-    print("\n" + "=" * 60)
-    print("  RAG 消融对比结果")
-    print("=" * 60)
-    print(ablation.build_comparison_table(results))
-
-    output_dir = Path(args.output_dir)
-    report_path = ablation.save_report(results, output_dir)
-    print(f"\n报告已保存: {report_path}")
+    runner = RAGAblation(args.dataset, args.k, formal=args.formal)
+    results = runner.run_all_mock() if args.mock else runner.run_all()
+    print(runner.save_report(results, args.output_dir))
+    return 0 if all(not row.error for row in results) else 2
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

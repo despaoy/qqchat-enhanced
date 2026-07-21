@@ -11,6 +11,7 @@ from evaluation.experiment_contracts import (
     sha256_file,
     validate_e1_e2_pair,
     validate_frozen_gold,
+    validate_r1_variant_set,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -27,6 +28,24 @@ def test_canonical_e1_e2_have_only_neftune_training_difference():
     assert validate_e1_e2_pair(e1, e2) == []
     assert compare_experiment_configs(e1, e2) == {"neftune_noise_alpha": (0.0, 5.0)}
 
+
+
+
+def test_r1_e1_to_e5_are_strict_single_variable_ablations():
+    configs = {
+        name: _load(EXPERIMENT_DIR / "configs" / f"kisaki_{name}_canonical.json")
+        for name in ("e1", "e2", "e3", "e4", "e5")
+    }
+    assert validate_r1_variant_set(configs) == []
+    assert compare_experiment_configs(configs["e1"], configs["e3"]) == {
+        "use_dora": (False, True)
+    }
+    assert compare_experiment_configs(configs["e1"], configs["e4"]) == {
+        "use_rslora": (False, True)
+    }
+    assert compare_experiment_configs(configs["e1"], configs["e5"]) == {
+        "packing": (False, True)
+    }
 
 def test_canonical_dataset_manifest_matches_files_and_has_no_split_overlap():
     manifest = _load(EXPERIMENT_DIR / "canonical_dataset_manifest.json")

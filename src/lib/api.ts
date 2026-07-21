@@ -1427,6 +1427,8 @@ export interface ExperimentStartResponse {
 export interface RouterConfigRecord {
   enabled: boolean;
   default_adapter: string;
+  mode: 'manual' | 'rule' | 'intent';
+  persona_adapters: Record<string, string>;
   rag_confidence_threshold: number;
   persona_keywords: Record<string, string[]>;
 }
@@ -1451,6 +1453,7 @@ export interface RoutingLogRecord {
   confidence: number;
   reason: string;
   fallback: boolean;
+  requires_rag: boolean;
 }
 
 export type PreferenceReviewStatus = 'pending' | 'approved' | 'rejected';

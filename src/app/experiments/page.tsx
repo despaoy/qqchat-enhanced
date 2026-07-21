@@ -41,7 +41,7 @@ export default function ExperimentsPage() {
 function ExperimentsContent() {
   const { experiments, loading, error, starting, refetch, startExperiment, getReport } = useExperiments();
   const [activeTab, setActiveTab] = useState<string>('lora-ablation');
-  const [mockMode, setMockMode] = useState(true);
+  const [mockMode, setMockMode] = useState(false);
   const [hypothesis, setHypothesis] = useState('');
   const [startDialogOpen, setStartDialogOpen] = useState(false);
   const [detailExperiment, setDetailExperiment] = useState<Experiment | null>(null);
@@ -191,7 +191,14 @@ function ExperimentsContent() {
                       <TableBody>
                         {filteredExperiments.map((exp) => (
                           <TableRow key={exp.id}>
-                            <TableCell className="font-mono text-xs">{exp.id}</TableCell>
+                            <TableCell className="font-mono text-xs">
+                              <div className="flex items-center gap-2">
+                                <span>{exp.id}</span>
+                                {!Array.isArray(exp.results) && exp.results?.mock === true && (
+                                  <Badge variant="destructive">演示数据</Badge>
+                                )}
+                              </div>
+                            </TableCell>
                             <TableCell>
                               <Badge className={statusColors[exp.status] || 'bg-gray-100 text-gray-800'}>
                                 {exp.status}

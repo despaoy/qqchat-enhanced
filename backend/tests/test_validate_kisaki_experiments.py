@@ -21,5 +21,5 @@ def test_custom_registry_output_does_not_modify_tracked_registry(tmp_path, monke
     assert validator.main() == 0
     assert validator.REGISTRY_PATH.read_bytes() == tracked_before
     registry = json.loads(output.read_text(encoding="utf-8"))
-    assert registry["schema_version"] == 2
-    assert registry["series_id"] == "KISAKI-CANONICAL-E1-E2"
+    assert registry["schema_version"] == 3
+    assert registry["series_id"] == "KISAKI-R1-CONTROLLED-PEFT"

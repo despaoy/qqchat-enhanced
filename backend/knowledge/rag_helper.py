@@ -399,6 +399,7 @@ class RAGHelper:
         for r in results:
             content = r.get("content", "")
             citations.append({
+                "source_id": str(r.get("id", r.get("chunk_id", ""))),
                 "source_title": r.get("title", r.get("original_title", "未知来源")),
                 "evidence_excerpt": content[:200] + ("..." if len(content) > 200 else ""),
                 "score": round(r.get("normalized_score", r.get("score", 0)), 4),

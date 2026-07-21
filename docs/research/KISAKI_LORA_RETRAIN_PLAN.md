@@ -1,3 +1,5 @@
+> 历史规划文档：其中旧 E1/E2/E2'/E2'' 编号与数据已废弃，不得据此启动正式实验。当前唯一方案见 [月社妃 LLM 研究主线 v3](KISAKI_LLM_RESEARCH_PROGRAM_V3.md)。
+
 # 月社妃 LoRA 重新训练科研路径（Qwen3-8B 基座）
 
 > 执行状态：E1、E2、E2'、E2'' 已完成；后续优先人工复核、无泄漏 Gold Set、DoRA/RSLoRA 消融和盲评。

@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import time
+import uuid
 import logging
 from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, Depends
@@ -170,6 +171,7 @@ def _response_cache_keys(request: MessageRequest, lora_name: str) -> tuple[str, 
 async def generate_reply_core(request: MessageRequest, current_user: dict | None = None):
     """测试生成回复 - 优先使用vLLM，回退到模型管理器"""
     request.message = strip_control_chars(request.message or "").strip()
+    request.traceId = request.traceId or uuid.uuid4().hex
     if _is_high_risk_prompt(request.message):
         return _security_policy_response()
 
@@ -189,13 +191,38 @@ async def generate_reply_core(request: MessageRequest, current_user: dict | None
     active_lora = next((l for l in db.loras if l["status"] == "active"), None)
     selected_lora = active_lora
 
+    if not request.loraName:
+        try:
+            rows = db.execute_sql("SELECT value FROM config WHERE key='lora_router_config'")
+            router_config = json.loads(rows[0]["value"]) if rows else {"enabled": False}
+            if router_config.get("enabled"):
+                from inference.lora_router import RouteTarget, get_lora_router
+
+                lora_router = get_lora_router(router_config)
+                decision = lora_router.route(request.message)
+                lora_router.log_routing(decision, request.traceId)
+                if decision.target == RouteTarget.PERSONA_ADAPTER.value:
+                    routed = next(
+                        (item for item in db.loras if item["name"] == decision.adapter_name),
+                        None,
+                    )
+                    if routed is not None:
+                        selected_lora = routed
+                    else:
+                        logger.warning(
+                            "LoRA route fallback: adapter is not registered adapter=%s traceId=%s",
+                            decision.adapter_name,
+                            request.traceId,
+                        )
+        except Exception:
+            logger.warning("LoRA routing failed; using explicit/active adapter traceId=%s", request.traceId, exc_info=True)
     if request.loraName:
         selected_lora = next((item for item in db.loras if item["name"] == request.loraName), None)
         if selected_lora is None:
             raise HTTPException(status_code=422, detail="Specified LoRA does not exist")
         lora_name = selected_lora["name"]
     else:
-        lora_name = active_lora["name"] if active_lora else "default"
+        lora_name = selected_lora["name"] if selected_lora else "default"
 
     vllm_lora_name = resolve_lora_served_name(lora_name) if lora_name != "default" else "default"
 

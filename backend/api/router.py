@@ -17,6 +17,26 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _normalize_config(config: dict) -> dict:
+    """Merge newly supported personas without overwriting administrator choices."""
+    from inference.lora_router import DEFAULT_PERSONA_ADAPTERS, DEFAULT_PERSONA_KEYWORDS
+
+    normalized = dict(config)
+    normalized.setdefault("enabled", False)
+    normalized.setdefault("default_adapter", "default")
+    normalized.setdefault("mode", "manual")
+    normalized.setdefault("rag_confidence_threshold", 0.3)
+    adapters = dict(normalized.get("persona_adapters") or {})
+    keywords = dict(normalized.get("persona_keywords") or {})
+    for persona, adapter in DEFAULT_PERSONA_ADAPTERS.items():
+        adapters.setdefault(persona, adapter)
+    for persona, values in DEFAULT_PERSONA_KEYWORDS.items():
+        keywords.setdefault(persona, list(values))
+    normalized["persona_adapters"] = adapters
+    normalized["persona_keywords"] = keywords
+    return normalized
+
+
 @router.get("/api/router/config")
 async def get_router_config(current_user: dict = Depends(get_current_user)):
     """获取路由配置"""
@@ -28,6 +48,8 @@ async def get_router_config(current_user: dict = Depends(get_current_user)):
             config = {
                 "enabled": False,
                 "default_adapter": "default",
+                "mode": "manual",
+                "persona_adapters": {"kisaki": "kisaki", "minamo": "minamo", "hutao": "hutao"},
                 "rag_confidence_threshold": 0.3,
                 "persona_keywords": {
                     "hutao": ["胡桃", "往生堂", "堂主"],
@@ -35,6 +57,7 @@ async def get_router_config(current_user: dict = Depends(get_current_user)):
                     "qiqi": ["七七", "不卜庐"],
                 },
             }
+        config = _normalize_config(config)
         return {"success": True, "config": config}
     except Exception as e:
         logger.error(f"获取路由配置失败: {e}")
@@ -50,20 +73,28 @@ async def update_router_config(req: RouterConfigUpdate,
         if rows:
             config = json.loads(rows[0]["value"])
         else:
-            config = {"enabled": False, "default_adapter": "default", "rag_confidence_threshold": 0.3, "persona_keywords": {}}
+            config = {"enabled": False, "default_adapter": "default", "mode": "manual", "persona_adapters": {}, "rag_confidence_threshold": 0.3, "persona_keywords": {}}
         if req.enabled is not None:
             config["enabled"] = req.enabled
         if req.default_adapter is not None:
             config["default_adapter"] = req.default_adapter
+        if req.mode is not None:
+            config["mode"] = req.mode
+        if req.persona_adapters is not None:
+            config["persona_adapters"] = req.persona_adapters
         if req.rag_confidence_threshold is not None:
             config["rag_confidence_threshold"] = req.rag_confidence_threshold
         if req.persona_keywords is not None:
             config["persona_keywords"] = req.persona_keywords
+        config = _normalize_config(config)
+        serialized = json.dumps(config, ensure_ascii=False)
         db.execute_sql(
             "INSERT INTO config (key, value) VALUES ('lora_router_config', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=?",
-            (json.dumps(config, ensure_ascii=False), json.dumps(config, ensure_ascii=False)),
+            (serialized, serialized),
         )
+        from inference.lora_router import get_lora_router
+        get_lora_router(config)
         return {"success": True, "config": config}
     except Exception as e:
         logger.error(f"更新路由配置失败: {e}")

@@ -146,13 +146,15 @@ async def start_lora_ablation(req: ExperimentStartRequest,
         )
         return {"success": True, "experiment_id": exp_id, "status": "completed", "mock": True, "results": mock_results}
 
-    _track_background(_run_lora_ablation(exp_id, req.config_overrides))
-    return {
-        "success": True,
-        "experiment_id": exp_id,
-        "status": "running",
-        "mock": False,
-    }
+    error = (
+        "Formal R1 training is protected by the reproducibility and GPU lock gates. "
+        "Run scripts/lab-queue-kisaki-r1-extension.sh on the experiment server."
+    )
+    db.execute_sql(
+        "UPDATE experiment_runs SET status='failed', completed_at=?, results=? WHERE id=?",
+        (_now(), json.dumps({"mock": False, "error": error}), exp_id),
+    )
+    raise HTTPException(status_code=409, detail=error)
 
 
 @router.post("/api/experiments/rag-ablation")
@@ -176,18 +178,31 @@ async def start_rag_ablation(req: ExperimentStartRequest,
         raw_results = await asyncio.to_thread(
             ablation.run_all_mock if req.mock else ablation.run_all
         )
-        results = _serialize_results(raw_results)
+        serialized = _serialize_results(raw_results)
+        payload = {
+            "mock": req.mock,
+            "formal": not req.mock,
+            "results": serialized,
+            "comparison_table": ablation.build_comparison_table(raw_results),
+        }
         db.execute_sql(
             "UPDATE experiment_runs SET status='completed', completed_at=?, results=? WHERE id=?",
-            (_now(), json.dumps(results, ensure_ascii=False), exp_id),
+            (_now(), json.dumps(payload, ensure_ascii=False), exp_id),
         )
         return {
             "success": True,
             "experiment_id": exp_id,
             "status": "completed",
             "mock": req.mock,
-            "results": results,
+            "results": payload,
         }
+    except ValueError as exc:
+        error = str(exc)
+        db.execute_sql(
+            "UPDATE experiment_runs SET status='failed', completed_at=?, results=? WHERE id=?",
+            (_now(), json.dumps({"mock": req.mock, "error": error}), exp_id),
+        )
+        raise HTTPException(status_code=409, detail=error)
     except ImportError:
         error = "RAG ablation module not available"
         db.execute_sql(
@@ -224,19 +239,20 @@ async def start_quantization_benchmark(req: ExperimentStartRequest,
         if not req.mock:
             error = (
                 "A real quantization comparison requires one isolated vLLM process per "
-                "quantization variant. Use deploy/compare_quantization.sh instead."
+                "quantization variant. Use scripts/lab-run-kisaki-r3.sh on the lab server."
             )
             db.execute_sql(
                 "UPDATE experiment_runs SET status='failed', completed_at=?, results=? WHERE id=?",
                 (_now(), json.dumps({"error": error}), exp_id),
             )
-            return {"success": False, "experiment_id": exp_id, "status": "failed", "error": error}
-        results = [item.to_dict() for item in await bench.run_comparison(bench.DEFAULT_CONFIGS, mock=True)]
+            raise HTTPException(status_code=409, detail=error)
+        rows = [item.to_dict() for item in await bench.run_comparison(bench.DEFAULT_CONFIGS, mock=True)]
+        results = {"mock": True, "formal": False, "results": rows}
         db.execute_sql(
             "UPDATE experiment_runs SET status='completed', completed_at=?, results=? WHERE id=?",
             (_now(), json.dumps(results), exp_id),
         )
-        return {"success": True, "experiment_id": exp_id, "status": "completed", "results": results}
+        return {"success": True, "experiment_id": exp_id, "status": "completed", "mock": True, "results": results}
     except ImportError:
         mock_results = {
             "mock": True,

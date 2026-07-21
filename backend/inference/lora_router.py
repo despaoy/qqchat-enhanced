@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -33,6 +34,7 @@ class RoutingDecision:
     confidence: float = 0.0
     reason: str = ""
     fallback: bool = False
+    requires_rag: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -40,10 +42,19 @@ class RoutingDecision:
 
 # 默认角色关键词映射
 DEFAULT_PERSONA_KEYWORDS: Dict[str, List[str]] = {
-    "hutao": ["胡桃", "往生堂", "堂主", "火系", "蝶引来生", "护摩"],
-    "zhongli": ["钟离", "岩王帝君", "摩拉克斯", "岩神", "岩柱", "天星"],
-    "qiqi": ["七七", "不卜庐", "僵尸", "符咒", "治疗"],
-    "xiao": ["魈", "降魔大圣", "护法夜叉", "面具", "风系"],
+    "kisaki": ["月社妃", "妃", "琉璃", "夜子", "彼方", "理央", "纸上的魔法使"],
+    "minamo": ["神白水菜萌", "水菜萌", "Minamo", "ATRI"],
+    "hutao": ["胡桃", "往生堂", "堂主", "蝶引来生"],
+    "zhongli": ["钟离", "岩王帝君", "摩拉克斯"],
+    "qiqi": ["七七", "不卜庐", "僵尸"],
+}
+
+DEFAULT_PERSONA_ADAPTERS: Dict[str, str] = {
+    "kisaki": "kisaki",
+    "minamo": "minamo",
+    "hutao": "hutao",
+    "zhongli": "zhongli",
+    "qiqi": "qiqi",
 }
 
 
@@ -60,6 +71,8 @@ class LoRARouter:
         config = config or {}
         self.enabled = config.get("enabled", False)
         self.default_adapter = config.get("default_adapter", "default")
+        self.mode = config.get("mode", "intent")
+        self.persona_adapters: Dict[str, str] = config.get("persona_adapters", DEFAULT_PERSONA_ADAPTERS)
         self.rag_confidence_threshold = config.get("rag_confidence_threshold", 0.5)
         self.persona_keywords: Dict[str, List[str]] = config.get(
             "persona_keywords", DEFAULT_PERSONA_KEYWORDS
@@ -89,7 +102,7 @@ class LoRARouter:
         Returns:
             RoutingDecision
         """
-        if not self.enabled:
+        if not self.enabled or self.mode == "manual":
             return RoutingDecision(
                 target=RouteTarget.BASE_CHAT.value,
                 adapter_name=self.default_adapter,
@@ -101,24 +114,28 @@ class LoRARouter:
         # 1. 检查是否需要 RAG（知识检索）
         need_rag = False
         rag_confidence = 0.0
-        if intent_result is not None:
-            need_rag = intent_result[0] if len(intent_result) > 0 else False
-            rag_confidence = intent_result[1] if len(intent_result) > 1 else 0.0
+        if self.mode == "rule":
+            need_rag = False
+        elif intent_result is not None:
+            need_rag = bool(intent_result[0]) if len(intent_result) > 0 else False
+            second = intent_result[1] if len(intent_result) > 1 else None
+            rag_confidence = (
+                float(second)
+                if isinstance(second, (int, float))
+                else (1.0 if need_rag else 0.0)
+            )
         else:
             detector = self._get_intent_detector()
             if detector:
                 try:
-                    need_rag, rag_confidence, _ = detector(query)
+                    detected = detector(query)
+                    need_rag = bool(detected[0])
+                    second = detected[1] if len(detected) > 1 else None
+                    rag_confidence = float(second) if isinstance(second, (int, float)) else (1.0 if need_rag else 0.0)
                 except Exception:
                     need_rag = False
+                    rag_confidence = 0.0
 
-        if need_rag and rag_confidence >= self.rag_confidence_threshold:
-            return RoutingDecision(
-                target=RouteTarget.RAG_REQUIRED.value,
-                adapter_name=self.default_adapter,
-                confidence=rag_confidence,
-                reason=f"意图检测需要 RAG (confidence={rag_confidence:.2f})",
-            )
 
         # 2. 检查角色关键词匹配
         best_persona = None
@@ -131,7 +148,7 @@ class LoRARouter:
 
         if best_persona and best_match_count > 0:
             confidence = min(1.0, best_match_count / 3.0)
-            adapter_name = f"{best_persona}_lora_7b"
+            adapter_name = self.persona_adapters.get(best_persona, f"{best_persona}_lora_7b")
             # 验证适配器名称安全性
             if not all(c.isalnum() or c in "_-" for c in adapter_name):
                 adapter_name = self.default_adapter
@@ -140,8 +157,17 @@ class LoRARouter:
                 adapter_name=adapter_name,
                 confidence=confidence,
                 reason=f"匹配角色 {best_persona} ({best_match_count} 个关键词)",
+                requires_rag=need_rag and rag_confidence >= self.rag_confidence_threshold,
             )
 
+        if need_rag and rag_confidence >= self.rag_confidence_threshold:
+            return RoutingDecision(
+                target=RouteTarget.RAG_REQUIRED.value,
+                adapter_name=self.default_adapter,
+                confidence=rag_confidence,
+                reason=f"意图检测需要 RAG (confidence={rag_confidence:.2f})",
+                requires_rag=True,
+            )
         # 3. 默认基础聊天
         return RoutingDecision(
             target=RouteTarget.BASE_CHAT.value,
@@ -175,20 +201,29 @@ class LoRARouter:
 DEFAULT_ROUTER_CONFIG = {
     "enabled": os.getenv("LORA_ROUTER_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
     "default_adapter": "default",
+    "mode": os.getenv("LORA_ROUTER_MODE", "intent"),
+    "persona_adapters": DEFAULT_PERSONA_ADAPTERS,
     "rag_confidence_threshold": 0.5,
     "persona_keywords": DEFAULT_PERSONA_KEYWORDS,
 }
 
 _router: Optional[LoRARouter] = None
+_router_config_hash = ""
 
 
-def get_lora_router() -> LoRARouter:
-    """获取 LoRARouter 单例。"""
-    global _router
-    if _router is None:
-        _router = LoRARouter(DEFAULT_ROUTER_CONFIG)
+def get_lora_router(config: Optional[Dict[str, Any]] = None) -> LoRARouter:
+    """Return the singleton and refresh it only when persisted config changes."""
+    global _router, _router_config_hash
+    effective = config or DEFAULT_ROUTER_CONFIG
+    config_hash = hashlib.sha256(
+        json.dumps(effective, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    if _router is None or config_hash != _router_config_hash:
+        previous_logs = _router._routing_logs if _router is not None else []
+        _router = LoRARouter(effective)
+        _router._routing_logs = previous_logs[-_router._max_logs:]
+        _router_config_hash = config_hash
     return _router
-
 
 def route_query(query: str, intent_result: Optional[tuple] = None) -> RoutingDecision:
     """便捷函数：路由查询并记录日志。"""

@@ -1,4 +1,4 @@
-"""Validate and materialize the canonical KISAKI-E1/E2 experiment registry."""
+"""Validate canonical Kisaki R1 experiments and emit a runtime validation report."""
 
 from __future__ import annotations
 
@@ -15,19 +15,24 @@ if str(BACKEND) not in sys.path:
 
 from evaluation.experiment_contracts import (  # noqa: E402
     canonical_json_hash,
+    compare_experiment_configs,
     environment_snapshot,
     sha256_file,
-    validate_e1_e2_pair,
     validate_frozen_gold,
+    validate_r1_variant_set,
 )
 
 EXPERIMENT_DIR = BACKEND / "data" / "character_dialogues" / "experiments"
 CONFIG_DIR = EXPERIMENT_DIR / "configs"
-E1_CONFIG = CONFIG_DIR / "kisaki_e1_canonical.json"
-E2_CONFIG = CONFIG_DIR / "kisaki_e2_canonical.json"
+CONFIG_PATHS = {
+    name: CONFIG_DIR / f"kisaki_{name}_canonical.json"
+    for name in ("e1", "e2", "e3", "e4", "e5")
+}
 DATASET_MANIFEST = EXPERIMENT_DIR / "canonical_dataset_manifest.json"
 REGISTRY_PATH = EXPERIMENT_DIR / "canonical_experiment_registry.json"
+PROGRAM_REGISTRY = EXPERIMENT_DIR / "research" / "research_program_registry_v3.json"
 GOLD_V2_PATH = BACKEND / "evaluation" / "kisaki_gold_set_v2.json"
+PROMPT_V2_PATH = BACKEND / "data" / "character_dialogues" / "kisaki_system_prompt_v2.txt"
 
 
 def _load(path: Path) -> Any:
@@ -40,12 +45,12 @@ def _resolve_project_path(value: str) -> Path:
 
 
 def build_registry(*, require_model: bool, formal_eval: bool) -> tuple[dict[str, Any], list[str]]:
-    e1 = _load(E1_CONFIG)
-    e2 = _load(E2_CONFIG)
+    configs = {name: _load(path) for name, path in CONFIG_PATHS.items()}
     dataset = _load(DATASET_MANIFEST)
-    errors = validate_e1_e2_pair(e1, e2)
+    errors = validate_r1_variant_set(configs)
 
-    for label, config in (("KISAKI-E1", e1), ("KISAKI-E2", e2)):
+    for name, config in configs.items():
+        label = f"R1-{name.upper()}"
         for field, manifest_key in (("train_data_path", "train"), ("eval_data_path", "validation")):
             path = _resolve_project_path(config[field])
             expected = dataset[manifest_key]
@@ -61,26 +66,48 @@ def build_registry(*, require_model: bool, formal_eval: bool) -> tuple[dict[str,
             if not model_config_path.exists():
                 errors.append(f"{label} base model has no config.json")
             elif _load(model_config_path).get("quantization_config"):
-                errors.append(f"{label} base model is pre-quantized and cannot be used for canonical training")
+                errors.append(f"{label} base model is pre-quantized and cannot be used for training")
+
+    if not PROMPT_V2_PATH.exists():
+        errors.append(f"evaluation prompt v2 is missing: {PROMPT_V2_PATH}")
+    prompt = {
+        "path": PROMPT_V2_PATH.relative_to(PROJECT_ROOT).as_posix(),
+        "version": 2,
+        "sha256": sha256_file(PROMPT_V2_PATH) if PROMPT_V2_PATH.exists() else None,
+    }
 
     gold: dict[str, Any] = {
         "path": GOLD_V2_PATH.relative_to(PROJECT_ROOT).as_posix(),
-        "status": "draft_not_present" if not GOLD_V2_PATH.exists() else "unknown",
+        "status": "missing" if not GOLD_V2_PATH.exists() else "unknown",
     }
     if GOLD_V2_PATH.exists():
         gold_data = _load(GOLD_V2_PATH)
-        gold["status"] = gold_data.get("status")
-        gold["sha256"] = sha256_file(GOLD_V2_PATH)
+        gold.update(status=gold_data.get("status"), sha256=sha256_file(GOLD_V2_PATH))
         if formal_eval:
             errors.extend(validate_frozen_gold(gold_data))
     elif formal_eval:
         errors.append("Frozen Gold v2 is required for formal evaluation")
 
+    experiments = []
+    for name, config in configs.items():
+        experiments.append(
+            {
+                "id": f"R1-{name.upper()}",
+                "run_id": config.get("_experiment_id"),
+                "config": CONFIG_PATHS[name].relative_to(PROJECT_ROOT).as_posix(),
+                "config_sha256": sha256_file(CONFIG_PATHS[name]),
+                "config_contract_sha256": canonical_json_hash(config),
+                "baseline_differences": compare_experiment_configs(configs["e1"], config),
+            }
+        )
+
     registry = {
-        "schema_version": 2,
-        "series_id": "KISAKI-CANONICAL-E1-E2",
+        "schema_version": 3,
+        "report_type": "runtime_preflight",
+        "program_registry": PROGRAM_REGISTRY.relative_to(PROJECT_ROOT).as_posix(),
+        "series_id": "KISAKI-R1-CONTROLLED-PEFT",
         "status": "ready_for_training" if not errors else "blocked",
-        "research_question": "NEFTune alpha=5.0 对月社妃 LoRA 质量、稳定性和成本有何影响？",
+        "mock": False,
         "fixed_contract": {
             "dataset_manifest": DATASET_MANIFEST.relative_to(PROJECT_ROOT).as_posix(),
             "train_sha256": dataset["train"]["sha256"],
@@ -88,6 +115,7 @@ def build_registry(*, require_model: bool, formal_eval: bool) -> tuple[dict[str,
             "base_model": "Qwen3-8B-Instruct BF16",
             "seeds": [42, 43, 44],
             "pilot_seed": 42,
+            "evaluation_prompt": prompt,
             "generation": {
                 "temperature": 0.0,
                 "max_tokens": 256,
@@ -96,31 +124,11 @@ def build_registry(*, require_model: bool, formal_eval: bool) -> tuple[dict[str,
                 "frequency_penalty": 0.0,
             },
         },
-        "experiments": [
-            {
-                "id": "KISAKI-E1",
-                "config": E1_CONFIG.relative_to(PROJECT_ROOT).as_posix(),
-                "config_sha256": sha256_file(E1_CONFIG),
-                "config_contract_sha256": canonical_json_hash(e1),
-                "variable": {"neftune_noise_alpha": 0.0},
-            },
-            {
-                "id": "KISAKI-E2",
-                "config": E2_CONFIG.relative_to(PROJECT_ROOT).as_posix(),
-                "config_sha256": sha256_file(E2_CONFIG),
-                "config_contract_sha256": canonical_json_hash(e2),
-                "variable": {"neftune_noise_alpha": 5.0},
-            },
-        ],
+        "experiments": experiments,
         "gold_v2": gold,
         "legacy": {
             "status": "legacy_exploratory_non_comparable",
             "series": ["E1 historical", "E2 historical", "E2' Safety++", "E2'' RAG"],
-            "reasons": [
-                "training data and evaluation splits changed between runs",
-                "Gold v1 prompts influenced supplemental data",
-                "generation and safety metric implementations drifted",
-            ],
         },
         "environment": environment_snapshot(PROJECT_ROOT),
         "errors": errors,
@@ -129,7 +137,7 @@ def build_registry(*, require_model: bool, formal_eval: bool) -> tuple[dict[str,
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate canonical Kisaki experiments")
+    parser = argparse.ArgumentParser(description="Validate canonical Kisaki R1 experiments")
     parser.add_argument("--require-model", action="store_true")
     parser.add_argument("--formal-eval", action="store_true")
     parser.add_argument("--write-registry", action="store_true")

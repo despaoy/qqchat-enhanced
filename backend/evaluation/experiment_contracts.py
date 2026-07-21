@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import json
 import os
 import platform
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 
-CANONICAL_EXPERIMENT_IDS = ("KISAKI-E1", "KISAKI-E2")
+CANONICAL_EXPERIMENT_IDS = tuple(f"R1-E{index}" for index in range(1, 6))
 CONFIG_COMPARISON_IGNORES = {"output_dir", "logging_dir", "resume_from_checkpoint"}
 ALLOWED_E1_E2_TRAINING_DIFFS = {"neftune_noise_alpha"}
 
@@ -173,6 +174,36 @@ def validate_e1_e2_pair(e1: Mapping[str, Any], e2: Mapping[str, Any]) -> list[st
     return errors
 
 
+R1_VARIANT_DIFFS: dict[str, dict[str, tuple[Any, Any]]] = {
+    "e1": {},
+    "e2": {"neftune_noise_alpha": (0.0, 5.0)},
+    "e3": {"use_dora": (False, True)},
+    "e4": {"use_rslora": (False, True)},
+    "e5": {"packing": (False, True)},
+}
+
+
+def validate_r1_variant_set(configs: Mapping[str, Mapping[str, Any]]) -> list[str]:
+    """Require every R1 variant to differ from E1 by exactly one declared factor."""
+    errors: list[str] = []
+    missing = set(R1_VARIANT_DIFFS) - set(configs)
+    if missing:
+        return [f"R1 configs missing: {sorted(missing)}"]
+    baseline = configs["e1"]
+    for name, expected in R1_VARIANT_DIFFS.items():
+        config = configs[name]
+        differences = compare_experiment_configs(baseline, config)
+        if differences != expected:
+            errors.append(
+                f"R1-{name.upper()} differences must be {expected}; found {differences}"
+            )
+        if not config.get("eval_data_path"):
+            errors.append(f"R1-{name.upper()} must use an explicit fixed eval_data_path")
+    if configs["e3"].get("use_rslora") or configs["e4"].get("use_dora"):
+        errors.append("DoRA and RSLoRA must remain separate R1 variants")
+    return errors
+
+
 def validate_frozen_gold(data: Mapping[str, Any]) -> list[str]:
     errors: list[str] = []
     if data.get("status") != "frozen":
@@ -204,9 +235,37 @@ def git_commit(project_root: Path) -> str | None:
 
 
 def environment_snapshot(project_root: Path) -> dict[str, Any]:
+    packages = {}
+    for name in ("torch", "transformers", "peft", "vllm", "trl", "datasets", "sentence-transformers"):
+        try:
+            packages[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            packages[name] = None
+    torch_version = cuda_version = None
+    try:
+        import torch
+        torch_version = torch.__version__
+        cuda_version = torch.version.cuda
+    except Exception:
+        pass
+    gpu = []
+    try:
+        output = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=index,name,driver_version", "--format=csv,noheader,nounits"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+        gpu = [line.strip() for line in output.splitlines() if line.strip()]
+    except Exception:
+        pass
     return {
         "git_commit": git_commit(project_root),
         "python": sys.version.split()[0],
         "platform": platform.platform(),
         "cuda_visible_devices": os.getenv("CUDA_VISIBLE_DEVICES"),
+        "torch": torch_version,
+        "cuda": cuda_version,
+        "gpus": gpu,
+        "packages": packages,
     }

@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
@@ -54,6 +55,8 @@ function RouterContent() {
       await updateConfig({
         enabled: editConfig.enabled,
         default_adapter: editConfig.default_adapter,
+        mode: editConfig.mode,
+        persona_adapters: editConfig.persona_adapters,
         rag_confidence_threshold: editConfig.rag_confidence_threshold,
         persona_keywords: editConfig.persona_keywords,
       });
@@ -110,6 +113,21 @@ function RouterContent() {
                   />
                 </div>
                 <Separator />
+                <div className="space-y-2">
+                  <Label>路由模式</Label>
+                  <Select
+                    value={editConfig.mode || 'manual'}
+                    onValueChange={(value: 'manual' | 'rule' | 'intent') => setEditConfig({ ...editConfig, mode: value })}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="manual">手动选择</SelectItem>
+                      <SelectItem value="rule">关键词规则</SelectItem>
+                      <SelectItem value="intent">意图路由</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Separator />
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label>默认适配器</Label>
@@ -129,6 +147,15 @@ function RouterContent() {
                         <Badge variant="outline">{persona}</Badge>
                         <span className="text-xs text-muted-foreground">{keywords.join(', ')}</span>
                       </div>
+                    ))}
+                  </div>
+                </div>
+                <Separator />
+                <div>
+                  <Label>角色适配器映射</Label>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {Object.entries(editConfig.persona_adapters || {}).map(([persona, adapter]) => (
+                      <Badge key={persona} variant="secondary">{persona} → {adapter}</Badge>
                     ))}
                   </div>
                 </div>

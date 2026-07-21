@@ -1,0 +1,22 @@
+{
+    "lora_r":  32,
+    "train_fraction":  0.8,
+    "base_model":  "Qwen3-8B-Instruct",
+    "quantization":  "NF4",
+    "claim":  "DPO pilot; not RLHF",
+    "orpo_enabled":  false,
+    "load_in_4bit":  true,
+    "starting_adapter":  "best_frozen_R1_adapter",
+    "q_a_lora_status":  "not_implemented",
+    "lora_alpha":  64,
+    "beta":  0.1,
+    "split_seed":  42,
+    "method":  "dpo",
+    "num_train_epochs":  1,
+    "experiment_id":  "R4-DPO-PILOT",
+    "schema_version":  3,
+    "heldout_fraction":  0.2,
+    "status":  "blocked_on_human_review",
+    "learning_rate":  5E-07,
+    "minimum_human_approved_pairs":  100
+}

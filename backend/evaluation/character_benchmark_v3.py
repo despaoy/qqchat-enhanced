@@ -76,6 +76,28 @@ def _call(
         return "", (time.perf_counter() - started) * 1000, f"{type(exc).__name__}: {exc}"
 
 
+def _call_conversation(
+    base_url: str,
+    model: str,
+    system_prompt: str,
+    turns: list[str],
+    generation: dict[str, Any],
+    timeout: float,
+) -> tuple[str, float, str, list[str]]:
+    """Generate each turn in order so the test contains real assistant context."""
+    messages = [{"role": "system", "content": system_prompt}] if system_prompt else []
+    replies: list[str] = []
+    total_latency = 0.0
+    for turn in turns:
+        messages.append({"role": "user", "content": turn})
+        reply, latency, error = _call(base_url, model, messages, generation, timeout)
+        total_latency += latency
+        if error:
+            return "", total_latency, error, replies
+        replies.append(reply)
+        messages.append({"role": "assistant", "content": reply})
+    return replies[-1] if replies else "", total_latency, "", replies[:-1]
+
 def evaluate_safety(item: dict[str, Any], response: str) -> dict[str, Any]:
     policy = item.get("safety_policy")
     if not policy:
@@ -130,6 +152,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--base-url", default="http://127.0.0.1:8001")
     parser.add_argument("--model", required=True)
+    parser.add_argument("--model-path", type=Path)
     parser.add_argument("--adapter-path", type=Path)
     parser.add_argument("--system-prompt", default="")
     parser.add_argument("--system-prompt-file", type=Path)
@@ -148,6 +171,8 @@ def main() -> int:
     dataset = _load(args.dataset)
     if args.formal:
         errors = validate_frozen_gold(dataset)
+        if not args.model_path or not args.model_path.exists():
+            errors.append("formal evaluation requires an existing --model-path for hashing")
         if errors:
             print(json.dumps({"formal_evaluation_refused": True, "errors": errors}, ensure_ascii=False))
             return 2
@@ -173,25 +198,28 @@ def main() -> int:
     samples: list[dict[str, Any]] = []
     before_vram = vram_mb(args.gpu)
     for index, item in enumerate(prompts, 1):
-        turns = item.get("turns")
-        if turns:
-            messages = [{"role": "system", "content": system_prompt}] if system_prompt else []
-            messages.extend({"role": "user", "content": turn} for turn in turns)
-        else:
-            messages = [{"role": "system", "content": system_prompt}] if system_prompt else []
-            messages.append({"role": "user", "content": item["prompt"]})
+        turns = list(item.get("turns") or [item["prompt"]])
+        context_responses: list[str] = []
         if args.mock:
             response = str(item["expected_behavior"])
             latency, error = float(10 + index % 7), ""
         else:
-            response, latency, error = _call(args.base_url, args.model, messages, generation, args.timeout)
+            response, latency, error, context_responses = _call_conversation(
+                args.base_url,
+                args.model,
+                system_prompt,
+                turns,
+                generation,
+                args.timeout,
+            )
         format_ok = bool(response.strip()) and not error
         samples.append(
             {
                 "id": item["id"],
                 "category": item["category"],
                 "prompt": item["prompt"],
-                "turns": turns or [],
+                "turns": turns,
+                "context_responses": context_responses,
                 "expected_behavior": item["expected_behavior"],
                 "response": response,
                 "output_chars": len(response),
@@ -217,6 +245,8 @@ def main() -> int:
         "model": args.model,
         "provenance": {
             **environment_snapshot(PROJECT_ROOT),
+            "model_path": str(args.model_path) if args.model_path else None,
+            "model_sha256": hash_tree(args.model_path) if args.model_path else None,
             "dataset_path": str(args.dataset),
             "dataset_sha256": sha256_file(args.dataset),
             "dataset_status": dataset.get("status"),
@@ -224,6 +254,7 @@ def main() -> int:
             "prompt_content_sha256": canonical_json_hash(prompts),
             "adapter_path": str(args.adapter_path) if args.adapter_path else None,
             "adapter_sha256": hash_tree(args.adapter_path) if args.adapter_path else None,
+            "prompt_sha256": sha256_file(args.system_prompt_file) if args.system_prompt_file else canonical_json_hash(system_prompt),
             "system_prompt_sha256": canonical_json_hash(system_prompt),
             "generation": generation,
             "generation_sha256": canonical_json_hash(generation),

@@ -1,4 +1,5 @@
 export interface RagCitation {
+  source_id: string;
   source_title: string;
   evidence_excerpt: string;
   score: number;

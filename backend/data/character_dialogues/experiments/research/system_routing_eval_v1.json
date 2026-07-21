@@ -1,0 +1,649 @@
+{
+  "schema_version": 1,
+  "status": "frozen",
+  "count": 80,
+  "selection": "deterministic routing contract prompts; not a generation-quality set",
+  "cases": [
+    {
+      "id": "s1-kisaki-01",
+      "query": "请让月社妃回应这个场景：今天适合读书吗？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-02",
+      "query": "我想和琉璃聊聊刚才发生的事。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-03",
+      "query": "切换到夜子的角色，再回答我的问题。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-04",
+      "query": "如果是彼方，会怎样看待这个选择？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-05",
+      "query": "请让理央回应这个场景：今天适合读书吗？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-06",
+      "query": "我想和月社妃聊聊刚才发生的事。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-07",
+      "query": "切换到琉璃的角色，再回答我的问题。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-08",
+      "query": "如果是夜子，会怎样看待这个选择？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-09",
+      "query": "请让彼方回应这个场景：今天适合读书吗？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-10",
+      "query": "我想和理央聊聊刚才发生的事。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-11",
+      "query": "切换到月社妃的角色，再回答我的问题。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-12",
+      "query": "如果是琉璃，会怎样看待这个选择？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-13",
+      "query": "请让夜子回应这个场景：今天适合读书吗？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-14",
+      "query": "我想和彼方聊聊刚才发生的事。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-15",
+      "query": "切换到理央的角色，再回答我的问题。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-16",
+      "query": "如果是月社妃，会怎样看待这个选择？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-17",
+      "query": "请让琉璃回应这个场景：今天适合读书吗？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-18",
+      "query": "我想和夜子聊聊刚才发生的事。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-19",
+      "query": "切换到彼方的角色，再回答我的问题。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-kisaki-20",
+      "query": "如果是理央，会怎样看待这个选择？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "kisaki",
+      "external_demo_only": false
+    },
+    {
+      "id": "s1-minamo-01",
+      "query": "请让神白水菜萌回应这个场景：今天适合读书吗？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-02",
+      "query": "我想和水菜萌聊聊刚才发生的事。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-03",
+      "query": "切换到Minamo的角色，再回答我的问题。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-04",
+      "query": "如果是ATRI，会怎样看待这个选择？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-05",
+      "query": "请让神白水菜萌回应这个场景：今天适合读书吗？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-06",
+      "query": "我想和水菜萌聊聊刚才发生的事。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-07",
+      "query": "切换到Minamo的角色，再回答我的问题。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-08",
+      "query": "如果是ATRI，会怎样看待这个选择？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-09",
+      "query": "请让神白水菜萌回应这个场景：今天适合读书吗？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-10",
+      "query": "我想和水菜萌聊聊刚才发生的事。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-11",
+      "query": "切换到Minamo的角色，再回答我的问题。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-12",
+      "query": "如果是ATRI，会怎样看待这个选择？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-13",
+      "query": "请让神白水菜萌回应这个场景：今天适合读书吗？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-14",
+      "query": "我想和水菜萌聊聊刚才发生的事。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-15",
+      "query": "切换到Minamo的角色，再回答我的问题。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-16",
+      "query": "如果是ATRI，会怎样看待这个选择？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-17",
+      "query": "请让神白水菜萌回应这个场景：今天适合读书吗？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-18",
+      "query": "我想和水菜萌聊聊刚才发生的事。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-19",
+      "query": "切换到Minamo的角色，再回答我的问题。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-minamo-20",
+      "query": "如果是ATRI，会怎样看待这个选择？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "minamo",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-01",
+      "query": "请让胡桃回应这个场景：今天适合读书吗？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-02",
+      "query": "我想和往生堂聊聊刚才发生的事。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-03",
+      "query": "切换到堂主的角色，再回答我的问题。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-04",
+      "query": "如果是蝶引来生，会怎样看待这个选择？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-05",
+      "query": "请让胡桃回应这个场景：今天适合读书吗？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-06",
+      "query": "我想和往生堂聊聊刚才发生的事。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-07",
+      "query": "切换到堂主的角色，再回答我的问题。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-08",
+      "query": "如果是蝶引来生，会怎样看待这个选择？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-09",
+      "query": "请让胡桃回应这个场景：今天适合读书吗？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-10",
+      "query": "我想和往生堂聊聊刚才发生的事。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-11",
+      "query": "切换到堂主的角色，再回答我的问题。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-12",
+      "query": "如果是蝶引来生，会怎样看待这个选择？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-13",
+      "query": "请让胡桃回应这个场景：今天适合读书吗？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-14",
+      "query": "我想和往生堂聊聊刚才发生的事。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-15",
+      "query": "切换到堂主的角色，再回答我的问题。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-16",
+      "query": "如果是蝶引来生，会怎样看待这个选择？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-17",
+      "query": "请让胡桃回应这个场景：今天适合读书吗？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-18",
+      "query": "我想和往生堂聊聊刚才发生的事。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-19",
+      "query": "切换到堂主的角色，再回答我的问题。",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-hutao-20",
+      "query": "如果是蝶引来生，会怎样看待这个选择？",
+      "expected_target": "persona_adapter",
+      "expected_adapter": "hutao",
+      "external_demo_only": true
+    },
+    {
+      "id": "s1-rag-01",
+      "query": "请检索知识库后说明设定条目 1 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-02",
+      "query": "请检索知识库后说明设定条目 2 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-03",
+      "query": "请检索知识库后说明设定条目 3 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-04",
+      "query": "请检索知识库后说明设定条目 4 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-05",
+      "query": "请检索知识库后说明设定条目 5 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-06",
+      "query": "请检索知识库后说明设定条目 6 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-07",
+      "query": "请检索知识库后说明设定条目 7 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-08",
+      "query": "请检索知识库后说明设定条目 8 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-09",
+      "query": "请检索知识库后说明设定条目 9 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-10",
+      "query": "请检索知识库后说明设定条目 10 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-11",
+      "query": "请检索知识库后说明设定条目 11 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-12",
+      "query": "请检索知识库后说明设定条目 12 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-13",
+      "query": "请检索知识库后说明设定条目 13 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-14",
+      "query": "请检索知识库后说明设定条目 14 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-15",
+      "query": "请检索知识库后说明设定条目 15 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-16",
+      "query": "请检索知识库后说明设定条目 16 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-17",
+      "query": "请检索知识库后说明设定条目 17 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-18",
+      "query": "请检索知识库后说明设定条目 18 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-19",
+      "query": "请检索知识库后说明设定条目 19 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    },
+    {
+      "id": "s1-rag-20",
+      "query": "请检索知识库后说明设定条目 20 的依据。",
+      "expected_target": "rag_required",
+      "expected_adapter": "default",
+      "intent_result": [
+        true,
+        0.95,
+        "kisaki"
+      ]
+    }
+  ],
+  "cases_sha256": "306eb65d2d0801dfe3fbb9f1ddaaf58acc92d5a4f588366468d6ad24b14be252"
+}

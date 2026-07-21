@@ -4,7 +4,7 @@ Pydantic 请求/响应模型
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 
 # ============================================
 # 核心消息模型
@@ -282,6 +282,8 @@ class RouterConfigUpdate(BaseModel):
     """路由配置更新请求"""
     enabled: Optional[bool] = None
     default_adapter: Optional[str] = None
+    mode: Optional[Literal["manual", "rule", "intent"]] = None
+    persona_adapters: Optional[Dict[str, str]] = None
     rag_confidence_threshold: Optional[float] = None
     persona_keywords: Optional[Dict[str, List[str]]] = None
 

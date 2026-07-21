@@ -12,6 +12,8 @@ import { api } from '@/lib/api';
 export interface RouterConfig {
   enabled: boolean;
   default_adapter: string;
+  mode: 'manual' | 'rule' | 'intent';
+  persona_adapters: Record<string, string>;
   rag_confidence_threshold: number;
   persona_keywords: Record<string, string[]>;
 }
@@ -36,6 +38,7 @@ export interface RoutingLog {
   confidence: number;
   reason: string;
   fallback: boolean;
+  requires_rag: boolean;
 }
 
 export function useRouter(enabled = true) {

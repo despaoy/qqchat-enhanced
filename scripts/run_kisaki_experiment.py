@@ -27,8 +27,8 @@ from evaluation.experiment_contracts import (  # noqa: E402
 
 EXPERIMENT_DIR = BACKEND / "data" / "character_dialogues" / "experiments"
 CONFIGS = {
-    "e1": EXPERIMENT_DIR / "configs" / "kisaki_e1_canonical.json",
-    "e2": EXPERIMENT_DIR / "configs" / "kisaki_e2_canonical.json",
+    name: EXPERIMENT_DIR / "configs" / f"kisaki_{name}_canonical.json"
+    for name in ("e1", "e2", "e3", "e4", "e5")
 }
 DATASET_MANIFEST = EXPERIMENT_DIR / "canonical_dataset_manifest.json"
 SERVER_ROOT = Path(os.getenv("QQCHAT_LAB_ROOT", "/home/szw/lhm2"))
@@ -94,7 +94,7 @@ def _best_checkpoint(output_dir: Path) -> str | None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run canonical Kisaki E1/E2 training")
+    parser = argparse.ArgumentParser(description="Run one canonical Kisaki R1 PEFT experiment")
     parser.add_argument("--experiment", choices=sorted(CONFIGS), required=True)
     parser.add_argument("--seed", type=int, choices=(42, 43, 44), default=42)
     parser.add_argument("--resume", action="store_true")
