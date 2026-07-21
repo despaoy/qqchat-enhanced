@@ -18,7 +18,7 @@ QQChat Enhanced 是一个面向角色对话研究与保研展示的多平台 LLM
 | 数据库 | SQLite（本地/单进程）或 PostgreSQL（部署推荐） |
 | 缓存 | Redis 可选；不可用时使用受限的进程内退化实现 |
 
-实验室服务器已验证 Python 3.12.13、PyTorch 2.8.0+cu128、RTX 3090 CUDA 可用、vLLM 0.10.2 依赖完整，后端回归最近一次为：Windows 本地 101 passed、1 skipped；实验室服务器 102 passed。
+实验室服务器已验证 PyTorch 2.8.0+cu128、RTX 3090 CUDA、BGE-M3 和 vLLM 0.10.2 可用；最近一次完整后端回归为 `121 passed`。月社妃 Gold v2 已完成人工审核及文本/语义泄漏审计并正式冻结。
 
 ## 系统架构
 
@@ -163,6 +163,7 @@ curl -fsS http://127.0.0.1:5000/api/health
 - [生产准备审查](docs/architecture/PRODUCTION_READINESS_REVIEW_2026-07-18.md)
 - [部署指南](docs/operations/DEPLOYMENT_GUIDE.md)
 - [研究与学习路线](docs/research/RESEARCH_AND_LEARNING_ROADMAP.md)
+- [月社妃实验总览](docs/research/KISAKI_EXPERIMENT_INDEX.md)
 - [月社妃 LoRA 重训计划](docs/research/KISAKI_LORA_RETRAIN_PLAN.md)
 - [数据集卡片](docs/data/dataset-card.md)
 - [人工评分标准](docs/data/human-scoring-rubric.md)
