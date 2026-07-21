@@ -48,7 +48,7 @@
 
 - **平台接入**：通过 AstrBot 网关插件接入 QQ / Telegram / 企业微信 / 公众号 / 个人微信等 IM 平台。
 - **核心服务**：FastAPI 提供认证、配置、知识库、训练、评估、实验等完整 REST API。
-- **推理后端**：以 vLLM（`qwen2.5-7b-awq`）为主，支持多实例负载均衡、LoRA 热切换；同时兼容 Ollama / llama.cpp / Transformers+PEFT / OpenAI 兼容 / Mock 多后端。
+- **推理后端**：以 vLLM（`Qwen3-8B-Instruct-AWQ`）为主，支持多实例负载均衡、LoRA 热切换；同时兼容 Ollama / llama.cpp / Transformers+PEFT / OpenAI 兼容 / Mock 多后端。
 - **RAG 能力**：FAISS 向量检索 + BM25 关键词混合 + Cross-Encoder 重排 + 纠错 RAG。
 - **训练能力**：SFT LoRA 微调、DPO/ORPO 偏好对齐，含 GPU 温度保护、早停、可取消。
 - **管理控制台**：Next.js 16 (App Router) + React 19 + Tailwind v4 + shadcn/ui 提供 14 个页面。
@@ -57,7 +57,7 @@
 **当前验证状态**（截至文档生成时）：
 - 后端回归：Windows 本地最近一次 `101 passed, 1 skipped`；实验室 Python 3.12 环境 `102 passed`
 - TypeScript 与 Next.js 生产构建通过
-- vLLM 在 RTX 3090 上稳定服务 `qwen2.5-7b-awq`
+- vLLM 在 RTX 3090 上稳定服务 `Qwen3-8B-Instruct-AWQ`
 - 26 张数据库表已建（PostgreSQL/SQLite 双模式）
 
 ---
@@ -84,8 +84,8 @@
      ┌─────────────┐  ┌─────────┐     ┌──────────────┐
      │   vLLM      │  │   RAG   │     │ PostgreSQL / │
      │ (端口 8001) │  │ FAISS   │     │   Redis      │
-     │ qwen2.5-7b  │  │ + BM25  │     │              │
-     │   -awq      │  │ +Rerank │     └──────────────┘
+     │ Qwen3-8B    │  │ + BM25  │     │              │
+     │ -Instruct   │  │ +Rerank │     └──────────────┘
      └─────────────┘  └─────────┘
             │
             ▼
@@ -667,7 +667,7 @@ build_citations() / build_context_prompt() → 注入 LLM
   - `_load_from_db(session_id)`：通过 `db.adapter` 的 `db.get_messages(limit=10, session_id=session_id)` 恢复
 - **RAG 集成**：`_rag_search_via_api(query, top_k, kb_name)`：HTTP POST 调用后端 RAG 服务
 - **LoRA 热切换**：
-  - `LORA_REGISTRY`：预置 hutao/minamo/test-lora-highperf 三个角色
+  - `LORA_REGISTRY`：预置 hutao/minamo/test-lora-highperf（月社妃）角色；月社妃 LoRA 适配器路径为 `loras/kisaki/e2pp_rag_r32/final`
   - `_load_7b_model(lora_name)`：加载 Qwen3-8B 4-bit NF4 + PeftModel；热切换时 `load_adapter` + `set_adapter`
 - **推理主流程**：
   - `generate_with_local_model(prompt, session_id, is_claw, lora_name)`：**优先 vLLM**（`inference.vllm_client.VLLMClient`），失败回退 transformers

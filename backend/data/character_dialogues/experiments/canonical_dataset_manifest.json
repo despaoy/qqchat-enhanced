@@ -1,0 +1,55 @@
+{
+  "checks": {
+    "semantic_gold_v2_audit": "required_before_gold_v2_freeze",
+    "train_validation_prompt_overlap": 0
+  },
+  "dataset_id": "KISAKI-CANONICAL-V2",
+  "development_gold": {
+    "path": "backend/evaluation/kisaki_gold_set_v1.json",
+    "sha256": "2d54aec0cc95786c2d26d62e4fde02ed0039d60efca1cbbb292c1553577b93ce",
+    "status": "development_only"
+  },
+  "eval_ratio": 0.1,
+  "exclusions": {
+    "count": 2,
+    "path": "backend/data/character_dialogues/experiments/canonical_dataset_exclusions.json",
+    "reason_counts": {
+      "development_gold_leakage": 1,
+      "duplicate_dialogue": 1
+    }
+  },
+  "near_duplicate_threshold": 0.9,
+  "schema_version": 2,
+  "seed": 42,
+  "sources": [
+    {
+      "count": 801,
+      "path": "backend/data/character_dialogues/tsukiyashiro_kisaki_sft.json",
+      "sha256": "bf923a774237e07c66af1ffe193ce8edc6fbf4d32d742e2b98b3a743f5ed8958"
+    },
+    {
+      "count": 119,
+      "path": "backend/data/character_dialogues/kisaki_llm_generated_v3.json",
+      "sha256": "8d62b88423aa6e96db2718baf9d6dc6fe6aa3e3a9f36ca5ed306975d601a3e0c"
+    }
+  ],
+  "status": "frozen_for_e1_e2",
+  "train": {
+    "count": 826,
+    "path": "backend/data/character_dialogues/experiments/tsukiyashiro_kisaki_train.json",
+    "sha256": "d91780fbe8e5d2a294109e5a024e41fc87039ac1d079849ef19e3f58bfb3132e",
+    "source_distribution": {
+      "game_extraction": 715,
+      "llm_v3_deepseek": 111
+    }
+  },
+  "validation": {
+    "count": 92,
+    "path": "backend/data/character_dialogues/experiments/tsukiyashiro_kisaki_eval.json",
+    "sha256": "5c2d71816f5119aa70858115123953cad67c49927cc35a5e78251c97bfc61769",
+    "source_distribution": {
+      "game_extraction": 84,
+      "llm_v3_deepseek": 8
+    }
+  }
+}

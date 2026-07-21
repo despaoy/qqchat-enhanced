@@ -184,16 +184,20 @@
 - target_modules：7 个线性层（q/k/v/o/gate/up/down_proj）
 - lora_r：`32`，lora_alpha：`64`，lora_dropout：`0.1`
 
-### 3.2 四组消融实验
+### 3.2 消融实验（实际执行）
 
-| 实验编号 | 名称 | 变量 | 配置文件 | 假设 |
-|---|---|---|---|---|
-| **E1** | LoRA baseline | 无（基准） | `E1_lora_baseline.json` | 标准 LoRA 已能达到合格质量 |
-| **E2** | + DoRA | `use_dora=true` | `E2_dora.json` | DoRA 的权重分解提升角色一致性 |
-| **E3** | + RSLoRA | `use_rslora=true` | `E3_rslora.json` | RSLoRA 的缩放因子提升训练稳定性 |
-| **E4** | + NEFTune | `neftune_noise_alpha=5.0` | `E4_neftune.json` | 嵌入噪声提升生成多样性、缓解塌缩 |
+> 原计划 E2=DoRA / E3=RSLoRA / E4=NEFTune 的四组消融；实际执行中根据 E1 暴露的问题调整为渐进式数据增强路径（NEFTune → Safety++ → RAG），DoRA/RSLoRA 消融待后续执行。
 
-**关键**：E2/E3/E4 各自**只改一个开关**，其余与 E1 完全一致。
+| 实验编号 | 名称 | 变量 | 配置文件 | 训练量 | 状态 |
+|---|---|---|---|---|---|
+| **E1** | LoRA baseline | r=32, alpha=64, 无 NEFTune | `tsukiyashiro_kisaki_lora_r32.json` | 854 条 | ✅ 已完成 |
+| **E2** | + NEFTune | + NEFTune α=2.5, safety 数据增强 | `tsukiyashiro_kisaki_e2_neftune.json` | 864 条 | ✅ 已完成 |
+| **E2'** | Safety++ | + 扩充 safety 数据（角色化软拒绝） | `tsukiyashiro_kisaki_e2p_neftune.json` | 874 条 | ✅ 已完成 |
+| **E2''** | RAG | + RAG 引用数据（15 单 ref + 5 多 ref + 5 拒答） | `tsukiyashiro_kisaki_e2pp_rag.json` | 899 条 | ✅ 已完成 |
+| **E3** | + DoRA | `use_dora=true` | 待建 | 899 条 | ⏳ 待执行 |
+| **E4** | + RSLoRA | `use_rslora=true` | 待建 | 899 条 | ⏳ 待执行 |
+
+**关键**：E2→E2'→E2'' 为渐进式数据增强（各自只增加一个维度的数据），E3/E4 将在 E2'' 基线上切换 DoRA/RSLoRA 开关。
 
 ### 3.3 实验执行流程（每个实验）
 
@@ -237,13 +241,15 @@
 
 ### 3.4 消融对比表（最终产物）
 
-| 实验 | eval_loss | perplexity | format | safety | RAG | token_ratio | distinct-2 | 盲评分 | 门禁 | VRAM | 训练时间 |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| E1 baseline | | | | | | | | | | | |
-| E2 DoRA | | | | | | | | | | | |
-| E3 RSLoRA | | | | | | | | | | | |
-| E4 NEFTune | | | | | | | | | | | |
-| v1 失败基线 | — | — | 1.0 | 0.27 | 0.0 | 0.05 | — | — | FAIL | — | — |
+| 实验 | eval_loss | perplexity | format | safety | RAG(citation) | token_ratio | distinct-2 | 平均字符 | 训练量 | 状态 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| E1 baseline | 2.802 | — | 1.0 | 0.13 | 0.60 | — | 0.50 | 56.31 | 854 | ✅ |
+| E2 NEFTune | — | — | 1.0 | — | — | — | — | 93.92 | 864 | ✅ |
+| E2' Safety++ | — | — | 1.0 | — | — | — | — | 44.63 | 874 | ✅ |
+| E2'' RAG | 2.705 | — | 1.0 | 1.0 | 0.05 | — | 0.61 | 50.27 | 899 | ✅ |
+| v1 失败基线 | — | — | 1.0 | 0.27 | 0.0 | 0.05 | — | — | — | 历史 |
+| E3 DoRA | | | | | | | | | | ⏳ |
+| E4 RSLoRA | | | | | | | | | | ⏳ |
 
 **这张表是保研面试的核心展示物。**
 
@@ -335,8 +341,8 @@
 |---|---|---|---|
 | 第 0 周 | v1 失败诊断 + 数据治理启动 | `v1_failure_diagnosis.md`、`kisaki_sft_v2.json` | 根因明确、v2 数据 ≥ 600 条 |
 | 第 1 周 | Gold Set + 评估基础 | `kisaki_gold_set_v1.json`、评估流水线 | Gold Set 100 条、自动指标可跑 |
-| 第 2 周 | E1 baseline + E2 DoRA | 两个实验完整产物 | 至少一个门禁 PASS |
-| 第 3 周 | E3 RSLoRA + E4 NEFTune | 两个实验完整产物 | 四组全部完成 |
+| 第 2 周 | E1 baseline + E2 NEFTune | 两个实验完整产物 | 至少一个门禁 PASS |
+| 第 3 周 | E2' Safety++ + E2'' RAG | 两个实验完整产物 | 四组全部完成 |
 | 第 4 周 | 消融对比 + 部署 | 对比表、最佳 adapter 上线 | 线上效果验证通过 |
 | 第 5 周 | 偏好 pilot（可选） | DPO adapter、对比报告 | 偏好胜率 > 50% |
 | 第 6 周 | 报告撰写 + 作品集 | 完整实验报告 | 可复现、可答辩 |
@@ -423,7 +429,7 @@
 | v2 数据仍导致塌缩 | 低 | 需三轮数据治理 | 第 0 周先诊断根因，针对性修复 |
 | 四组实验都不过门禁 | 低 | 需调参 | 先跑 E1，若不过则调 lr/epochs/data |
 | 偏好数据不足 50 条 | 中 | DPO pilot 取消 | SFT 部分已足够展示，DPO 标为可选 |
-| 时间不足 | 中 | 跳过 E3/E4 | 优先 E1+E2+E4（DoRA 和 NEFTune 最有故事性） |
+| 时间不足 | 中 | 跳过 E3/E4（DoRA/RSLoRA） | 已完成 E1+E2+E2'+E2''，E3/E4 视时间补充 |
 
 ---
 

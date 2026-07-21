@@ -46,7 +46,7 @@ vLLM：默认端口 8001；月社妃 LoRA 对比实验使用 8002，具体由 VL
 ## 3. 当前限制（不得声称的事项）
 
 - 旧 DPO 报告的 `eval_accuracy=0.65` 是历史占位值，**非真实偏好胜率**
-- 首个 LoRA baseline/DoRA 报告使用旧的 adapter-size 和 trainable-parameter 计算，展示前需重跑
+- E1 baseline 已完成真实评估（eval_loss=2.802, safety=0.13, citation=0.60）；E2'' 重训后 100/100 成功但 citation 跌至 0.05，AI 自指和第三人称问题需 System Prompt 层面解决
 - 当前 AWQ 结果是热服务单模型基准，**不是** FP16/AWQ/NF4/INT8 对比，也**不是**真实 startup-load/streaming-TTFT 测量
 - 当前 RAG 集是回归基准，声明泛化前需单独编写 held-out 集
 - SQLite + 手动 Redis **不是**生产部署
