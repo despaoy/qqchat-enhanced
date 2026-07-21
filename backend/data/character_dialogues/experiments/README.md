@@ -33,7 +33,7 @@ experiments/
 │   ├── archive/                            明确归档的旧结果
 │   └── kisaki_e2*.json                     历史探索结果
 └── research/
-    └── core_research_registry_v2.json      后续研究方向
+    └── core_research_registry_v2.json      （已归档至 archive/legacy_v3_superseded/，被 v3 取代）
 ```
 
 ## 事实来源优先级

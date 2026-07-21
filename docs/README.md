@@ -33,13 +33,13 @@
 - `KISAKI_GOLD_V2_AI_PRESCREEN.md`：Gold v2 审核与冻结记录。
 - `RESEARCH_AND_LEARNING_ROADMAP.md`：研究主线和学习路线。
 - `BEGINNER_REAL_LLM_EXPERIMENT_GUIDE.md`：真实 LLM 实验操作指南。
-- `KISAKI_LORA_RETRAIN_PLAN.md`：后续 LoRA/DoRA/RSLoRA 消融计划。
+- `archive/KISAKI_LORA_RETRAIN_PLAN.md`：历史 LoRA/DoRA/RSLoRA 消融计划（已被 v3 主线取代）。
 - 其余 `KISAKI_E1_*`、`KISAKI_E2*` 报告：历史探索记录，以实验总览中的状态为准。
-- `REAL_VLLM_BENCHMARK_REPORT.md`：Qwen2.5 历史基准，作为迁移对照保留。
+- `archive/REAL_VLLM_BENCHMARK_REPORT.md`：Qwen2.5 历史基准（迁移对照，已归档）。
 
 ### `data/`
 
-- `dataset-card.md`：数据来源、许可、拆分和限制。
+- `archive/dataset-card.md`：历史 v1 数据集卡（已归档，当前数据集以 `backend/data/character_dialogues/experiments/canonical_dataset_manifest.json` 为准）。
 - `human-scoring-rubric.md`：Gold Set 人工评分标准。
 
 ## 维护规则

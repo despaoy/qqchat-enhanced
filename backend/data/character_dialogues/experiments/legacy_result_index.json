@@ -1,4 +1,5 @@
 {
+  "_note": "Index file for legacy exploratory results. Retained at experiments/ root per KISAKI_EXPERIMENT_INDEX.md (Historical asset index). The status=legacy_exploratory_non_comparable field describes the indexed results, not this index file itself. Do not move to archive/ — result_globs are relative paths.",
   "schema_version": 1,
   "status": "legacy_exploratory_non_comparable",
   "result_globs": [

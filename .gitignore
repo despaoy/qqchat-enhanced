@@ -188,4 +188,4 @@ ssh_*.py
 
 # === 一次性生成的 Wiki/报告（可选保留）===
 # docs/architecture/CODE_WIKI.md
-# docs/research/REAL_VLLM_BENCHMARK_REPORT.md
+# docs/research/archive/REAL_VLLM_BENCHMARK_REPORT.md

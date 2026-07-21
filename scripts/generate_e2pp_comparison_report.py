@@ -13,6 +13,7 @@
 
 输出: Markdown 格式的对比报告
 """
+# NOTE: 此脚本输出/读取的资产已归档至 archive/legacy_v3_superseded/ 或 docs/research/archive/，保留脚本作历史可追溯性证据。
 import argparse
 import hashlib
 import json

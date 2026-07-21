@@ -6,6 +6,7 @@
   python scripts/post_e2pp_retrain_pipeline.py --no-vllm       # 跳过 vLLM 重启（如果已在运行）
   python scripts/post_e2pp_retrain_pipeline.py --status-only   # 仅检查状态
 """
+# NOTE: 此脚本输出/读取的资产已归档至 archive/legacy_v3_superseded/ 或 docs/research/archive/，保留脚本作历史可追溯性证据。
 import argparse
 import json
 import re

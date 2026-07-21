@@ -8,7 +8,7 @@
   - tsukiyashiro_kisaki_train.json (合并后 90% 训练集)
   - tsukiyashiro_kisaki_eval.json  (合并后 10% 验证集)
   - tsukiyashiro_kisaki_merged.json (合并全集，含来源标记)
-  - kisaki_merged_stats.json (统计信息)
+  - kisaki_merged_stats.json (统计信息，输出至 archive/legacy_v3_superseded/，已归档)
 
 切分策略：
   - 按 prompt 归一化文本去重
@@ -31,7 +31,7 @@ LLM_V3_PATH = BASE / "kisaki_llm_generated_v3.json"
 TRAIN_PATH = BASE / "tsukiyashiro_kisaki_train.json"
 EVAL_PATH = BASE / "tsukiyashiro_kisaki_eval.json"
 MERGED_PATH = BASE / "tsukiyashiro_kisaki_merged.json"
-STATS_PATH = BASE / "kisaki_merged_stats.json"
+STATS_PATH = BASE / "archive" / "legacy_v3_superseded" / "kisaki_merged_stats.json"
 
 SEED = 42
 EVAL_RATIO = 0.10

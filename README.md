@@ -165,8 +165,8 @@ curl -fsS http://127.0.0.1:5000/api/health
 - [研究与学习路线](docs/research/RESEARCH_AND_LEARNING_ROADMAP.md)
 - [月社妃 LLM 研究主线 v3](docs/research/KISAKI_LLM_RESEARCH_PROGRAM_V3.md)
 - [月社妃实验总览](docs/research/KISAKI_EXPERIMENT_INDEX.md)
-- [月社妃 LoRA 重训计划](docs/research/KISAKI_LORA_RETRAIN_PLAN.md)
-- [数据集卡片](docs/data/dataset-card.md)
+- [月社妃 LoRA 重训计划（历史）](docs/research/archive/KISAKI_LORA_RETRAIN_PLAN.md)
+- [数据集卡片（历史）](docs/data/archive/dataset-card.md)
 - [人工评分标准](docs/data/human-scoring-rubric.md)
 
 ## 研究诚信

@@ -2,7 +2,7 @@
 
 > 本文件是 AI 助手和维护者进入项目时的当前事实入口。
 >
-> 更新时间：2026-07-21。详细实验导航见 [月社妃实验总览](docs/research/KISAKI_EXPERIMENT_INDEX.md)。
+> 更新时间：2026-07-21（同步至 commit `5f712cd`）。详细实验导航见 [月社妃实验总览](docs/research/KISAKI_EXPERIMENT_INDEX.md)。
 
 ## 1. 项目定位
 
@@ -175,4 +175,4 @@ bash scripts/lab-queue-kisaki-e1-e2.sh replicate
 - 服务器后端测试：`121 passed, 3 warnings`。
 - Gold v2 文本与 BGE-M3 语义泄漏审计：`passed`。
 - 正式实验预检：`ready_for_training`，`errors=[]`。
-- 当前源码提交基线：`bb2d202`，待推送并同步服务器。
+- 当前源码提交基线：`5f712cd`，已推送至 origin/main，服务器运行前需 `git pull` 同步。

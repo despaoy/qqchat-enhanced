@@ -143,6 +143,7 @@
                                                          ],
                                  "negative_results_retained":  true,
                                  "legacy_excluded":  [
+                                                         "E1 historical",
                                                          "E2 historical",
                                                          "E2 prime Safety++",
                                                          "E2 double-prime RAG"

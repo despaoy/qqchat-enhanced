@@ -1,4 +1,5 @@
 {
+  "_note": "Historical candidate snapshot (status: draft). Frozen version: kisaki_gold_set_v2.json (content_sha256=1e3f6542bb46823c6074c6a64172a38b58942fd4f0dcdc491946bd4bfa4e4feb). Retained for audit trail only; do not use as evaluation set.",
   "schema_version": 2,
   "gold_id": "KISAKI-GOLD-V2",
   "status": "draft",

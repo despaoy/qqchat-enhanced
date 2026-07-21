@@ -1,7 +1,7 @@
 # 初学者真实 LLM 实验操作指南
 
 > 当前基线：Qwen3-8B-Instruct、Python 3.12、PyTorch 2.8、vLLM 0.10.2、RTX 3090。
-> Qwen2.5 的既有结果属于历史对照，见 `REAL_VLLM_BENCHMARK_REPORT.md`。
+> Qwen2.5 的既有结果属于历史对照，见 `archive/REAL_VLLM_BENCHMARK_REPORT.md`。
 
 ## 1. 这套实验在证明什么
 

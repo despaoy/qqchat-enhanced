@@ -1147,9 +1147,9 @@ curl -fsS http://127.0.0.1:8001/v1/models
 | 脚本 | 用途 |
 |---|---|
 | `extract_character_dialogues.py` | 从源文本提取角色对话数据集（shenbai_mizunamo 神白水菜萌 / tsukiyashiro_kisaki 月社妃），输出 raw.jsonl/sft.json/sft_full.json/excluded.jsonl/manifest.json/coverage_report.json |
-| `build_character_experiments.py` | 构建角色实验资产（150 条 held-out eval + train 集 + lora_ablation_matrix.json 13 变体） |
+| `build_character_experiments.py` | 构建角色实验资产（150 条 held-out eval + train 集 + lora_ablation_matrix.json 13 变体，已归档至 `archive/legacy_v3_superseded/`） |
 | `build_character_rag_eval.py` | 将 held-out RAG 样本转为检索实验 schema |
-| `build_research_assets.py` | 构建研究资产：dataset_cards.json、synthetic_data_audit.json、preference_alignment_configs.json、controlled_peft_ablations.json、core_experiment_registry.json、RESEARCH_EXECUTION_GUIDE.md |
+| `build_research_assets.py` | 构建研究资产：dataset_cards.json、synthetic_data_audit.json、preference_alignment_configs.json、controlled_peft_ablations.json、core_experiment_registry.json、RESEARCH_EXECUTION_GUIDE.md（dataset_cards/preference_alignment_configs/core_experiment_registry 已归档至 `archive/legacy_v3_superseded/`） |
 
 ### 10.2 盲评与审核类（Python）
 
@@ -1291,8 +1291,8 @@ api ──→ db.adapter (所有路由)
 | `docs/architecture/CODE_WIKI.md` | 本文档：代码知识库（权威技术文档） |
 | `docs/architecture/OPTIMIZATION_STRATEGY.md` | 并发/可靠/安全/可观测/部署原则 |
 | `docs/research/RESEARCH_AND_LEARNING_ROADMAP.md` | 研究路线图、10 周计划、部署验收、学习资源（合并自 PROJECT_STATUS/LLM_RESEARCH/PERSONAL_ACTION 三份文档） |
-| `docs/research/REAL_VLLM_BENCHMARK_REPORT.md` | 真实 vLLM 基准报告 |
+| `docs/research/archive/REAL_VLLM_BENCHMARK_REPORT.md` | 真实 vLLM 基准报告（已归档，Qwen2.5 历史对照） |
 | `docs/research/BEGINNER_REAL_LLM_EXPERIMENT_GUIDE.md` | 新手实验指南 |
-| `docs/data/dataset-card.md` | 训练数据来源与使用约束 |
+| `docs/data/archive/dataset-card.md` | 训练数据来源与使用约束（已归档，历史 v1 数据集卡） |
 | `docs/data/human-scoring-rubric.md` | 盲评与偏好标注评分标准 |
 | `astrbot_plugins/qqchat_gateway/README.md` | AstrBot 网关插件安装说明 |
