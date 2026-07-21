@@ -9,9 +9,9 @@
 | Canonical 训练集 | 826 条，已冻结 | [canonical_dataset_manifest.json](../../backend/data/character_dialogues/experiments/canonical_dataset_manifest.json) |
 | 固定验证集 | 92 条，已冻结 | [canonical_dataset_manifest.json](../../backend/data/character_dialogues/experiments/canonical_dataset_manifest.json) |
 | Gold v2 | 150 条，人工审核及文本/语义泄漏审计通过 | [kisaki_gold_set_v2.json](../../backend/evaluation/kisaki_gold_set_v2.json) |
-| KISAKI-E1 | 标准 LoRA，等待 seed 42 正式训练 | [kisaki_e1_canonical.json](../../backend/data/character_dialogues/experiments/configs/kisaki_e1_canonical.json) |
-| KISAKI-E2 | LoRA + NEFTune alpha 5.0，等待 seed 42 正式训练 | [kisaki_e2_canonical.json](../../backend/data/character_dialogues/experiments/configs/kisaki_e2_canonical.json) |
-| 正式结论 | 尚未形成 | 需完成训练、自动评测和匿名 A/B 人工盲评 |
+| KISAKI-E1 | Seed 42 训练、自动评测和 AI 辅助盲审人工确认已完成 | [Seed 42 盲评结果](reviews/KISAKI_SEED42_BLIND_REVIEW_RESULT.md) |
+| KISAKI-E2 | Seed 42 训练、自动评测和 AI 辅助盲审人工确认已完成 | [Seed 42 盲评结果](reviews/KISAKI_SEED42_BLIND_REVIEW_RESULT.md) |
+| 当前结论 | Seed 42 pilot 完成；E2 有轻微方向性优势但不显著 | 仍需多随机种子与独立人工盲评才能形成正式结论 |
 
 E1 与 E2 的唯一训练变量是 `neftune_noise_alpha`。历史 E1/E2/E2'/E2'' 使用不同数据或评测规则，统一标记为 `legacy_exploratory_non_comparable`。
 
@@ -21,7 +21,8 @@ E1 与 E2 的唯一训练变量是 `neftune_noise_alpha`。历史 E1/E2/E2'/E2''
 2. [Canonical E1/E2 实验设计](KISAKI_E1_E2_CANONICAL_EXPERIMENT.md)：研究问题、固定条件和通过标准。
 3. [Gold v2 审核说明](KISAKI_GOLD_V2_AI_PRESCREEN.md)：题目审核、语义泄漏处理和冻结状态。
 4. [实验数据目录说明](../../backend/data/character_dialogues/experiments/README.md)：数据、配置、结果与历史资产的位置。
-5. [LoRA 后续研究计划](KISAKI_LORA_RETRAIN_PLAN.md)：DoRA、RSLoRA、QLoRA 等后续消融方向。
+5. [Seed 42 盲评结果](reviews/KISAKI_SEED42_BLIND_REVIEW_RESULT.md)：E1/E2 揭盲胜率、分类结果和统计解释。
+6. [LoRA 后续研究计划](KISAKI_LORA_RETRAIN_PLAN.md)：DoRA、RSLoRA、QLoRA 等后续消融方向。
 
 ## 目录分工
 
@@ -64,7 +65,7 @@ python scripts/validate_kisaki_experiments.py --require-model --formal-eval
 bash scripts/lab-queue-kisaki-e1-e2.sh pilot
 ```
 
-seed 42 完成后检查自动质量门和失败样本，再决定是否运行 seeds 43/44：
+seed 42 的训练、自动质量门和 AI 辅助盲审人工确认已经完成。当前按实验安排暂缓多种子；资源允许时可运行 seeds 43/44：
 
 ```bash
 bash scripts/lab-queue-kisaki-e1-e2.sh replicate

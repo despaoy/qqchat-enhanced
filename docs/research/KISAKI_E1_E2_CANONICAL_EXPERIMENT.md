@@ -27,8 +27,10 @@
 - fixed validation：92 条。
 - Gold v1：降级为开发集。
 - Gold v2：150 条，五类各 30 条；人工审核、文本与 BGE-M3 语义泄漏审计均已通过并正式冻结。
-- KISAKI-E1/E2：配置和本地预检完成，尚未进行新的 canonical 真实训练。
-- 当前不能声称 E2 优于 E1。
+- KISAKI-E1/E2：Seed 42 canonical 真实训练、自动评测、质量门和 AI 辅助盲审人工确认均已完成。
+- 揭盲结果为 E1 胜 26、E2 胜 32、平局 62；E2 非平局胜率 55.2%，双侧精确符号检验 p=0.512。
+- 当前只能表述为 E2 呈轻微方向性优势但未达到统计显著，不能声称 NEFTune 已被证明优于标准 LoRA。
+- 完整结果见 [Seed 42 盲评报告](reviews/KISAKI_SEED42_BLIND_REVIEW_RESULT.md)。
 
 数量和哈希以 canonical_dataset_manifest.json 为准。
 
