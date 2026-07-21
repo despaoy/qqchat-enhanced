@@ -759,15 +759,18 @@ class LoRATrainer:
                 return_tensors="pt",
             )
 
-            trainer = SFTTrainer(
+            # TRL>=1.8: packing=True 时内部启用 padding-free，不接受自定义 data_collator
+            trainer_kwargs = dict(
                 model=model,
                 args=training_args,
                 train_dataset=datasets["train"],
                 eval_dataset=datasets["eval"],
-                data_collator=data_collator,
                 callbacks=callbacks,
                 processing_class=tokenizer,
             )
+            if not self.config.packing:
+                trainer_kwargs["data_collator"] = data_collator
+            trainer = SFTTrainer(**trainer_kwargs)
 
             logger.info("=" * 60)
             logger.info("开始训练")
