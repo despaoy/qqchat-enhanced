@@ -33,10 +33,15 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   mkdir "$LOCK_DIR"
 fi
 echo $$ > "$LOCK_DIR/pid"
+CURRENT_STAGE="initialization"
 cleanup() {
+  local exit_code=$?
+  if (( exit_code != 0 )); then
+    write_state "failed" "stage=$CURRENT_STAGE exit_code=$exit_code"
+    log "queue_failed stage=$CURRENT_STAGE exit_code=$exit_code"
+  fi
   rm -rf "$LOCK_DIR"
 }
-trap cleanup EXIT INT TERM
 
 log() {
   printf '%s %s\n' "$(date --iso-8601=seconds)" "$*" | tee -a "$LOG"
@@ -47,6 +52,9 @@ write_state() {
   local detail=$2
   printf '{"schema_version":1,"phase":"%s","status":"%s","detail":"%s","updated_at":"%s"}\n' "$PHASE" "$status" "$detail" "$(date --iso-8601=seconds)" > "$STATE"
 }
+
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 gpu_snapshot() {
   nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv,noheader,nounits
@@ -97,16 +105,19 @@ run_seed() {
   local gpu
   gpu=$(wait_for_gpu)
   log "selected_gpu=$gpu stage=e1 seed=$seed"
+  CURRENT_STAGE="e1_seed_$seed"
   write_state "training_e1" "seed=$seed gpu=$gpu"
   CUDA_VISIBLE_DEVICES=$gpu "$PYTHON" "$PROJECT/scripts/run_kisaki_experiment.py" --experiment e1 --seed "$seed"
 
   gpu=$(wait_for_gpu)
   log "selected_gpu=$gpu stage=e2 seed=$seed"
+  CURRENT_STAGE="e2_seed_$seed"
   write_state "training_e2" "seed=$seed gpu=$gpu"
   CUDA_VISIBLE_DEVICES=$gpu "$PYTHON" "$PROJECT/scripts/run_kisaki_experiment.py" --experiment e2 --seed "$seed"
 
   gpu=$(wait_for_gpu)
   log "selected_gpu=$gpu stage=evaluation seed=$seed"
+  CURRENT_STAGE="evaluation_seed_$seed"
   write_state "evaluating" "seed=$seed gpu=$gpu"
   bash "$PROJECT/scripts/lab-evaluate-kisaki-seed.sh" "$seed" "$gpu"
 }
@@ -129,7 +140,10 @@ wait_for_clean_git() {
 }
 
 cd "$PROJECT"
+CURRENT_STAGE="dependency_preflight"
 write_state "preflight" "validating canonical training contracts"
+"$PYTHON" -c 'import tensorboard' >/dev/null
+CURRENT_STAGE="experiment_preflight"
 "$PYTHON" "$PROJECT/scripts/validate_kisaki_experiments.py" --require-model --write-registry
 wait_for_frozen_gold
 wait_for_clean_git
