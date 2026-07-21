@@ -75,6 +75,11 @@ if ! git diff --quiet || ! git diff --cached --quiet || [[ -n "$(git ls-files --
   echo 'refusing_dirty_source=true' >&2
   exit 2
 fi
+gpu=$(wait_for_gpu)
+CURRENT_STAGE=baseline_prompt_v2_seed_${SEED}
+write_state evaluating "variants=e1,e2 gpu=$gpu prompt=v2 scope=baseline"
+log "baseline_prompt_v2_start seed=$SEED gpu=$gpu variants=e1,e2"
+bash "$PROJECT/scripts/lab-evaluate-kisaki-r1-seed.sh" "$SEED" "$gpu" prompt-v2-baseline e1,e2
 for variant in e3 e4 e5; do run_variant "$variant"; done
 gpu=$(wait_for_gpu)
 CURRENT_STAGE=evaluation_seed_${SEED}

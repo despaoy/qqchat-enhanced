@@ -5,14 +5,19 @@ ROOT=/home/szw/lhm2
 PROJECT=$ROOT/qqchat-enhanced
 PYTHON=$ROOT/envs/qqchat-gpu-qwen3/bin/python
 SEED=${1:?usage: lab-evaluate-kisaki-r1-seed.sh SEED PHYSICAL_GPU}
-GPU=${2:?usage: lab-evaluate-kisaki-r1-seed.sh SEED PHYSICAL_GPU}
+GPU=${2:?usage: lab-evaluate-kisaki-r1-seed.sh SEED PHYSICAL_GPU [SCOPE] [VARIANTS_CSV]}
+SCOPE=${3:-formal}
+VARIANTS_CSV=${4:-e1,e2,e3,e4,e5}
 MODEL=$ROOT/runtime/models/Qwen3-8B-Instruct
 GOLD=$PROJECT/backend/evaluation/kisaki_gold_set_v2.json
 PROMPT=$PROJECT/backend/data/character_dialogues/kisaki_system_prompt_v2.txt
 RESULT_ROOT=$ROOT/runtime/experiments/kisaki/r1
+[[ "$SCOPE" =~ ^[a-z0-9-]+$ ]] || { echo "invalid_scope=$SCOPE" >&2; exit 2; }
+if [[ "$SCOPE" != formal ]]; then RESULT_ROOT=$RESULT_ROOT/evaluation-$SCOPE; fi
 MERGED_ROOT=$ROOT/runtime/models/kisaki-r1-merged/seed$SEED
 PORT=${KISAKI_R1_EVAL_PORT:-8001}
-VARIANTS=(e1 e2 e3 e4 e5)
+IFS=',' read -r -a VARIANTS <<< "$VARIANTS_CSV"
+for variant in "${VARIANTS[@]}"; do [[ "$variant" =~ ^e[1-5]$ ]] || { echo "invalid_variant=$variant" >&2; exit 2; }; done
 VLLM_PID=''
 
 [[ "$PROJECT" == "$ROOT/"* ]] || { echo "project_path_outside_allowed_root=$PROJECT" >&2; exit 2; }
@@ -75,6 +80,7 @@ for variant in "${VARIANTS[@]}"; do
   echo "variant_evaluation_complete variant=$variant elapsed_seconds=$(($(date +%s)-started))"
 done
 
+if [[ "$SCOPE" == formal && "$VARIANTS_CSV" == "e1,e2,e3,e4,e5" ]]; then
 for candidate in e2 e3 e4 e5; do
   gate="$RESULT_ROOT/gates/e1-vs-$candidate-seed$SEED.json"
   blind="$RESULT_ROOT/blind/e1-vs-$candidate-seed$SEED"
@@ -95,4 +101,5 @@ for candidate in e2 e3 e4 e5; do
       --output-dir "$blind" --seed "$SEED" --per-category 10
   fi
 done
-echo "r1_evaluation_complete seed=$SEED prompt=v2 strategy=merged_isolated"
+fi
+echo "r1_evaluation_complete seed=$SEED prompt=v2 strategy=merged_isolated scope=$SCOPE variants=$VARIANTS_CSV"
