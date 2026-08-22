@@ -1,6 +1,7 @@
 import os
 import json
 import sqlite3
+import time
 import logging
 import threading
 from pathlib import Path
@@ -59,17 +60,21 @@ def refresh_lora_dir_map(lora_base: Optional[Path] = None) -> dict[str, str]:
 # 导致 vLLM 故障回退到 TransformersPeftProvider 时 LoRA 永远不会被加载，
 # 静默退化为 base model。改为函数动态查找：从 db.loras 表的 id 列映射
 # 到 LORA_DIR_MAP 的目录路径。调用方需改为 get_lora_path_by_id(id)。
-def get_lora_path_by_id(lora_id: str) -> str | None:
+def get_lora_path_by_id(lora_id: str, *, loras: list | None = None) -> str | None:
     """根据 LoRA id 查找其文件系统路径。
 
     查找逻辑：
-    1. 遍历 db.loras，找到匹配 id 的 LoRA 记录
+    1. 遍历 loras（默认 db.loras），找到匹配 id 的 LoRA 记录
     2. 用 LoRA 的 name 字段在 LORA_DIR_MAP 中查找路径
     3. 若 name 未命中，尝试用 id 本身作为目录名（历史兼容）
+
+    loras 由容器注入的调用方传入（从当前应用容器数据库读出的
+    列表）：默认查全局 db.loras 时，自定义容器下 LoRA 列表来自
+    容器、路径却在全局库查不到，会静默退回基座模型。
     """
     try:
         directory_map = refresh_lora_dir_map()
-        for lora in db.loras:
+        for lora in (loras if loras is not None else db.loras):
             if str(lora.get("id")) == str(lora_id):
                 name = lora.get("name", "")
                 if name and name in directory_map:
@@ -353,6 +358,22 @@ class SQLiteDB:
         # 使用 _ensure_column 做幂等迁移，已有数据库升级时自动添加该列。
         self._ensure_column(cursor, 'users', 'role', 'TEXT NOT NULL DEFAULT \'user\'')
 
+        # 创建 API Key 表（统一访问控制，SQLite 与 PostgreSQL 共用主库）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key_hash TEXT NOT NULL UNIQUE,
+                key_prefix TEXT NOT NULL,
+                role TEXT NOT NULL,
+                description TEXT,
+                created_at REAL NOT NULL,
+                revoked_at REAL,
+                last_used_at REAL,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                rate_limit INTEGER
+            )
+        ''')
+
         # 创建用户数据表（表单数据持久化）
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS user_data (
@@ -382,25 +403,12 @@ class SQLiteDB:
             )
         ''')
 
-        # 会话设置表：每个会话的机器人开关状态
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS session_settings (
-                sessionId TEXT PRIMARY KEY,
-                platform TEXT NOT NULL DEFAULT 'qq',
-                conversationId TEXT,
-                sessionType TEXT NOT NULL DEFAULT 'private',
-                sessionName TEXT,
-                bot_enabled INTEGER NOT NULL DEFAULT 1,
-                updated_at TEXT
-            )
-        ''')
-
         # 创建训练任务表
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS training_tasks (
                 id TEXT PRIMARY KEY,
                 task_id TEXT UNIQUE,
-                lora_name TEXT NOT NULL,
+                lora_name TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'pending',
                 progress REAL DEFAULT 0,
                 error_message TEXT DEFAULT '',
@@ -675,6 +683,46 @@ class SQLiteDB:
             )
         ''')
 
+        # 角色关系表：主键为完整记忆隔离范围（与 UserScope.memory_scope_key 一致）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS character_relationships (
+                character_id TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                adapter TEXT NOT NULL,
+                sender_id TEXT NOT NULL,
+                conversation_type TEXT NOT NULL,
+                conversation_id TEXT NOT NULL,
+                relationship_stage TEXT NOT NULL,
+                preferred_address TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                interaction_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (character_id, platform, adapter, sender_id, conversation_type, conversation_id)
+            )
+        ''')
+
+        # 角色长期记忆表：memory_key 在同一范围内唯一（upsert 键）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS character_memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                character_id TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                adapter TEXT NOT NULL,
+                sender_id TEXT NOT NULL,
+                conversation_type TEXT NOT NULL,
+                conversation_id TEXT NOT NULL,
+                memory_type TEXT NOT NULL,
+                memory_key TEXT NOT NULL,
+                content TEXT NOT NULL,
+                importance REAL NOT NULL DEFAULT 0.0,
+                source_message_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(character_id, platform, adapter, sender_id, conversation_type, conversation_id, memory_key)
+            )
+        ''')
+
         self._ensure_column(cursor, "messages", "platform", "TEXT NOT NULL DEFAULT 'qq'")
         self._ensure_column(cursor, "messages", "adapter", "TEXT NOT NULL DEFAULT 'nonebot'")
         self._ensure_column(cursor, "messages", "conversationId", "TEXT")
@@ -683,31 +731,75 @@ class SQLiteDB:
         self._ensure_column(cursor, "messages", "traceId", "TEXT")
         self._ensure_column(cursor, "messages", "conversationType", "TEXT")
         self._ensure_column(cursor, "messages", "senderName", "TEXT")
-        self._ensure_column(cursor, "session_settings", "platform", "TEXT NOT NULL DEFAULT 'qq'")
-        self._ensure_column(cursor, "session_settings", "conversationId", "TEXT")
-        self._ensure_column(cursor, "session_settings", "sessionType", "TEXT NOT NULL DEFAULT 'private'")
-        self._ensure_column(cursor, "session_settings", "sessionName", "TEXT")
-        self._ensure_column(cursor, "session_settings", "bot_enabled", "INTEGER NOT NULL DEFAULT 1")
-
-        # One-way compatibility migration: conversations is the canonical switch table.
-        migrated_at = datetime.now().isoformat()
-        cursor.execute('''
-            INSERT OR IGNORE INTO conversations (
-                platform, conversationId, conversationType, displayName,
-                botEnabled, replyPolicy, createdAt, updatedAt
-            )
-            SELECT
-                COALESCE(platform, 'qq'),
-                COALESCE(conversationId, sessionId),
-                COALESCE(sessionType, 'private'),
-                COALESCE(NULLIF(sessionName, ''), sessionId),
-                bot_enabled,
-                'default',
-                COALESCE(updated_at, ?),
-                COALESCE(updated_at, ?)
-            FROM session_settings
-        ''', (migrated_at, migrated_at))
-        cursor.execute('DELETE FROM session_settings')
+        # One-way compatibility migration: legacy session_settings is folded into
+        # conversations and then removed. Fresh databases never create this table.
+        try:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='session_settings'")
+            if cursor.fetchone():
+                # Older legacy tables may lack the columns introduced later.
+                cursor.execute("PRAGMA table_info(session_settings)")
+                legacy_cols = {row[1] for row in cursor.fetchall()}
+                if "platform" not in legacy_cols:
+                    cursor.execute("ALTER TABLE session_settings ADD COLUMN platform TEXT NOT NULL DEFAULT 'qq'")
+                if "conversationId" not in legacy_cols:
+                    cursor.execute("ALTER TABLE session_settings ADD COLUMN conversationId TEXT")
+                if "conversationType" not in legacy_cols:
+                    cursor.execute("ALTER TABLE session_settings ADD COLUMN conversationType TEXT NOT NULL DEFAULT 'private'")
+                    cursor.execute("UPDATE session_settings SET conversationType = sessionType")
+                if "sessionName" not in legacy_cols:
+                    cursor.execute("ALTER TABLE session_settings ADD COLUMN sessionName TEXT")
+                if "bot_enabled" not in legacy_cols:
+                    cursor.execute("ALTER TABLE session_settings ADD COLUMN bot_enabled INTEGER NOT NULL DEFAULT 1")
+                if "updated_at" not in legacy_cols:
+                    cursor.execute("ALTER TABLE session_settings ADD COLUMN updated_at TEXT")
+                migrated_at = datetime.now().isoformat()
+                cursor.execute('''
+                    INSERT OR IGNORE INTO conversations (
+                        platform, conversationId, conversationType, displayName,
+                        botEnabled, replyPolicy, createdAt, updatedAt
+                    )
+                    SELECT
+                        COALESCE(platform, 'qq'),
+                        COALESCE(conversationId, sessionId),
+                        COALESCE(conversationType, sessionType, 'private'),
+                        COALESCE(NULLIF(sessionName, ''), sessionId),
+                        bot_enabled,
+                        'default',
+                        COALESCE(updated_at, ?),
+                        COALESCE(updated_at, ?)
+                    FROM session_settings
+                ''', (migrated_at, migrated_at))
+                # SQLite does not allow DO UPDATE with INSERT...SELECT...FROM;
+                # refresh existing conversations so the latest legacy state wins.
+                cursor.execute('''
+                    UPDATE conversations
+                    SET
+                        botEnabled = COALESCE((SELECT s.bot_enabled FROM session_settings s
+                                              WHERE COALESCE(s.platform, 'qq') = conversations.platform
+                                                AND COALESCE(s.conversationId, s.sessionId) = conversations.conversationId
+                                                AND COALESCE(s.conversationType, s.sessionType, 'private') = conversations.conversationType),
+                                             conversations.botEnabled),
+                        displayName = COALESCE((SELECT COALESCE(NULLIF(s.sessionName, ''), s.sessionId) FROM session_settings s
+                                              WHERE COALESCE(s.platform, 'qq') = conversations.platform
+                                                AND COALESCE(s.conversationId, s.sessionId) = conversations.conversationId
+                                                AND COALESCE(s.conversationType, s.sessionType, 'private') = conversations.conversationType),
+                                             conversations.displayName),
+                        updatedAt = COALESCE((SELECT s.updated_at FROM session_settings s
+                                             WHERE COALESCE(s.platform, 'qq') = conversations.platform
+                                               AND COALESCE(s.conversationId, s.sessionId) = conversations.conversationId
+                                               AND COALESCE(s.conversationType, s.sessionType, 'private') = conversations.conversationType),
+                                             conversations.updatedAt)
+                    WHERE EXISTS (
+                        SELECT 1 FROM session_settings s
+                        WHERE COALESCE(s.platform, 'qq') = conversations.platform
+                          AND COALESCE(s.conversationId, s.sessionId) = conversations.conversationId
+                          AND COALESCE(s.conversationType, s.sessionType, 'private') = conversations.conversationType
+                    )
+                ''')
+                cursor.execute("DROP TABLE session_settings")
+                logger.info("已迁移并删除旧的 session_settings 表")
+        except sqlite3.OperationalError:
+            pass
 
         conn.commit()
 
@@ -747,6 +839,7 @@ class SQLiteDB:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_feedback_trace_id ON feedback(trace_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_feedback_message_id ON feedback(message_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_character_memories_scope ON character_memories(character_id, platform, adapter, sender_id, conversation_type, conversation_id)')
         except Exception:
             pass  # 索引已存在或 SQLite 版本不支，不影响功能
 
@@ -2055,8 +2148,8 @@ class SQLiteDB:
     def set_session_bot_enabled(self, session_id: str, enabled: bool, platform: str = "qq", conversation_id: str | None = None, conversation_type: str = "private"):
         """设置某个会话的机器人开关。
 
-        统一写入 conversations 表（此前同时写 session_settings + conversations 双表，
-        现合并为单表，消除冗余）。session_settings 表保留以兼容旧数据库但不再写入。
+        统一写入 conversations 表。旧 session_settings 数据会在初始化时单向迁移，
+        随后删除旧表。
         """
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -2251,6 +2344,114 @@ class SQLiteDB:
             conn.rollback()
             raise
         return {"id": user_id, "username": username, "created_at": now, "role": role}    # ============================================
+    # API Key 管理（统一访问控制）
+    # ============================================
+    def create_api_key_record(self, key_hash: str, key_prefix: str, role: str,
+                              description: str | None = None,
+                              rate_limit: int | None = None) -> dict:
+        """Create a managed API key row in the main database."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        created_at = time.time()
+        cursor.execute(
+            "INSERT INTO api_keys (key_hash, key_prefix, role, description, created_at, rate_limit) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (key_hash, key_prefix, role, description, created_at, rate_limit),
+        )
+        conn.commit()
+        return {
+            "id": cursor.lastrowid,
+            "key_hash": key_hash,
+            "key_prefix": key_prefix,
+            "role": role,
+            "description": description,
+            "created_at": created_at,
+            "rate_limit": rate_limit,
+        }
+
+    def get_api_key_by_hash(self, key_hash: str) -> dict | None:
+        """Return one managed API key row by stored hash."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, key_hash, key_prefix, role, description, created_at, revoked_at, "
+            "last_used_at, is_active, rate_limit FROM api_keys WHERE key_hash = ?",
+            (key_hash,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_api_key_by_id(self, key_id: int) -> dict | None:
+        """Return one managed API key row by database id."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, key_hash, key_prefix, role, description, created_at, revoked_at, "
+            "last_used_at, is_active, rate_limit FROM api_keys WHERE id = ?",
+            (key_id,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def list_api_keys(self, include_revoked: bool = False) -> list[dict]:
+        """List managed API key metadata from the main database."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        query = (
+            "SELECT id, key_prefix, role, description, created_at, revoked_at, "
+            "is_active, rate_limit FROM api_keys"
+        )
+        if not include_revoked:
+            query += " WHERE is_active = 1"
+        query += " ORDER BY created_at DESC"
+        cursor.execute(query)
+        return [dict(row) for row in cursor.fetchall()]
+
+    def revoke_api_key_by_hash(self, key_hash: str) -> bool:
+        """Revoke a managed API key by its stored hash."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE api_keys SET is_active = 0, revoked_at = ? "
+            "WHERE key_hash = ? AND is_active = 1",
+            (time.time(), key_hash),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def revoke_api_key_by_id(self, key_id: int) -> bool:
+        """Revoke a managed API key by its database id."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE api_keys SET is_active = 0, revoked_at = ? "
+            "WHERE id = ? AND is_active = 1",
+            (time.time(), key_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def get_api_key_rows_by_prefix(self, prefix: str) -> list[dict]:
+        """Return active/inactive key rows matching a key prefix."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT key_hash, role, is_active, rate_limit FROM api_keys WHERE key_prefix = ?",
+            (prefix,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def touch_api_key(self, key_hash: str) -> None:
+        """Update last_used_at for a managed API key."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE api_keys SET last_used_at = ? WHERE key_hash = ?",
+            (time.time(), key_hash),
+        )
+        conn.commit()
+
+    # ============================================
     # 用户数据持久化（高层方法）
     # ============================================
     def get_user_data(self, user_id: int, page_key: Optional[str] = None):
@@ -2292,6 +2493,339 @@ class SQLiteDB:
         ''', (user_id, page_key, data_json, now))
         conn.commit()
         return True
+
+    # ============================================
+    # 角色关系与长期记忆（高层方法）
+    # ============================================
+    def _character_scope_where(
+        self,
+        character_id: str,
+        platform: str,
+        adapter: str,
+        sender_id: str,
+        conversation_type: str,
+        conversation_id: str,
+        *,
+        table: str = "",
+        include_character: bool = True,
+    ) -> tuple[str, list]:
+        """组装角色记忆隔离范围的 WHERE 子句（按 UserScope.memory_scope_key 语义）。"""
+        prefix = f"{table}." if table else ""
+        conditions = [
+            f"{prefix}platform = ?",
+            f"{prefix}adapter = ?",
+            f"{prefix}sender_id = ?",
+            f"{prefix}conversation_type = ?",
+            f"{prefix}conversation_id = ?",
+        ]
+        params: list = [platform, adapter, sender_id, conversation_type, conversation_id]
+        if include_character:
+            conditions.insert(0, f"{prefix}character_id = ?")
+            params.insert(0, character_id)
+        return " AND ".join(conditions), params
+
+    def get_character_relationship(
+        self,
+        character_id: str,
+        platform: str,
+        adapter: str,
+        sender_id: str,
+        conversation_type: str,
+        conversation_id: str,
+    ) -> Optional[Dict]:
+        """读取指定角色+用户范围的关系状态，不存在时返回 None。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        where, params = self._character_scope_where(
+            character_id, platform, adapter, sender_id, conversation_type, conversation_id
+        )
+        cursor.execute(f"SELECT * FROM character_relationships WHERE {where}", params)
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def upsert_character_relationship(
+        self,
+        character_id: str,
+        platform: str,
+        adapter: str,
+        sender_id: str,
+        conversation_type: str,
+        conversation_id: str,
+        relationship_stage: str,
+        preferred_address: str = "",
+        summary: str = "",
+        interaction_count: Optional[int] = None,
+    ) -> Dict:
+        """写入关系状态（单条 UPSERT 原子完成）。
+
+        interaction_count 为 None 时 UPDATE 子句不触碰该列、保留数据库
+        当前值：先 SELECT 计数再写回的实现在并发下会用旧计数覆盖
+        increment_character_interaction 刚自增的结果（管理端更新关系与
+        新消息并发时计数回退）。
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now().isoformat()
+        where, params = self._character_scope_where(
+            character_id, platform, adapter, sender_id, conversation_type, conversation_id
+        )
+        count = int(interaction_count) if interaction_count is not None else 0
+        set_clauses = [
+            "relationship_stage = excluded.relationship_stage",
+            "preferred_address = excluded.preferred_address",
+            "summary = excluded.summary",
+        ]
+        if interaction_count is not None:
+            set_clauses.append("interaction_count = excluded.interaction_count")
+        set_clauses.append("updated_at = excluded.updated_at")
+        cursor.execute(
+            f'''
+            INSERT INTO character_relationships (
+                character_id, platform, adapter, sender_id, conversation_type,
+                conversation_id, relationship_stage, preferred_address, summary,
+                interaction_count, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(character_id, platform, adapter, sender_id, conversation_type, conversation_id)
+            DO UPDATE SET {", ".join(set_clauses)}
+        ''',
+            (
+                character_id, platform, adapter, sender_id, conversation_type,
+                conversation_id, relationship_stage, preferred_address, summary,
+                count, now, now,
+            ),
+        )
+        conn.commit()
+        # 写入后回读真实记录（计数与 created_at 以数据库为准）
+        cursor.execute(
+            f"SELECT * FROM character_relationships WHERE {where}", params
+        )
+        row = cursor.fetchone()
+        if row is None:  # pragma: no cover - 提交成功后行必存在
+            raise RuntimeError("upsert_character_relationship 提交后读取失败")
+        return dict(row)
+
+    def increment_character_interaction(
+        self,
+        character_id: str,
+        platform: str,
+        adapter: str,
+        sender_id: str,
+        conversation_type: str,
+        conversation_id: str,
+    ) -> int:
+        """交互轮数 +1，返回自增后的值（首次交互时从 1 开始）。
+
+        自增在单条 UPSERT 语句内由数据库原子完成：
+        "读取-加一-写回" 的多语句实现在并发下会丢失更新
+        （两条并发消息都从 10 更新到 11）。
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now().isoformat()
+        where, params = self._character_scope_where(
+            character_id, platform, adapter, sender_id, conversation_type, conversation_id
+        )
+        cursor.execute('''
+            INSERT INTO character_relationships (
+                character_id, platform, adapter, sender_id, conversation_type,
+                conversation_id, relationship_stage, preferred_address, summary,
+                interaction_count, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 'stranger', '', '', 1, ?, ?)
+            ON CONFLICT(character_id, platform, adapter, sender_id, conversation_type, conversation_id)
+            DO UPDATE SET
+                interaction_count = character_relationships.interaction_count + 1,
+                updated_at = excluded.updated_at
+        ''', (
+            character_id, platform, adapter, sender_id, conversation_type,
+            conversation_id, now, now,
+        ))
+        conn.commit()
+        # 提交后读取当前值；写路径已原子化，此读取仅为返回值
+        cursor.execute(
+            f"SELECT interaction_count FROM character_relationships WHERE {where}",
+            params,
+        )
+        row = cursor.fetchone()
+        return int(row["interaction_count"]) if row else 1
+
+    def list_character_memories(
+        self,
+        character_id: str,
+        platform: str,
+        adapter: str,
+        sender_id: str,
+        conversation_type: str,
+        conversation_id: str,
+        limit: int = 30,
+    ) -> list:
+        """读取指定范围内最近的记忆（按 updated_at 倒序，最多 limit 条）。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        where, params = self._character_scope_where(
+            character_id, platform, adapter, sender_id, conversation_type, conversation_id
+        )
+        cursor.execute(
+            f"SELECT * FROM character_memories WHERE {where} ORDER BY updated_at DESC LIMIT ?",
+            [*params, max(1, min(int(limit), 200))],
+        )
+        columns = [desc[0] for desc in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def add_or_update_character_memory(
+        self,
+        character_id: str,
+        platform: str,
+        adapter: str,
+        sender_id: str,
+        conversation_type: str,
+        conversation_id: str,
+        memory_type: str,
+        memory_key: str,
+        content: str,
+        importance: float = 0.0,
+        source_message_id: Optional[str] = None,
+    ) -> Dict:
+        """写入一条记忆（同 memory_key upsert，更新内容与时间戳）。
+
+        单条 UPSERT 原子完成：先 SELECT 再 INSERT/UPDATE 的实现在并发下
+        相同 memory_key 会撞唯一约束（两个线程都查不到既有行然后各自 INSERT）。
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now().isoformat()
+        where, params = self._character_scope_where(
+            character_id, platform, adapter, sender_id, conversation_type, conversation_id
+        )
+        cursor.execute('''
+            INSERT INTO character_memories (
+                character_id, platform, adapter, sender_id, conversation_type,
+                conversation_id, memory_type, memory_key, content, importance,
+                source_message_id, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(character_id, platform, adapter, sender_id, conversation_type, conversation_id, memory_key)
+            DO UPDATE SET
+                memory_type = excluded.memory_type,
+                content = excluded.content,
+                importance = excluded.importance,
+                source_message_id = excluded.source_message_id,
+                updated_at = excluded.updated_at
+        ''', (
+            character_id, platform, adapter, sender_id, conversation_type,
+            conversation_id, memory_type, memory_key, content, float(importance),
+            source_message_id, now, now,
+        ))
+        conn.commit()
+        # 写入后回读真实记录（id 与 created_at 以数据库为准）
+        cursor.execute(
+            f"SELECT * FROM character_memories WHERE {where} AND memory_key = ?",
+            [*params, memory_key],
+        )
+        row = cursor.fetchone()
+        if row is None:  # pragma: no cover - 提交成功后行必存在
+            raise RuntimeError("add_or_update_character_memory 提交后读取失败")
+        return dict(row)
+
+    def delete_character_memory(
+        self,
+        memory_id: int,
+        character_id: str,
+        platform: str,
+        adapter: str,
+        sender_id: str,
+        conversation_type: str,
+        conversation_id: str,
+    ) -> bool:
+        """删除一条记忆。必须同时匹配隔离范围，防止越权删除其他用户记忆。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        where, params = self._character_scope_where(
+            character_id, platform, adapter, sender_id, conversation_type, conversation_id
+        )
+        cursor.execute(
+            f"DELETE FROM character_memories WHERE id = ? AND {where}",
+            [int(memory_id), *params],
+        )
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        return deleted
+
+    def clear_character_memories(
+        self,
+        character_id: str,
+        platform: str,
+        adapter: str,
+        sender_id: str,
+        conversation_type: str,
+        conversation_id: str,
+    ) -> int:
+        """清空指定范围内的全部记忆，返回删除条数。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        where, params = self._character_scope_where(
+            character_id, platform, adapter, sender_id, conversation_type, conversation_id
+        )
+        cursor.execute(f"DELETE FROM character_memories WHERE {where}", params)
+        deleted = cursor.rowcount
+        conn.commit()
+        return deleted
+
+    def list_conversation_history(
+        self,
+        platform: str,
+        adapter: str,
+        sender_id: str,
+        conversation_type: str,
+        conversation_id: str,
+        limit: int = 8,
+        max_chars: int = 6000,
+    ) -> list:
+        """按用户范围读取最近对话历史，组装成角色生成用的消息列表。
+
+        - 私聊：platform+adapter+senderId 下全部私聊记录；
+        - 群聊/频道：再加 conversationId（群/频道）过滤，只看该用户在该群的消息；
+        - 返回按时间正序的 [{"role": "user"|"assistant", "content": ...}]，
+          总字符数超过 max_chars 时从最旧一侧截断。
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        conditions = ["platform = ?", "adapter = ?", 'senderId = ?']
+        params: list = [platform, adapter, sender_id]
+        if conversation_type in ("group", "channel"):
+            conditions.append('"conversationId" = ?')
+            params.append(conversation_id)
+        else:
+            conditions.append('(conversationType = ? OR conversationType = ?)')
+            params.extend(["private", ""])
+        cursor.execute(
+            f'SELECT message, reply, createdAt FROM messages WHERE {" AND ".join(conditions)} '
+            "ORDER BY createdAt DESC LIMIT ?",
+            [*params, max(1, min(int(limit), 50))],
+        )
+        rows = cursor.fetchall()
+        # 倒序取出后翻转为时间正序
+        turns: list = []
+        for row in reversed(rows):
+            message = (row["message"] or "").strip()
+            reply = (row["reply"] or "").strip()
+            if message:
+                turns.append({"role": "user", "content": message})
+            if reply:
+                turns.append({"role": "assistant", "content": reply})
+        # 总长度预算：超限时从最旧一侧丢弃整条消息
+        if max_chars > 0:
+            kept: list = []
+            total = 0
+            for item in reversed(turns):
+                total += len(item["content"])
+                if total > max_chars and kept:
+                    break
+                kept.append(item)
+            kept.reverse()
+            turns = kept
+        return turns
 
     # ============================================
     # LoRA 管理（高层方法）
